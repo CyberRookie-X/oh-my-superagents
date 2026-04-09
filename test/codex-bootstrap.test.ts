@@ -2,7 +2,25 @@ import { describe, expect, it } from "vitest"
 import {
   buildCodexBootstrapFiles,
   buildStarterCodexConfig,
+  runCodexBootstrap,
 } from "../src/codex-bootstrap.js"
+
+const incompatibleCodexStrict = {
+  host: "codex" as const,
+  source: "test-detector",
+  detectedVersion: "4.9.9",
+  detectedRef: null,
+  status: "incompatible" as const,
+  reason: "Version is below minimum supported version 5.0.0.",
+  policyMode: "strict" as const,
+  shouldBlock: true,
+}
+
+function createNotFoundError(filePath: string) {
+  const error = new Error(`ENOENT: ${filePath}`) as Error & { code?: string }
+  error.code = "ENOENT"
+  return error
+}
 
 describe("buildStarterCodexConfig", () => {
   it("creates a Codex-friendly starter config", () => {
@@ -94,5 +112,61 @@ describe("buildCodexBootstrapFiles", () => {
     const marketplace = result.files.find((file) => file.path === ".agents/plugins/marketplace.json")
     expect(marketplace?.content).toContain('"name": "existing-plugin"')
     expect(marketplace?.content).toContain('"name": "oh-my-superagents-codex"')
+  })
+})
+
+describe("runCodexBootstrap", () => {
+  it("returns before starter config, scaffold writes, or generated agents when strict compatibility blocks", async () => {
+    const mkdirCalls: string[] = []
+    const writeCalls: string[] = []
+    let buildCodexArtifactsCalled = false
+    let materializeArtifactsCalled = false
+
+    const result = await runCodexBootstrap({
+      cwd: "/workspace/project",
+      discoverConfigPath: async () => undefined,
+      loadConfig: async () => {
+        throw new Error("unexpected")
+      },
+      resolveCompatibility: async () => incompatibleCodexStrict,
+      buildCodexArtifacts: () => {
+        buildCodexArtifactsCalled = true
+        return { agents: [] }
+      },
+      materializeArtifacts: async () => {
+        materializeArtifactsCalled = true
+        return { exitCode: 0 as const, warnings: [], written: [], removed: [] }
+      },
+      fs: {
+        mkdir: async (filePath: string) => {
+          mkdirCalls.push(filePath)
+        },
+        writeFile: async (filePath: string) => {
+          writeCalls.push(filePath)
+        },
+        readFile: async (filePath: string) => {
+          throw createNotFoundError(filePath)
+        },
+        readdir: async () => [],
+        stat: async () => ({ isFile: () => true }),
+        rename: async () => {
+          throw new Error("unexpected")
+        },
+        unlink: async () => {
+          throw new Error("unexpected")
+        },
+      },
+    })
+
+    expect(result.configPath).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(result.createdConfig).toBe(false)
+    expect(result.bootstrapFiles).toEqual([])
+    expect(result.compatibility).toEqual(incompatibleCodexStrict)
+    expect(result.syncResult).toEqual({ exitCode: 1, warnings: [], written: [], removed: [] })
+    expect(result.nextSteps).toEqual([])
+    expect(buildCodexArtifactsCalled).toBe(false)
+    expect(materializeArtifactsCalled).toBe(false)
+    expect(mkdirCalls).toEqual([])
+    expect(writeCalls).toEqual([])
   })
 })

@@ -6,6 +6,10 @@
   "properties": {
     "profiles": {
       "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
       "additionalProperties": {
         "type": "object",
         "required": ["model"],
@@ -33,6 +37,16 @@
       },
       "additionalProperties": { "type": "string", "minLength": 1 }
     },
-    "defaultRoute": { "type": "string", "minLength": 1 }
+    "defaultRoute": { "type": "string", "minLength": 1 },
+    "superpowersCompatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": ["warn", "strict"],
+          "default": "warn"
+        }
+      }
+    }
   }
 }

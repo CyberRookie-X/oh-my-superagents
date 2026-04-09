@@ -6,6 +6,7 @@ Thin routing for `superpowers` on OpenCode and Codex.
 
 `oh-my-superagents` only targets hosts where `superpowers` still lacks a thin, host-native routing layer.
 It is not a cross-host configuration sync tool.
+The supported surface for this early release is the CLI, generated host artifacts, packaged plugin entrypoints, and the current `oh-my-superagents/library` export surface.
 
 Today that means:
 
@@ -105,6 +106,47 @@ oh-my-superagents explain --host opencode --all
 oh-my-superagents explain --host codex --all
 ```
 
+## Compatibility Monitoring
+
+`oh-my-superagents` includes a host-aware compatibility monitor for upstream `superpowers`.
+In the first release it checks:
+
+- OpenCode upstream install metadata from project or user `opencode.json` plugin entries plus the standard local install paths `.opencode/plugins/superpowers.js` and `${XDG_CONFIG_HOME:-~/.config}/opencode/plugins/superpowers.js`
+- Codex upstream install metadata from the standard clone and skills symlink locations
+
+First-release scope does not include Gemini CLI.
+
+The monitor is observational only:
+
+- it reads upstream install metadata to detect the current `superpowers` ref or version when possible
+- it does not install, update, rewrite, or relocate upstream `superpowers`
+
+For OpenCode, if project-scope and user-scope detection resolve to different upstream refs or versions, the monitor degrades to a conservative non-versioned result that evaluates as `not_detected` instead of pretending one install won.
+
+Compatibility results surface in JSON output from `sync`, `explain`, and `bootstrap`.
+OpenCode startup diagnostics currently log only `incompatible` and `not_detected` outcomes.
+The reported status is one of:
+
+- `compatible`: detected version is inside a tested range
+- `untested`: detected version is parseable but outside tested ranges
+- `incompatible`: detected version is below the minimum supported version or in a known bad range
+- `not_detected`: no parseable upstream version could be detected
+
+Configure policy mode in `oh-my-superagents.config.jsonc`:
+
+```jsonc
+{
+  "superpowersCompatibility": {
+    "mode": "warn"
+  }
+}
+```
+
+Policy behavior:
+
+- `warn`: always continue; `sync` and `bootstrap` include compatibility details in JSON output and emit warning text for `untested`, `incompatible`, and `not_detected`, while `explain` includes compatibility in JSON output only
+- `strict`: block `sync` and `bootstrap` only when status is `incompatible`; `compatible`, `untested`, and `not_detected` remain non-blocking
+
 ## Generated Commands
 
 - `/sp-brainstorm`
@@ -114,6 +156,8 @@ oh-my-superagents explain --host codex --all
 - `/sp-verify`
 - `/sp-visual`
 - `/sp-web-test`
+
+On OpenCode, `/sp-visual` and `/sp-web-test` both target the shared `spr-visual` agent today, so they cannot diverge on model selection in the current implementation.
 
 ## Generated Codex Agents
 

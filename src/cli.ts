@@ -6,6 +6,14 @@ import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex
 import { materializeArtifacts } from "./materialize.js"
 import { buildArtifacts } from "./opencode.js"
 import { explainAll, explainPhase, type BuiltInPhase } from "./router.js"
+import {
+  evaluateSuperpowersCompatibility,
+  type SuperpowersCompatibilityMode,
+  type SuperpowersCompatibilityResult,
+  type SuperpowersDetectionResult,
+  type SupportedSuperpowersHost,
+} from "./superpowers-compatibility.js"
+import { detectCodexSuperpowers, detectOpenCodeSuperpowers } from "./superpowers-detectors.js"
 
 export type CliResult = {
   exitCode: 0 | 1 | 2
@@ -42,6 +50,9 @@ type CliDeps = {
   buildCodexArtifacts: typeof buildCodexArtifacts
   buildCodexBootstrap: typeof runCodexBootstrap
   materializeArtifacts: typeof materializeArtifacts
+  detectOpenCodeSuperpowers: typeof detectOpenCodeSuperpowers
+  detectCodexSuperpowers: typeof detectCodexSuperpowers
+  evaluateSuperpowersCompatibility: typeof evaluateSuperpowersCompatibility
 }
 
 const defaultDeps: CliDeps = {
@@ -55,6 +66,9 @@ const defaultDeps: CliDeps = {
   buildCodexArtifacts,
   buildCodexBootstrap: runCodexBootstrap,
   materializeArtifacts,
+  detectOpenCodeSuperpowers,
+  detectCodexSuperpowers,
+  evaluateSuperpowersCompatibility,
 }
 
 function parseArgs(argv: string[]) {
@@ -85,6 +99,91 @@ function getStringFlag(flags: Map<string, string | true>, name: string) {
   return typeof value === "string" ? value : undefined
 }
 
+function formatCompatibilityWarning(result: SuperpowersCompatibilityResult) {
+  if (result.status === "compatible" || result.shouldBlock) {
+    return ""
+  }
+
+  return `Warning: superpowers compatibility is ${result.status} for ${result.host}: ${result.reason}`
+}
+
+function formatCompatibilityBlock(result: SuperpowersCompatibilityResult) {
+  return `Blocked by incompatible superpowers installation for ${result.host}: ${result.reason}`
+}
+
+function withCompatibility<T extends Record<string, unknown>>(
+  payload: T,
+  compatibility: SuperpowersCompatibilityResult,
+) {
+  return {
+    ...payload,
+    compatibility,
+  }
+}
+
+function formatExplainOutput(payload: unknown, compatibility: SuperpowersCompatibilityResult) {
+  if (Array.isArray(payload)) {
+    return payload.map((item) => (
+      item && typeof item === "object" && !Array.isArray(item)
+        ? withCompatibility(item as Record<string, unknown>, compatibility)
+        : item
+    ))
+  }
+
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    return withCompatibility(payload as Record<string, unknown>, compatibility)
+  }
+
+  return {
+    result: payload,
+    compatibility,
+  }
+}
+
+function createFallbackCompatibility(
+  host: SupportedSuperpowersHost,
+  policyMode: SuperpowersCompatibilityMode,
+  source: string,
+  error: unknown,
+): SuperpowersCompatibilityResult {
+  return {
+    host,
+    source,
+    detectedVersion: null,
+    detectedRef: null,
+    status: "not_detected",
+    reason: error instanceof Error ? `Compatibility check failed: ${error.message}` : `Compatibility check failed: ${String(error)}`,
+    policyMode,
+    shouldBlock: false,
+  }
+}
+
+async function resolveCompatibilityForHost(
+  host: SupportedSuperpowersHost,
+  policyMode: SuperpowersCompatibilityMode,
+  deps: CliDeps,
+): Promise<SuperpowersCompatibilityResult> {
+  let detection: SuperpowersDetectionResult
+
+  try {
+    detection = host === "opencode"
+      ? await deps.detectOpenCodeSuperpowers()
+      : await deps.detectCodexSuperpowers()
+  } catch (error) {
+    return createFallbackCompatibility(host, policyMode, "compatibility-monitor", error)
+  }
+
+  try {
+    return deps.evaluateSuperpowersCompatibility(detection, policyMode)
+  } catch (error) {
+    return createFallbackCompatibility(host, policyMode, detection.source, error)
+  }
+}
+
+function joinStderr(parts: Array<string | undefined>) {
+  return parts.filter((part): part is string => Boolean(part && part.length > 0)).join("\n")
+}
+
 export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promise<CliResult> {
   try {
     const { command, flags } = parseArgs(argv)
@@ -108,13 +207,19 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         loadConfig: deps.loadConfig,
         materializeArtifacts: deps.materializeArtifacts,
         buildCodexArtifacts: deps.buildCodexArtifacts,
+        resolveCompatibility: async (policyMode) => resolveCompatibilityForHost(host, policyMode, deps),
         fs: nodeFs,
       })
 
       return {
         exitCode: result.syncResult.exitCode,
         stdout: JSON.stringify(result, null, 2),
-        stderr: result.syncResult.exitCode === 0 ? "" : result.syncResult.warnings.join("\n"),
+        stderr: result.compatibility.shouldBlock
+          ? formatCompatibilityBlock(result.compatibility)
+          : joinStderr([
+            formatCompatibilityWarning(result.compatibility),
+            ...result.syncResult.warnings,
+          ]),
       }
     }
 
@@ -126,7 +231,17 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
     if (command === "explain") {
       if (flags.get("--all") === true) {
-        return { exitCode: 0, stdout: JSON.stringify(deps.explainAllForHost(loaded.config, host), null, 2), stderr: "" }
+        const compatibility = await resolveCompatibilityForHost(
+          host,
+          loaded.config.superpowersCompatibility.mode,
+          deps,
+        )
+
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify(formatExplainOutput(deps.explainAllForHost(loaded.config, host), compatibility), null, 2),
+          stderr: "",
+        }
       }
 
       const phase = getStringFlag(flags, "--phase")
@@ -138,16 +253,47 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         return { exitCode: 1, stdout: "", stderr: `Unknown phase: ${phase}` }
       }
 
+      const compatibility = await resolveCompatibilityForHost(
+        host,
+        loaded.config.superpowersCompatibility.mode,
+        deps,
+      )
+
       return {
         exitCode: 0,
-        stdout: JSON.stringify(deps.explainPhaseForHost(loaded.config, host, phase as BuiltInPhase), null, 2),
+        stdout: JSON.stringify(
+          formatExplainOutput(deps.explainPhaseForHost(loaded.config, host, phase as BuiltInPhase), compatibility),
+          null,
+          2,
+        ),
         stderr: "",
       }
     }
 
     if (command === "sync") {
+      const compatibility = await resolveCompatibilityForHost(
+        host,
+        loaded.config.superpowersCompatibility.mode,
+        deps,
+      )
+
+      if (compatibility.shouldBlock) {
+        return {
+          exitCode: 1,
+          stdout: JSON.stringify(
+            withCompatibility({ exitCode: 1 as const, warnings: [], written: [], removed: [] }, compatibility),
+            null,
+            2,
+          ),
+          stderr: formatCompatibilityBlock(compatibility),
+        }
+      }
+
       const artifacts = host === "opencode"
-        ? [...deps.buildArtifacts(loaded.config).agents, ...deps.buildArtifacts(loaded.config).commands]
+        ? (() => {
+            const built = deps.buildArtifacts(loaded.config)
+            return [...built.agents, ...built.commands]
+          })()
         : deps.buildCodexArtifacts(loaded.config).agents
       const result = await deps.materializeArtifacts({
         cwd,
@@ -157,8 +303,11 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
       return {
         exitCode: result.exitCode,
-        stdout: JSON.stringify(result, null, 2),
-        stderr: result.exitCode === 0 ? "" : result.warnings.join("\n"),
+        stdout: JSON.stringify(withCompatibility(result, compatibility), null, 2),
+        stderr: joinStderr([
+          formatCompatibilityWarning(compatibility),
+          ...result.warnings,
+        ]),
       }
     }
 

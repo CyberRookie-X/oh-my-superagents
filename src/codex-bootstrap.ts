@@ -3,6 +3,10 @@ import path from "node:path"
 import { discoverConfigPath, type RouterConfig, type loadRouterConfig } from "./config.js"
 import { buildCodexArtifacts } from "./codex.js"
 import type { MaterializeArtifactsResult, materializeArtifacts } from "./materialize.js"
+import type {
+  SuperpowersCompatibilityMode,
+  SuperpowersCompatibilityResult,
+} from "./superpowers-compatibility.js"
 
 type BootstrapFs = {
   mkdir: (filePath: string, options?: { recursive?: boolean }) => Promise<void>
@@ -24,6 +28,7 @@ export type CodexBootstrapResult = {
   bootstrapFiles: string[]
   syncResult: MaterializeArtifactsResult
   nextSteps: string[]
+  compatibility: SuperpowersCompatibilityResult
 }
 
 export function buildStarterCodexConfig() {
@@ -240,6 +245,7 @@ export async function runCodexBootstrap(input: {
   loadConfig: typeof loadRouterConfig
   materializeArtifacts: typeof materializeArtifacts
   buildCodexArtifacts: typeof buildCodexArtifacts
+  resolveCompatibility: (policyMode: SuperpowersCompatibilityMode) => Promise<SuperpowersCompatibilityResult>
   fs: BootstrapFs & {
     readFile: (filePath: string) => Promise<string>
     readdir: (directory: string) => Promise<string[]>
@@ -258,11 +264,29 @@ export async function runCodexBootstrap(input: {
   const existingConfigPath = explicitConfigExists ? explicitConfigPath : discoveredConfigPath
   const starter = buildStarterCodexConfig()
   const configPath = explicitConfigPath ?? existingConfigPath ?? starter.path
-  const packageVersion = await readOwnPackageVersion()
 
   const loaded = existingConfigPath
     ? await input.loadConfig({ cwd: input.cwd, explicitPath: existingConfigPath })
     : { path: path.resolve(input.cwd, configPath), config: starter.config }
+
+  const compatibility = await input.resolveCompatibility(
+    "superpowersCompatibility" in loaded.config && loaded.config.superpowersCompatibility
+      ? loaded.config.superpowersCompatibility.mode
+      : "warn",
+  )
+
+  if (compatibility.shouldBlock) {
+    return {
+      configPath: loaded.path,
+      createdConfig: false,
+      bootstrapFiles: [],
+      syncResult: { exitCode: 1, warnings: [], written: [], removed: [] },
+      nextSteps: [],
+      compatibility,
+    } satisfies CodexBootstrapResult
+  }
+
+  const packageVersion = await readOwnPackageVersion()
 
   const existingMarketplaceContent = await input.fs
     .readFile(path.join(input.cwd, ".agents/plugins/marketplace.json"))
@@ -298,5 +322,6 @@ export async function runCodexBootstrap(input: {
       "Open the plugin directory and install oh-my-superagents-codex from the local marketplace.",
       "Use $oh-my-superagents-sync or $oh-my-superagents-doctor inside Codex for host-native convenience.",
     ],
+    compatibility,
   } satisfies CodexBootstrapResult
 }

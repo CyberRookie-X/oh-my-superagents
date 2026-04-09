@@ -2,6 +2,10 @@ import { access, readFile } from "node:fs/promises"
 import path from "node:path"
 import { parse, type ParseError } from "jsonc-parser"
 import { z } from "zod"
+import {
+  SUPERPOWERS_COMPATIBILITY_MODES,
+  type SuperpowersCompatibilityMode,
+} from "./superpowers-compatibility.js"
 
 export const BUILT_IN_PHASES = [
   "brainstorming",
@@ -29,10 +33,19 @@ const RouterConfigSchema = z
     profiles: z.record(z.string().min(1), ProfileSchema),
     routes: z.record(z.string().min(1), z.string().min(1)),
     defaultRoute: z.string().min(1).optional(),
+    superpowersCompatibility: z
+      .object({
+        mode: z.enum(SUPERPOWERS_COMPATIBILITY_MODES).default("warn"),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
 
 export type RouterConfig = z.infer<typeof RouterConfigSchema>
+export type SuperpowersCompatibilityConfig = {
+  mode: SuperpowersCompatibilityMode
+}
 
 export type DiscoverConfigPathInput = {
   cwd: string
@@ -88,7 +101,11 @@ export async function loadRouterConfig(input: LoadRouterConfigInput) {
     throw new Error(`Invalid JSONC in ${configPath}`)
   }
 
-  const config = RouterConfigSchema.parse(rawConfig)
+  const parsedConfig = RouterConfigSchema.parse(rawConfig)
+  const config = {
+    ...parsedConfig,
+    superpowersCompatibility: parsedConfig.superpowersCompatibility ?? { mode: "warn" as const },
+  }
 
   for (const phase of Object.keys(config.routes)) {
     if (!BUILT_IN_PHASE_SET.has(phase)) {
