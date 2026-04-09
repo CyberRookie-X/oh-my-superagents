@@ -1,13 +1,16 @@
 import { BUILT_IN_PHASES, type RouterConfig } from "./config.js"
 import { PHASE_TO_AGENT, PHASE_TO_COMMAND, resolvePhase, type BuiltInPhase } from "./router.js"
 
-const MARKER = "<!-- generated-by: oh-my-superagents; do-not-edit: true -->"
+export const MARKER_TEXT = "generated-by: oh-my-superagents; do-not-edit: true"
+export const MARKER = `<!-- ${MARKER_TEXT} -->`
 
 type PermissionTask = Record<string, "allow" | "deny" | "ask">
 
 export type GeneratedArtifact = {
   kind: "agent" | "command"
+  directory: string
   fileName: string
+  ownerPrefix: string
   content: string
 }
 
@@ -98,7 +101,9 @@ export function buildArtifacts(config: RouterConfig) {
 
       agents.set(agentName, {
         kind: "agent",
+        directory: ".opencode/agents",
         fileName: `${agentName}.md`,
+        ownerPrefix: "spr-",
         content: renderAgentFile({
           agentName,
           description: `${agentName} helper for ${phase}`,
@@ -124,7 +129,9 @@ export function buildArtifacts(config: RouterConfig) {
 
     commands.push({
       kind: "command",
+      directory: ".opencode/commands",
       fileName: `${commandName}.md`,
+      ownerPrefix: "sp-",
       content: renderCommandFile({
         description: `Route ${phase} through ${agentName}`,
         agentName,
@@ -139,5 +146,3 @@ export function buildArtifacts(config: RouterConfig) {
     commands,
   }
 }
-
-export { MARKER }

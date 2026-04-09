@@ -1,5 +1,5 @@
 import path from "node:path"
-import { MARKER, type GeneratedArtifact } from "./opencode.js"
+import { MARKER_TEXT, type GeneratedArtifact } from "./opencode.js"
 
 type StatsLike = {
   isFile: () => boolean
@@ -28,16 +28,19 @@ export type MaterializeArtifactsResult = {
   removed: string[]
 }
 
-const AGENT_DIR = [".opencode", "agents"]
-const COMMAND_DIR = [".opencode", "commands"]
-
-function getTargetDirectory(cwd: string, kind: GeneratedArtifact["kind"]) {
-  return path.join(cwd, ...(kind === "agent" ? AGENT_DIR : COMMAND_DIR))
+function getTargetDirectory(cwd: string, directory: string) {
+  return path.join(cwd, directory)
 }
 
 function validateFileName(fileName: string) {
   if (path.basename(fileName) !== fileName || fileName.includes("..")) {
     throw new Error(`Invalid artifact file name: ${fileName}`)
+  }
+}
+
+function validateDirectory(directory: string) {
+  if (path.isAbsolute(directory) || directory.includes("..")) {
+    throw new Error(`Invalid artifact directory: ${directory}`)
   }
 }
 
@@ -62,9 +65,9 @@ function getMarkerLine(content: string) {
   return lines[index]
 }
 
-function isRouterOwned(kind: GeneratedArtifact["kind"], fileName: string, content: string) {
-  const hasPrefix = kind === "agent" ? fileName.startsWith("spr-") : fileName.startsWith("sp-")
-  return hasPrefix && getMarkerLine(content) === MARKER
+function isRouterOwned(fileName: string, content: string, prefixes: Set<string>) {
+  const hasPrefix = Array.from(prefixes).some((prefix) => fileName.startsWith(prefix))
+  return hasPrefix && getMarkerLine(content)?.includes(MARKER_TEXT)
 }
 
 export async function materializeArtifacts(
@@ -75,25 +78,32 @@ export async function materializeArtifacts(
   const removed: string[] = []
 
   const desiredFinalPaths = new Set<string>()
+  const directoryPrefixes = new Map<string, Set<string>>()
 
   try {
-    await input.fs.mkdir(path.join(input.cwd, ...AGENT_DIR), { recursive: true })
-    await input.fs.mkdir(path.join(input.cwd, ...COMMAND_DIR), { recursive: true })
-
     for (const artifact of input.artifacts) {
       validateFileName(artifact.fileName)
-      const finalPath = path.join(getTargetDirectory(input.cwd, artifact.kind), artifact.fileName)
+      validateDirectory(artifact.directory)
+
+      const targetDirectory = getTargetDirectory(input.cwd, artifact.directory)
+      await input.fs.mkdir(targetDirectory, { recursive: true })
+
+      const prefixes = directoryPrefixes.get(targetDirectory) ?? new Set<string>()
+      prefixes.add(artifact.ownerPrefix)
+      directoryPrefixes.set(targetDirectory, prefixes)
+
+      const finalPath = path.join(targetDirectory, artifact.fileName)
       desiredFinalPaths.add(finalPath)
 
       const existingContent = await input.fs.readFile(finalPath).catch(() => "")
-      if (existingContent && !isRouterOwned(artifact.kind, artifact.fileName, existingContent)) {
+      if (existingContent && !isRouterOwned(artifact.fileName, existingContent, new Set([artifact.ownerPrefix]))) {
         warnings.push(`Collision at ${finalPath}`)
         return { exitCode: 1, warnings, written, removed }
       }
     }
 
     for (const artifact of input.artifacts) {
-      const finalPath = path.join(getTargetDirectory(input.cwd, artifact.kind), artifact.fileName)
+      const finalPath = path.join(getTargetDirectory(input.cwd, artifact.directory), artifact.fileName)
       const tempPath = `${finalPath}.tmp`
       await input.fs.writeFile(tempPath, artifact.content)
       await input.fs.rename(tempPath, finalPath)
@@ -105,7 +115,7 @@ export async function materializeArtifacts(
     return { exitCode: 1, warnings, written, removed }
   }
 
-  for (const directory of [path.join(input.cwd, ...AGENT_DIR), path.join(input.cwd, ...COMMAND_DIR)]) {
+  for (const [directory, prefixes] of directoryPrefixes.entries()) {
     let entries: string[] = []
     try {
       entries = await input.fs.readdir(directory)
@@ -120,8 +130,7 @@ export async function materializeArtifacts(
       }
 
       const content = await input.fs.readFile(fullPath).catch(() => "")
-      const kind = directory.endsWith(path.join(...AGENT_DIR)) ? "agent" : "command"
-      if (!isRouterOwned(kind, entry, content)) {
+      if (!isRouterOwned(entry, content, prefixes)) {
         continue
       }
 

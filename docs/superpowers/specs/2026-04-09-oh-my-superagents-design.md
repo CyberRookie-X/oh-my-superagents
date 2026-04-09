@@ -1,11 +1,11 @@
-# Oh My Superpowers for OpenCode Design
+# Oh My Superpowers for OpenCode and Codex Design
 
 ## Summary
 
 This project builds a thin routing layer for `superpowers`, not a competing workflow system.
 `superpowers` remains responsible for deciding what process to run. The router decides which host-native agent, model, and reasoning intensity should execute each phase.
 
-The first release targets OpenCode while keeping the core routing logic host-agnostic so future adapters can support Claude Code, Codex, and other CLI agents.
+The current release targets OpenCode and Codex while keeping the core routing logic host-agnostic so future adapters can support Claude Code, Gemini CLI, and other CLI agents.
 
 ## Problem
 
@@ -63,10 +63,11 @@ The routing engine will operate on abstract concepts:
 
 Adapters will translate those abstractions into host-native configuration.
 
-### 3. Materialized host artifacts for OpenCode v1
+### 3. Materialized host artifacts for host adapters
 
 OpenCode supports markdown-backed agents and commands as first-class configuration.
-The first release will generate those artifacts instead of relying entirely on fragile runtime hooks.
+Codex supports project-scoped custom agents in `.codex/agents/` plus host-level config for model and reasoning controls.
+The current release generates host-native artifacts instead of relying entirely on fragile runtime hooks.
 
 This decision reduces exposure to current OpenCode plugin risks such as:
 
@@ -80,10 +81,11 @@ The router will treat `superpowers` as an upstream dependency.
 It will reference upstream skill names and expect the user to install `superpowers` normally.
 It will not vendor or rewrite upstream skills.
 
-### 5. Subagent-first OpenCode execution model
+### 5. Host-specific execution models
 
-For OpenCode, the router will generate hidden helper agents that are optimized for specific `superpowers` phases.
-User-facing commands will launch those agents into focused subtask sessions so the main context stays clean.
+For OpenCode, the router generates hidden helper agents that are optimized for specific `superpowers` phases.
+For Codex, the router generates one custom agent per `superpowers` phase with phase-specific instructions and per-profile model settings.
+User-facing entrypoints remain host-native.
 
 ## High-Level Architecture
 
@@ -115,13 +117,25 @@ Responsibilities:
 The adapter does not decide which profile wins.
 It only translates a resolved route from the core into OpenCode artifacts.
 
+### 2b. Codex Adapter
+
+The Codex adapter converts resolved profiles into project-scoped custom agent TOML files.
+
+Responsibilities:
+
+- generate one `.codex/agents/*.toml` file per supported `superpowers` phase
+- map host-neutral `effort` to Codex `model_reasoning_effort`
+- map `fast` effort to Codex `service_tier = "fast"`
+- bind each generated Codex agent to the corresponding upstream `superpowers` skill in its developer instructions
+
 ### 3. Materializer
 
 The materializer writes generated files into standard host locations.
-For OpenCode v1, those locations are fixed and not configurable:
+For the currently supported hosts, the generated locations are fixed and not configurable:
 
 - `.opencode/agents/`
 - `.opencode/commands/`
+- `.codex/agents/`
 
 The materializer also handles idempotent regeneration so config changes can be synced safely.
 
@@ -142,10 +156,12 @@ Concrete v1 runtime contract:
 - if config exists but cannot be parsed as valid JSONC, it logs a concise error
 - it does not write files, mutate prompts, or register routing hooks in v1
 
-The required user-facing surfaces for v1 are:
+The required user-facing surfaces for the current release are:
 
 - CLI: `oh-my-superagents sync --host opencode`
 - CLI: `oh-my-superagents explain --host opencode --phase <skill-name> | --all`
+- CLI: `oh-my-superagents sync --host codex`
+- CLI: `oh-my-superagents explain --host codex --phase <skill-name> | --all`
 
 `explain` must output JSON in v1.
 For a single phase it returns one object. With `--all` it returns an array of those objects.
@@ -156,8 +172,8 @@ Each object must include:
 - matched profile
 - resolved model
 - resolved variant, if any
-- generated OpenCode command name
-- generated OpenCode subagent name
+- generated host-native command name, if the host uses commands
+- generated host-native agent name
 
 ## Routing Model
 

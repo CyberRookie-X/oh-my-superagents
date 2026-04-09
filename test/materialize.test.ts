@@ -10,12 +10,16 @@ describe("materializeArtifacts", () => {
       artifacts: [
         {
           kind: "agent",
+          directory: ".opencode/agents",
           fileName: "spr-build.md",
+          ownerPrefix: "spr-",
           content: "---\n---\n\n<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
         },
         {
           kind: "command",
+          directory: ".opencode/commands",
           fileName: "sp-review.md",
+          ownerPrefix: "sp-",
           content: "---\n---\n\n<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
         },
       ],
@@ -43,7 +47,9 @@ describe("materializeArtifacts", () => {
       artifacts: [
         {
           kind: "agent",
+          directory: ".opencode/agents",
           fileName: "spr-build.md",
+          ownerPrefix: "spr-",
           content: "---\n---\n\n<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
         },
       ],
@@ -67,7 +73,9 @@ describe("materializeArtifacts", () => {
       artifacts: [
         {
           kind: "agent",
+          directory: ".opencode/agents",
           fileName: "spr-build.md",
+          ownerPrefix: "spr-",
           content: "---\n---\n\n<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
         },
       ],
@@ -93,7 +101,9 @@ describe("materializeArtifacts", () => {
       artifacts: [
         {
           kind: "agent",
+          directory: ".opencode/agents",
           fileName: "spr-build.md",
+          ownerPrefix: "spr-",
           content: "---\n---\n\n<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
         },
       ],
@@ -120,7 +130,9 @@ describe("materializeArtifacts", () => {
       artifacts: [
         {
           kind: "agent",
+          directory: ".opencode/agents",
           fileName: "../escape.md",
+          ownerPrefix: "spr-",
           content: "---\n---\n\n<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
         },
       ],
@@ -136,5 +148,31 @@ describe("materializeArtifacts", () => {
     })
 
     expect(result.exitCode).toBe(1)
+  })
+
+  it("treats existing Codex generated agents as router-owned", async () => {
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "agent",
+          directory: ".codex/agents",
+          fileName: "oms-review.toml",
+          ownerPrefix: "oms-",
+          content: "# generated-by: oh-my-superagents; do-not-edit: true\nname = \"oms-review\"\n",
+        },
+      ],
+      fs: {
+        mkdir: async () => undefined,
+        writeFile: async () => undefined,
+        rename: async () => undefined,
+        readdir: async () => [],
+        readFile: async () => "# generated-by: oh-my-superagents; do-not-edit: true\nname = \"oms-review\"\n",
+        stat: async () => ({ isFile: () => true }),
+        unlink: async () => undefined,
+      },
+    })
+
+    expect(result.exitCode).toBe(0)
   })
 })

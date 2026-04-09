@@ -1,5 +1,7 @@
 node_modules/
 dist/
 .tmp/
+.worktrees/
 .opencode/agents/
 .opencode/commands/
+.codex/agents/
