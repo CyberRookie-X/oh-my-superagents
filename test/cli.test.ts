@@ -168,4 +168,56 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("oms-review.toml")
   })
+
+  it("returns exit code 0 for bootstrap --host codex", async () => {
+    const result = await runCli(["bootstrap", "--host", "codex"], {
+      discoverConfigPath: async () => undefined,
+      loadConfig: async () => ({ path: "/workspace/project/oh-my-superagents.config.jsonc", config: baseConfig }),
+      explainAll: () => [],
+      explainPhase: () => {
+        throw new Error("unexpected")
+      },
+      buildArtifacts: () => ({ agents: [], commands: [] }),
+      buildCodexArtifacts: () => ({ agents: [] }),
+      buildCodexBootstrap: () => ({
+        configPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        createdConfig: true,
+        bootstrapFiles: ["/workspace/project/.agents/plugins/marketplace.json"],
+        syncResult: { exitCode: 0, warnings: [], written: [], removed: [] },
+        nextSteps: ["Restart Codex"],
+      }),
+      explainAllForHost: () => [],
+      explainPhaseForHost: () => {
+        throw new Error("unexpected")
+      },
+      materializeArtifacts: async () => ({ exitCode: 0, warnings: [], written: [], removed: [] }),
+    } as any)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Restart Codex")
+  })
+
+  it("rejects bootstrap for unsupported hosts", async () => {
+    const result = await runCli(["bootstrap", "--host", "opencode"], {
+      discoverConfigPath: async () => undefined,
+      loadConfig: async () => ({ path: "/workspace/project/oh-my-superagents.config.jsonc", config: baseConfig }),
+      explainAll: () => [],
+      explainPhase: () => {
+        throw new Error("unexpected")
+      },
+      buildArtifacts: () => ({ agents: [], commands: [] }),
+      buildCodexArtifacts: () => ({ agents: [] }),
+      buildCodexBootstrap: async () => {
+        throw new Error("unexpected")
+      },
+      explainAllForHost: () => [],
+      explainPhaseForHost: () => {
+        throw new Error("unexpected")
+      },
+      materializeArtifacts: async () => ({ exitCode: 0, warnings: [], written: [], removed: [] }),
+    } as any)
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("bootstrap")
+  })
 })

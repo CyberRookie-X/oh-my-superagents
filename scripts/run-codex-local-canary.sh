@@ -51,15 +51,18 @@ make_case_dir() {
   printf '%s\n' "$case_dir"
 }
 
-run_sync_checks() {
+run_bootstrap_checks() {
   local case_dir="$1"
 
-  log "running oh-my-superagents sync and explain"
+  log "running oh-my-superagents bootstrap and explain"
   (
     cd "$case_dir/project"
+    oh-my-superagents bootstrap --host codex >"$case_dir/bootstrap.json"
     oh-my-superagents explain --host codex --all >"$case_dir/explain.json"
-    oh-my-superagents sync --host codex >"$case_dir/sync.json"
   )
+
+  grep -q '"nextSteps"' "$case_dir/bootstrap.json" \
+    || fail "bootstrap output did not include next steps"
 
   node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if (!Array.isArray(data) || data.length !== 7) process.exit(1);" "$case_dir/explain.json" \
     || fail "explain output did not contain the full phase set"
@@ -68,10 +71,21 @@ run_sync_checks() {
   grep -q "generated-by: oh-my-superagents" "$case_dir/project/.codex/agents/oms-review.toml" \
     || fail "generated Codex agent is missing ownership marker"
 
+  [ -f "$case_dir/project/.agents/plugins/marketplace.json" ] || fail "missing generated Codex marketplace"
+  [ -f "$case_dir/project/plugins/oh-my-superagents-codex/.codex-plugin/plugin.json" ] || fail "missing generated Codex plugin manifest"
+  [ -f "$case_dir/project/plugins/oh-my-superagents-codex/skills/oh-my-superagents-sync/SKILL.md" ] || fail "missing generated Codex sync skill"
+  [ -f "$case_dir/project/plugins/oh-my-superagents-codex/skills/oh-my-superagents-doctor/SKILL.md" ] || fail "missing generated Codex doctor skill"
+
+  node -e "const fs=require('fs'); const market=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); const plugin=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const hasEntry=(market.plugins||[]).some((item)=>item.name==='oh-my-superagents-codex'); if(!hasEntry) process.exit(1); if(plugin.name!=='oh-my-superagents-codex') process.exit(2);" "$case_dir/project/.agents/plugins/marketplace.json" "$case_dir/project/plugins/oh-my-superagents-codex/.codex-plugin/plugin.json" \
+    || fail "generated Codex marketplace or plugin manifest could not be parsed"
+
+  grep -q "oh-my-superagents sync --host codex --config" "$case_dir/project/plugins/oh-my-superagents-codex/skills/oh-my-superagents-sync/SKILL.md" \
+    || fail "generated Codex sync skill is missing the expected command"
+
   (
     cd "$case_dir/project"
-    oh-my-superagents sync --host codex >"$case_dir/sync-second.json"
-  ) || fail "second Codex sync was not idempotent"
+    oh-my-superagents bootstrap --host codex >"$case_dir/bootstrap-second.json"
+  ) || fail "second Codex bootstrap was not idempotent"
 }
 
 run_exec_probe() {
@@ -115,12 +129,12 @@ EOF
 
 if (
   cd "$invalid_case/project"
-  oh-my-superagents sync --host codex >"$invalid_case/sync.json" 2>"$invalid_case/sync.stderr"
+  oh-my-superagents bootstrap --host codex >"$invalid_case/bootstrap.json" 2>"$invalid_case/bootstrap.stderr"
 ); then
   fail "invalid Codex config unexpectedly synced"
 fi
 
-grep -q "Invalid JSONC" "$invalid_case/sync.stderr" \
+grep -q "Invalid JSONC" "$invalid_case/bootstrap.stderr" \
   || fail "invalid Codex config did not report JSONC parse failure"
 
 valid_case="$(make_case_dir valid-router-config)"
@@ -143,7 +157,7 @@ cat >"$valid_case/project/oh-my-superagents.config.jsonc" <<'EOF'
 }
 EOF
 
-run_sync_checks "$valid_case"
+run_bootstrap_checks "$valid_case"
 run_exec_probe "valid router config after sync" "$valid_case"
 
 log "Codex local isolated canary completed successfully"

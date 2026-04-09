@@ -5,7 +5,8 @@
 This project builds a thin routing layer for `superpowers`, not a competing workflow system.
 `superpowers` remains responsible for deciding what process to run. The router decides which host-native agent, model, and reasoning intensity should execute each phase.
 
-The current release targets OpenCode and Codex while keeping the core routing logic host-agnostic so future adapters can support Claude Code, Gemini CLI, and other CLI agents.
+The current release targets OpenCode and Codex.
+Future adapters are only worth adding when a host leaves a meaningful routing gap that `oh-my-superagents` can fill without replacing `superpowers` itself.
 
 ## Problem
 
@@ -23,7 +24,7 @@ The missing piece is a thin compatibility layer that complements `superpowers` w
 - Support different models and reasoning intensities per phase.
 - Stay compatible with upstream `superpowers` updates without copying skill content.
 - Keep the first release lightweight and host-native.
-- Preserve a host-agnostic core so future adapters can target Claude Code and Codex.
+- Preserve a host-agnostic core so future adapters can target other hosts when they need a real routing layer.
 
 ## Non-Goals
 
@@ -44,6 +45,9 @@ This means:
 - The router decides who should do it and with what execution profile.
 - The router may generate host-native entrypoints and helper agents.
 - The router must not reorder or redefine `superpowers` methodology.
+
+Host support is gap-driven, not parity-driven.
+If a host already provides strong native agent routing, per-agent model selection, and effort controls, adding an `oh-my-superagents` adapter is not automatically worthwhile.
 
 ## Key Decisions
 
@@ -128,6 +132,17 @@ Responsibilities:
 - map `fast` effort to Codex `service_tier = "fast"`
 - bind each generated Codex agent to the corresponding upstream `superpowers` skill in its developer instructions
 
+### 2c. Codex Bootstrap Layer
+
+Codex also gets a thin convenience layer for installation and updates.
+
+Responsibilities:
+
+- scaffold a repo-local plugin marketplace entry in `.agents/plugins/marketplace.json`
+- scaffold a local plugin bundle in `plugins/oh-my-superagents-codex/`
+- create a starter `oh-my-superagents.config.jsonc` when the project does not have one yet
+- delegate back to the existing Codex sync path so generated `.codex/agents/*.toml` remain the single runtime truth
+
 ### 3. Materializer
 
 The materializer writes generated files into standard host locations.
@@ -162,6 +177,7 @@ The required user-facing surfaces for the current release are:
 - CLI: `oh-my-superagents explain --host opencode --phase <skill-name> | --all`
 - CLI: `oh-my-superagents sync --host codex`
 - CLI: `oh-my-superagents explain --host codex --phase <skill-name> | --all`
+- CLI: `oh-my-superagents bootstrap --host codex`
 
 `explain` must output JSON in v1.
 For a single phase it returns one object. With `--all` it returns an array of those objects.

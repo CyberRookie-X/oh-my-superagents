@@ -8,11 +8,12 @@ This canary verifies that the packaged `oh-my-superagents` artifact can be exerc
 
 - installs `@openai/codex` in a clean Debian environment
 - installs the locally packed `oh-my-superagents` tarball
-- verifies invalid `oh-my-superagents.config.jsonc` fails with a clear JSONC error
+- verifies invalid `oh-my-superagents.config.jsonc` fails with a clear JSONC error through `bootstrap --host codex`
+- verifies `oh-my-superagents bootstrap --host codex`
 - verifies `oh-my-superagents explain --host codex --all`
-- verifies `oh-my-superagents sync --host codex`
 - verifies generated `.codex/agents/*.toml` files exist
-- verifies a second `sync` succeeds, proving Codex artifact ownership is idempotent
+- verifies generated local marketplace/plugin files exist
+- verifies a second `bootstrap` succeeds, proving Codex convenience scaffolding is idempotent
 - runs `codex exec` against a dead local provider endpoint and confirms Codex reaches provider connection failure instead of crashing on generated agent/config parsing
 
 ## Why The Dead Provider Is Intentional

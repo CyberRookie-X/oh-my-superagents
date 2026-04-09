@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises"
 import { cwd as getCwd } from "node:process"
-import { BUILT_IN_PHASES, loadRouterConfig } from "./config.js"
+import { BUILT_IN_PHASES, discoverConfigPath, loadRouterConfig } from "./config.js"
+import { runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
 import { materializeArtifacts } from "./materialize.js"
 import { buildArtifacts } from "./opencode.js"
@@ -31,6 +32,7 @@ const nodeFs = {
 }
 
 type CliDeps = {
+  discoverConfigPath: typeof discoverConfigPath
   loadConfig: typeof loadRouterConfig
   explainAll: typeof explainAll
   explainPhase: typeof explainPhase
@@ -38,10 +40,12 @@ type CliDeps = {
   explainPhaseForHost: (config: Awaited<ReturnType<typeof loadRouterConfig>>["config"], host: "opencode" | "codex", phase: BuiltInPhase) => unknown
   buildArtifacts: typeof buildArtifacts
   buildCodexArtifacts: typeof buildCodexArtifacts
+  buildCodexBootstrap: typeof runCodexBootstrap
   materializeArtifacts: typeof materializeArtifacts
 }
 
 const defaultDeps: CliDeps = {
+  discoverConfigPath,
   loadConfig: loadRouterConfig,
   explainAll,
   explainPhase,
@@ -49,6 +53,7 @@ const defaultDeps: CliDeps = {
   explainPhaseForHost: (config, host, phase) => (host === "opencode" ? explainPhase(config, phase) : explainCodexPhase(config, phase)),
   buildArtifacts,
   buildCodexArtifacts,
+  buildCodexBootstrap: runCodexBootstrap,
   materializeArtifacts,
 }
 
@@ -87,8 +92,30 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     const host = getStringFlag(flags, "--host")
     const explicitPath = getStringFlag(flags, "--config")
 
-    if (command !== "sync" && command !== "explain") {
+    if (command !== "sync" && command !== "explain" && command !== "bootstrap") {
       return { exitCode: 1, stdout: "", stderr: `Unknown command: ${command ?? ""}` }
+    }
+
+    if (command === "bootstrap") {
+      if (host !== "codex") {
+        return { exitCode: 1, stdout: "", stderr: "bootstrap is currently only supported for --host codex" }
+      }
+
+      const result = await deps.buildCodexBootstrap({
+        cwd,
+        explicitPath,
+        discoverConfigPath: deps.discoverConfigPath,
+        loadConfig: deps.loadConfig,
+        materializeArtifacts: deps.materializeArtifacts,
+        buildCodexArtifacts: deps.buildCodexArtifacts,
+        fs: nodeFs,
+      })
+
+      return {
+        exitCode: result.syncResult.exitCode,
+        stdout: JSON.stringify(result, null, 2),
+        stderr: result.syncResult.exitCode === 0 ? "" : result.syncResult.warnings.join("\n"),
+      }
     }
 
     if (host !== "opencode" && host !== "codex") {

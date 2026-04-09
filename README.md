@@ -2,18 +2,32 @@
 
 Thin routing for `superpowers` on OpenCode and Codex.
 
+## Scope
+
+`oh-my-superagents` only targets hosts where `superpowers` still lacks a thin, host-native routing layer.
+It is not a cross-host configuration sync tool.
+
+Today that means:
+
+- OpenCode: supported
+- Codex: supported
+- Claude Code: intentionally out of scope for now because Claude already provides strong native subagents, per-agent model selection, effort controls, and plugin distribution
+
 ## What It Does
 
 - Reads `oh-my-superagents.config.jsonc`
 - Resolves built-in `superpowers` phases to profiles
 - Generates `.opencode/agents/*.md` and `.opencode/commands/*.md`
 - Generates `.codex/agents/*.toml`
-- Exposes `sync` and `explain` CLIs
+- Exposes `sync`, `explain`, and `bootstrap` CLIs
 - Ships a minimal OpenCode plugin entrypoint for startup diagnostics
 
 ## Install
 
-Install upstream `superpowers` separately, then add `oh-my-superagents` to your OpenCode plugin list.
+Install upstream `superpowers` separately, then use the host-specific flow you need:
+
+- OpenCode: add `oh-my-superagents` to your OpenCode plugin list
+- Codex: use the packaged CLI to run `bootstrap --host codex`
 
 For ad-hoc local use of the CLI, run it with `npx` or from your local `node_modules/.bin`:
 
@@ -45,6 +59,29 @@ Create `oh-my-superagents.config.jsonc` in your project root:
 
 For `--host codex`, use Codex-compatible model ids in profiles, such as `gpt-5.4` or `gpt-5.3-codex-spark`.
 The Codex adapter does not translate arbitrary OpenCode provider/model ids.
+
+## Bootstrap
+
+For Codex, the recommended first-run command is:
+
+```bash
+oh-my-superagents bootstrap --host codex
+```
+
+This will:
+
+- create a starter `oh-my-superagents.config.jsonc` if the project does not have one yet
+- scaffold a repo-local Codex marketplace entry in `.agents/plugins/marketplace.json`
+- scaffold a local plugin bundle in `plugins/oh-my-superagents-codex/`
+- generate `.codex/agents/*.toml`
+
+After bootstrap completes:
+
+1. restart Codex
+2. open the plugin directory
+3. install `oh-my-superagents-codex` from the local marketplace
+
+The installed plugin adds Codex-native skill entrypoints for resync and diagnostics, but routing truth still lives in `oh-my-superagents.config.jsonc` plus `sync --host codex`.
 
 ## Sync
 
@@ -94,6 +131,15 @@ Then ask Codex to use a specific phase agent, for example:
 ```text
 Use the oms-review agent to review the current branch
 ```
+
+## Generated Codex Plugin Bundle
+
+`bootstrap --host codex` also scaffolds:
+
+- `.agents/plugins/marketplace.json`
+- `plugins/oh-my-superagents-codex/.codex-plugin/plugin.json`
+- `plugins/oh-my-superagents-codex/skills/oh-my-superagents-sync/SKILL.md`
+- `plugins/oh-my-superagents-codex/skills/oh-my-superagents-doctor/SKILL.md`
 
 ## Debian Docker Canary
 
