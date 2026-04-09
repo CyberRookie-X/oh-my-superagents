@@ -1,0 +1,2 @@
+# Intentionally empty.
+# package.json "files" controls the publish surface and should not inherit .gitignore.

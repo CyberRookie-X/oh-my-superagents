@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["profiles", "routes"],
+  "additionalProperties": false,
+  "properties": {
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["model"],
+        "additionalProperties": false,
+        "properties": {
+          "model": { "type": "string", "minLength": 1 },
+          "variant": { "type": "string", "minLength": 1 },
+          "effort": { "enum": ["fast", "balanced", "deep", "max"] },
+          "temperature": { "type": "number" }
+        }
+      }
+    },
+    "routes": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "brainstorming",
+          "writing-plans",
+          "subagent-driven-development",
+          "requesting-code-review",
+          "verification-before-completion",
+          "frontend-design",
+          "webapp-testing"
+        ]
+      },
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "defaultRoute": { "type": "string", "minLength": 1 }
+  }
+}
