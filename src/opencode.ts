@@ -1,8 +1,15 @@
-import { BUILT_IN_PHASES, type RouterConfig } from "./config.js"
+import {
+  BUILT_IN_PHASES,
+  CONTROL_PLANE_COMMAND_KEYS,
+  type ControlPlaneCommandKey,
+  type ControlPlaneConfig,
+  type RouterConfig,
+} from "./config.js"
 import { PHASE_TO_AGENT, PHASE_TO_COMMAND, resolvePhase, type BuiltInPhase } from "./router.js"
 
 export const MARKER_TEXT = "generated-by: oh-my-superagents; do-not-edit: true"
 export const MARKER = `<!-- ${MARKER_TEXT} -->`
+export const CONTROL_PLANE_MARKER_PREFIX = "oms-control-plane:"
 
 type PermissionTask = Record<string, "allow" | "deny" | "ask">
 
@@ -14,8 +21,31 @@ export type GeneratedArtifact = {
   content: string
 }
 
+type OpenCodeControlPlaneSettings = Pick<ControlPlaneConfig["settings"], "commandPrefix" | "commands">
+
+const CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string> = {
+  status: "Show OMS status for OpenCode.",
+  use: "Switch OMS to the selected preset for OpenCode.",
+  disable: "Disable OMS for OpenCode.",
+  sync: "Sync OMS artifacts for OpenCode.",
+  doctor: "Inspect OMS diagnostics for OpenCode.",
+}
+
+const RESERVED_PHASE_COMMAND_FILES = new Set(
+  Object.values(PHASE_TO_COMMAND).map((commandName) => `${commandName.slice(1)}.md`),
+)
+
 function yamlScalar(value: string) {
   return `'${value.replace(/'/g, "''")}'`
+}
+
+export function renderControlPlaneOwnershipMetadata(input: {
+  host: "opencode" | "codex"
+  artifact: "command" | "skill"
+  logicalCommand: ControlPlaneCommandKey
+  renderedName: string
+}) {
+  return `<!-- ${CONTROL_PLANE_MARKER_PREFIX} stage=1; host=${input.host}; artifact=${input.artifact}; logical-command=${input.logicalCommand}; rendered-name=${input.renderedName} -->`
 }
 
 export function renderAgentFile(input: {
@@ -78,7 +108,67 @@ export function renderCommandFile(input: {
   ].join("\n")
 }
 
-export function buildArtifacts(config: RouterConfig) {
+export function renderControlPlaneCommandFile(input: {
+  description: string
+  logicalCommand: ControlPlaneCommandKey
+  renderedName: string
+}) {
+  return [
+    "---",
+    `description: ${yamlScalar(input.description)}`,
+    "---",
+    "",
+    MARKER,
+    renderControlPlaneOwnershipMetadata({
+      host: "opencode",
+      artifact: "command",
+      logicalCommand: input.logicalCommand,
+      renderedName: input.renderedName,
+    }),
+    "",
+    `Run \`oh-my-superagents ${input.logicalCommand} --host opencode $ARGUMENTS\` from the repository root.`,
+    "",
+  ].join("\n")
+}
+
+function buildControlPlaneCommandArtifacts(settings: OpenCodeControlPlaneSettings): GeneratedArtifact[] {
+  const ownerPrefix = `${settings.commandPrefix}-`
+  const seenFileNames = new Map<string, string>()
+
+  return CONTROL_PLANE_COMMAND_KEYS.flatMap((commandKey) => {
+    const command = settings.commands[commandKey]
+    const renderedNames = [command.name, ...command.aliases]
+
+    return renderedNames.map((renderedName) => {
+      const fileName = `${settings.commandPrefix}-${renderedName}.md`
+
+      if (RESERVED_PHASE_COMMAND_FILES.has(fileName)) {
+        throw new Error(`OMS command file collides with reserved OpenCode phase command: ${fileName}`)
+      }
+
+      const existingCommand = seenFileNames.get(fileName)
+      if (existingCommand) {
+        throw new Error(`Duplicate OMS command file rendering: ${fileName} (${existingCommand}, ${commandKey})`)
+      }
+
+      seenFileNames.set(fileName, commandKey)
+
+      return {
+        kind: "command" as const,
+        directory: ".opencode/commands",
+        fileName,
+        ownerPrefix,
+        content: renderControlPlaneCommandFile({
+          description: CONTROL_PLANE_COMMAND_DESCRIPTIONS[commandKey],
+          logicalCommand: commandKey,
+          renderedName: fileName.replace(/\.md$/, ""),
+        }),
+      }
+    })
+  })
+}
+
+export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: OpenCodeControlPlaneSettings) {
   const commands: GeneratedArtifact[] = []
   const agents = new Map<string, GeneratedArtifact>()
   const agentSelections = new Map<string, string>()
@@ -139,6 +229,10 @@ export function buildArtifacts(config: RouterConfig) {
         phase,
       }),
     })
+  }
+
+  if (controlPlaneSettings) {
+    commands.push(...buildControlPlaneCommandArtifacts(controlPlaneSettings))
   }
 
   return {

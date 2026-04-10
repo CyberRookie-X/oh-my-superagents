@@ -1,137 +1,370 @@
 import { readFile } from "node:fs/promises"
 import { describe, expect, it } from "vitest"
-import { discoverConfigPath, loadRouterConfig } from "../src/config.js"
+import { discoverConfigPath, loadControlPlaneConfig } from "../src/config.js"
+
+function createExists(files: Record<string, string>) {
+  return async (filePath: string) => filePath in files
+}
+
+function createReadFile(files: Record<string, string>) {
+  return async (filePath: string) => {
+    const value = files[filePath]
+    if (value === undefined) {
+      throw new Error(`Unexpected read: ${filePath}`)
+    }
+
+    return value
+  }
+}
 
 describe("discoverConfigPath", () => {
-  it("prefers the default config file in cwd", async () => {
+  it("falls back to the global config path when project config is missing", async () => {
     const result = await discoverConfigPath({
       cwd: "/workspace/project",
-      explicitPath: undefined,
-      exists: async (filePath: string) =>
-        filePath === "/workspace/project/oh-my-superagents.config.jsonc",
+      homeDir: "/home/tester",
+      exists: async (filePath: string) => filePath === "/home/tester/.config/oh-my-superagents/config.jsonc",
     })
 
-    expect(result).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(result).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
   })
 })
 
-describe("loadRouterConfig", () => {
-  it("loads valid config from explicit path", async () => {
-    const result = await loadRouterConfig({
+describe("loadControlPlaneConfig", () => {
+  it("migrates legacy config into presets.default", async () => {
+    const result = await loadControlPlaneConfig({
       cwd: "/workspace/project",
-      explicitPath: "/workspace/project/router.jsonc",
-      readFile: async () => `{
-        "profiles": { "build": { "model": "openai/gpt-5" } },
-        "routes": { "brainstorming": "build" },
-        "defaultRoute": "build"
-      }`,
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
       exists: async () => true,
-    })
-
-    expect(result.config.defaultRoute).toBe("build")
-    expect(result.path).toBe("/workspace/project/router.jsonc")
-  })
-
-  it("defaults superpowers compatibility mode to warn", async () => {
-    const result = await loadRouterConfig({
-      cwd: "/workspace/project",
-      explicitPath: "/workspace/project/router.jsonc",
       readFile: async () => `{
-        "profiles": { "build": { "model": "openai/gpt-5" } },
-        "routes": { "brainstorming": "build" }
-      }`,
-      exists: async () => true,
-    })
-
-    expect(result.config.superpowersCompatibility.mode).toBe("warn")
-  })
-
-  it("accepts strict superpowers compatibility mode", async () => {
-    const result = await loadRouterConfig({
-      cwd: "/workspace/project",
-      explicitPath: "/workspace/project/router.jsonc",
-      readFile: async () => `{
-        "profiles": { "build": { "model": "openai/gpt-5" } },
-        "routes": { "brainstorming": "build" },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        },
+        "routes": {
+          "brainstorming": "build"
+        },
+        "defaultRoute": "build",
         "superpowersCompatibility": { "mode": "strict" }
       }`,
-      exists: async () => true,
     })
 
-    expect(result.config.superpowersCompatibility.mode).toBe("strict")
+    expect(result.config.settings.activePreset).toBe("default")
+    expect(result.config.settings.superpowersCompatibility.mode).toBe("strict")
+    expect(result.config.presets.default).toMatchObject({
+      label: "Default",
+      short: "def",
+      description: "Migrated legacy OMS configuration",
+      profiles: {
+        build: { model: "openai/gpt-5" },
+      },
+      routes: {
+        brainstorming: "build",
+      },
+      defaultRoute: "build",
+    })
   })
 
-  it("rejects unknown superpowers compatibility mode", async () => {
+  it("rejects mixed-shape config", async () => {
     await expect(
-      loadRouterConfig({
+      loadControlPlaneConfig({
         cwd: "/workspace/project",
-        explicitPath: "/workspace/project/router.jsonc",
-        readFile: async () => `{
-          "profiles": { "build": { "model": "openai/gpt-5" } },
-          "routes": { "brainstorming": "build" },
-          "superpowersCompatibility": { "mode": "lax" }
-        }`,
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
         exists: async () => true,
-      }),
-    ).rejects.toThrow(/warn|strict/i)
-  })
-
-  it("rejects unknown phase keys", async () => {
-    await expect(
-      loadRouterConfig({
-        cwd: "/workspace/project",
-        explicitPath: "/workspace/project/router.jsonc",
         readFile: async () => `{
-          "profiles": { "build": { "model": "openai/gpt-5" } },
-          "routes": { "unknown-phase": "build" }
-        }`,
-        exists: async () => true,
-      }),
-    ).rejects.toThrow(/unknown-phase/)
-  })
-
-  it("rejects unknown top-level keys", async () => {
-    await expect(
-      loadRouterConfig({
-        cwd: "/workspace/project",
-        explicitPath: "/workspace/project/router.jsonc",
-        readFile: async () => `{
-          "profiles": { "build": { "model": "openai/gpt-5" } },
-          "routes": { "brainstorming": "build" },
-          "unexpected": true
-        }`,
-        exists: async () => true,
-      }),
-    ).rejects.toThrow(/unexpected/)
-  })
-
-  it("rejects malformed JSONC", async () => {
-    await expect(
-      loadRouterConfig({
-        cwd: "/workspace/project",
-        explicitPath: "/workspace/project/router.jsonc",
-        readFile: async () => `{
-          "profiles": { "build": { "model": "openai/gpt-5" } },
-          "routes": { "brainstorming": "build" }
-        `,
-        exists: async () => true,
-      }),
-    ).rejects.toThrow(/JSONC/i)
-  })
-
-  it("keeps schema parity for non-empty profile names", async () => {
-    await expect(
-      loadRouterConfig({
-        cwd: "/workspace/project",
-        explicitPath: "/workspace/project/router.jsonc",
-        readFile: async () => `{
+          "settings": {
+            "activePreset": "default"
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          },
           "profiles": {
-            "": { "model": "openai/gpt-5" },
             "build": { "model": "openai/gpt-5" }
           },
-          "routes": { "brainstorming": "build" }
+          "defaultRoute": "build"
         }`,
+      }),
+    ).rejects.toThrow(/mixed-shape/i)
+  })
+
+  it("treats --config as exclusive", async () => {
+    const files = {
+      "/workspace/project/explicit.jsonc": `{
+        "settings": {
+          "activePreset": "explicit"
+        },
+        "presets": {
+          "explicit": {
+            "label": "Explicit",
+            "short": "exp",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "project"
+        },
+        "presets": {
+          "project": {
+            "label": "Project",
+            "short": "prj",
+            "profiles": {
+              "build": { "model": "google/gemini-2.5-pro" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "global"
+        },
+        "presets": {
+          "global": {
+            "label": "Global",
+            "short": "glo",
+            "profiles": {
+              "build": { "model": "anthropic/claude-sonnet-4-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/explicit.jsonc",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.path).toBe("/workspace/project/explicit.jsonc")
+    expect(result.sources).toEqual(["/workspace/project/explicit.jsonc"])
+    expect(result.config.settings.activePreset).toBe("explicit")
+    expect(result.config.presets).toHaveProperty("explicit")
+    expect(result.config.presets).not.toHaveProperty("project")
+    expect(result.config.presets).not.toHaveProperty("global")
+  })
+
+  it("merges global and project layered config", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "enabled": false,
+          "activePreset": "global",
+          "commandPrefix": "team"
+        },
+        "presets": {
+          "global": {
+            "label": "Global",
+            "short": "glo",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "enabled": true,
+          "activePreset": "project"
+        },
+        "presets": {
+          "project": {
+            "label": "Project",
+            "short": "prj",
+            "profiles": {
+              "review": { "model": "anthropic/claude-sonnet-4-5" }
+            },
+            "routes": {},
+            "defaultRoute": "review"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.sources).toEqual([
+      "/home/tester/.config/oh-my-superagents/config.jsonc",
+      "/workspace/project/oh-my-superagents.config.jsonc",
+    ])
+    expect(result.path).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(result.config.settings.enabled).toBe(true)
+    expect(result.config.settings.activePreset).toBe("project")
+    expect(result.config.settings.commandPrefix).toBe("team")
+    expect(result.config.presets).toHaveProperty("global")
+    expect(result.config.presets).toHaveProperty("project")
+  })
+
+  it("replaces a same-named project preset instead of deep-merging it", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Global Default",
+            "short": "glo",
+            "description": "Global description",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {
+              "brainstorming": "build"
+            },
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Project Default",
+            "short": "prj",
+            "profiles": {
+              "review": { "model": "anthropic/claude-sonnet-4-5" }
+            },
+            "routes": {},
+            "defaultRoute": "review"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.config.presets.default).toEqual({
+      label: "Project Default",
+      short: "prj",
+      profiles: {
+        review: { model: "anthropic/claude-sonnet-4-5" },
+      },
+      routes: {},
+      defaultRoute: "review",
+    })
+  })
+
+  it("replaces a same-named project command entry and synthesizes missing defaults", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "default",
+          "commands": {
+            "status": {
+              "name": "health",
+              "aliases": ["hs"]
+            }
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "default",
+          "commands": {
+            "status": {
+              "name": "state"
+            }
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.config.settings.commands.status).toEqual({
+      name: "state",
+      aliases: ["st"],
+    })
+    expect(result.config.settings.commands.doctor).toEqual({
+      name: "doctor",
+      aliases: ["dr"],
+    })
+  })
+
+  it("keeps schema parity for non-empty layered preset keys", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
         exists: async () => true,
+        readFile: async () => `{
+          "settings": {
+            "activePreset": "default"
+          },
+          "presets": {
+            "": {
+              "label": "Broken",
+              "short": "bad",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
       }),
     ).rejects.toThrow()
 
@@ -142,7 +375,7 @@ describe("loadRouterConfig", () => {
       ),
     ) as {
       properties?: {
-        profiles?: {
+        presets?: {
           propertyNames?: {
             type?: string
             minLength?: number
@@ -151,7 +384,60 @@ describe("loadRouterConfig", () => {
       }
     }
 
-    expect(schema.properties?.profiles?.propertyNames?.type).toBe("string")
-    expect(schema.properties?.profiles?.propertyNames?.minLength).toBe(1)
+    expect(schema.properties?.presets?.propertyNames?.type).toBe("string")
+    expect(schema.properties?.presets?.propertyNames?.minLength).toBe(1)
+  })
+
+  it("keeps schema parity for naming patterns and legacy config support", async () => {
+    const schema = JSON.parse(
+      await readFile(
+        new URL("../schemas/oh-my-superagents.schema.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      anyOf?: Array<{
+        required?: string[]
+        properties?: {
+          settings?: {
+            properties?: {
+              commandPrefix?: { pattern?: string }
+              commands?: {
+                properties?: {
+                  status?: {
+                    properties?: {
+                      name?: { pattern?: string }
+                      aliases?: { items?: { pattern?: string } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          presets?: {
+            additionalProperties?: {
+              properties?: {
+                short?: { pattern?: string }
+              }
+            }
+          }
+        }
+      }>
+    }
+
+    const layeredShape = schema.anyOf?.find((entry) => entry.required?.includes("presets"))
+    const legacyShape = schema.anyOf?.find((entry) => entry.required?.includes("profiles"))
+
+    expect(layeredShape?.properties?.settings?.properties?.commandPrefix?.pattern).toBe("^[a-z0-9-]+$")
+    expect(
+      layeredShape?.properties?.settings?.properties?.commands?.properties?.status?.properties?.name?.pattern,
+    ).toBe("^[a-z0-9-]+$")
+    expect(
+      layeredShape?.properties?.settings?.properties?.commands?.properties?.status?.properties?.aliases?.items?.pattern,
+    ).toBe("^[a-z0-9-]+$")
+    expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.short?.pattern).toBe(
+      "^[a-z0-9-]+$",
+    )
+    expect(legacyShape?.required).toContain("profiles")
+    expect(legacyShape?.required).toContain("defaultRoute")
   })
 })

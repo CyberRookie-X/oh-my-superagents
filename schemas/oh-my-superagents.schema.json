@@ -1,10 +1,40 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["profiles", "routes"],
-  "additionalProperties": false,
+  "description": "oh-my-superagents supports both the current layered config shape and the legacy single-routing shape during migration.",
   "properties": {
-    "profiles": {
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "activePreset": { "type": "string", "minLength": 1 },
+        "commandPrefix": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
+        "commands": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
+                "aliases": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" }
+                }
+              }
+            },
+            "use": { "$ref": "#/$defs/commandEntry" },
+            "disable": { "$ref": "#/$defs/commandEntry" },
+            "sync": { "$ref": "#/$defs/commandEntry" },
+            "doctor": { "$ref": "#/$defs/commandEntry" }
+          }
+        },
+        "superpowersCompatibility": { "$ref": "#/$defs/compatibility" }
+      }
+    },
+    "presets": {
       "type": "object",
       "propertyNames": {
         "type": "string",
@@ -12,14 +42,148 @@
       },
       "additionalProperties": {
         "type": "object",
-        "required": ["model"],
+        "required": ["label", "short", "profiles", "routes", "defaultRoute"],
         "additionalProperties": false,
         "properties": {
-          "model": { "type": "string", "minLength": 1 },
-          "variant": { "type": "string", "minLength": 1 },
-          "effort": { "enum": ["fast", "balanced", "deep", "max"] },
-          "temperature": { "type": "number" }
+          "label": { "type": "string", "minLength": 1 },
+          "short": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
+          "description": { "type": "string", "minLength": 1 },
+          "profiles": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1
+            },
+            "additionalProperties": {
+              "$ref": "#/$defs/profile"
+            }
+          },
+          "routes": {
+            "$ref": "#/$defs/routes"
+          },
+          "defaultRoute": { "type": "string", "minLength": 1 }
         }
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/profile"
+      }
+    },
+    "routes": {
+      "$ref": "#/$defs/routes"
+    },
+    "defaultRoute": { "type": "string", "minLength": 1 },
+    "superpowersCompatibility": { "$ref": "#/$defs/compatibility" }
+  },
+  "anyOf": [
+    {
+      "type": "object",
+      "required": ["presets"],
+      "additionalProperties": false,
+      "properties": {
+        "settings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "activePreset": { "type": "string", "minLength": 1 },
+            "commandPrefix": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
+            "commands": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "status": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
+                    "aliases": {
+                      "type": "array",
+                      "items": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" }
+                    }
+                  }
+                },
+                "use": { "$ref": "#/$defs/commandEntry" },
+                "disable": { "$ref": "#/$defs/commandEntry" },
+                "sync": { "$ref": "#/$defs/commandEntry" },
+                "doctor": { "$ref": "#/$defs/commandEntry" }
+              }
+            },
+            "superpowersCompatibility": { "$ref": "#/$defs/compatibility" }
+          }
+        },
+        "presets": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["label", "short", "profiles", "routes", "defaultRoute"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string", "minLength": 1 },
+              "short": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
+              "description": { "type": "string", "minLength": 1 },
+              "profiles": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/profile"
+                }
+              },
+              "routes": {
+                "$ref": "#/$defs/routes"
+              },
+              "defaultRoute": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["profiles", "defaultRoute"],
+      "additionalProperties": false,
+      "properties": {
+        "profiles": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/profile"
+          }
+        },
+        "routes": {
+          "$ref": "#/$defs/routes"
+        },
+        "defaultRoute": { "type": "string", "minLength": 1 },
+        "superpowersCompatibility": { "$ref": "#/$defs/compatibility" }
+      }
+    }
+  ],
+  "$defs": {
+    "profile": {
+      "type": "object",
+      "required": ["model"],
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "variant": { "type": "string", "minLength": 1 },
+        "effort": { "enum": ["fast", "balanced", "deep", "max"] },
+        "temperature": { "type": "number" }
       }
     },
     "routes": {
@@ -37,14 +201,24 @@
       },
       "additionalProperties": { "type": "string", "minLength": 1 }
     },
-    "defaultRoute": { "type": "string", "minLength": 1 },
-    "superpowersCompatibility": {
+    "compatibility": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "mode": {
           "enum": ["warn", "strict"],
           "default": "warn"
+        }
+      }
+    },
+    "commandEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" }
         }
       }
     }
