@@ -1020,7 +1020,155 @@ describe("runCli", () => {
         ],
         missing: [],
       },
+      state: {
+        code: "healthy",
+        category: "oms",
+        reason: "OMS is enabled and expected OpenCode artifacts are present.",
+      },
+      nextAction: null,
+      artifactSummary: {
+        expected: 2,
+        present: [
+          "/workspace/project/.opencode/agents/spr-build.md",
+          "/workspace/project/.opencode/agents/spr-strategy.md",
+        ],
+        missing: [],
+        stale: [],
+      },
     })
+  })
+
+  it("classifies default no-config status as first-run guidance for opencode", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: { kind: "default" as const, hasRealSource: false, sources: [] },
+        config: controlPlaneConfig,
+        activePreset: { key: "default", preset: controlPlaneConfig.presets.default },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.host).toBe("opencode")
+    expect(output.state.code).toBe("missing_config")
+    expect(output.state.category).toBe("oms")
+    expect(output.nextAction.command).toBe("oh-my-superagents sync --host opencode")
+  })
+
+  it("reports missing expected OpenCode artifacts as a sync-needed state", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      artifactExists: async (filePath: string) => filePath.endsWith("spr-build.md"),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.state.code).toBe("artifacts_out_of_sync")
+    expect(output.nextAction.command).toBe("oh-my-superagents sync --host opencode")
+    expect(output.artifactSummary.missing.length).toBeGreaterThan(0)
+  })
+
+  it("treats an expected OpenCode artifact replaced with user content as out of sync", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      ...createArtifactFs({
+        "/workspace/project/.opencode/agents/spr-build.md": renderUserMarkdownArtifact("spr-build"),
+        "/workspace/project/.opencode/agents/spr-strategy.md": renderOwnedMarkdownArtifact("spr-strategy"),
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.state.code).toBe("artifacts_out_of_sync")
+    expect(output.artifactSummary.present).toEqual([
+      "/workspace/project/.opencode/agents/spr-strategy.md",
+    ])
+    expect(output.artifactSummary.missing).toContain(
+      "/workspace/project/.opencode/agents/spr-build.md",
+    )
+  })
+
+  it("tracks stale OpenCode artifacts separately from expected artifact summary", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      ...createArtifactFs({
+        "/workspace/project/.opencode/agents/spr-build.md": renderOwnedMarkdownArtifact("spr-build"),
+        "/workspace/project/.opencode/agents/spr-strategy.md": renderOwnedMarkdownArtifact("spr-strategy"),
+        "/workspace/project/.opencode/commands/oms-legacy.md": renderOwnedMarkdownArtifact("oms-legacy"),
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.artifactSummary.expected).toBe(2)
+    expect(output.artifactSummary.present).toEqual([
+      "/workspace/project/.opencode/agents/spr-build.md",
+      "/workspace/project/.opencode/agents/spr-strategy.md",
+    ])
+    expect(output.artifactSummary.stale).toEqual([
+      "/workspace/project/.opencode/commands/oms-legacy.md",
+    ])
+  })
+
+  it("keeps OpenCode-only state guidance out of codex status output", async () => {
+    const result = await runCli(["status", "--host", "codex"], createCliDeps({
+      buildCodexArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".codex/agents",
+            fileName: "oms-review.toml",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+      }),
+      artifactExists: async (filePath: string) => filePath === "/workspace/project/.codex/agents/oms-review.toml",
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.host).toBe("codex")
+    expect(output.state).toBeUndefined()
+    expect(output.nextAction).toBeUndefined()
+    expect(output.artifactSummary).toBeUndefined()
+  })
+
+  it("uses the preset short in disabled next-action guidance when the preset key is shell-unfriendly", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          settings: {
+            ...controlPlaneConfig.settings,
+            enabled: false,
+            activePreset: "default preset $(rm -rf /)",
+          },
+          presets: {
+            "default preset $(rm -rf /)": controlPlaneConfig.presets.default,
+            review: controlPlaneConfig.presets.review,
+          },
+        },
+        activePreset: {
+          key: "default preset $(rm -rf /)",
+          preset: controlPlaneConfig.presets.default,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.state.code).toBe("disabled")
+    expect(output.nextAction.command).toBe("oh-my-superagents use def --host opencode")
   })
 
   it("returns OMS doctor details with rendered command names, aliases, artifact presence, and compatibility", async () => {

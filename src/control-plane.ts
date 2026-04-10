@@ -16,6 +16,7 @@ import {
   type LoadControlPlaneConfigInput,
   readControlPlaneSourceDocument,
 } from "./config.js"
+import type { SuperpowersCompatibilityResult, SupportedSuperpowersHost } from "./superpowers-compatibility.js"
 
 const READ_ONLY_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "doctor"])
 const NAME_PATTERN = /^[a-z0-9-]+$/
@@ -43,6 +44,119 @@ export type ResolvedControlPlane = {
   activePreset: {
     key: string
     preset: ControlPlanePreset
+  }
+}
+
+export type OpenCodeStatusState = {
+  code:
+    | "healthy"
+    | "missing_config"
+    | "disabled"
+    | "artifacts_out_of_sync"
+    | "upstream_not_detected"
+    | "upstream_incompatible"
+  category: "oms" | "upstream" | "host"
+  reason: string
+}
+
+export type ControlPlaneNextAction = {
+  command: string
+  reason: string
+}
+
+export type ControlPlaneArtifactSummary = {
+  expected: number
+  present: string[]
+  missing: string[]
+  stale: string[]
+}
+
+export function summarizeControlPlaneArtifacts(input: {
+  present: string[]
+  missing: string[]
+  stale: string[]
+}): ControlPlaneArtifactSummary {
+  return {
+    expected: input.present.length + input.missing.length,
+    present: input.present,
+    missing: input.missing,
+    stale: input.stale,
+  }
+}
+
+export function buildOpenCodeStatusState(input: {
+  host: SupportedSuperpowersHost | "qwen"
+  source: ResolvedControlPlane["source"]
+  enabled: boolean
+  compatibility: SuperpowersCompatibilityResult | null
+  artifactSummary: ControlPlaneArtifactSummary
+}): OpenCodeStatusState {
+  if (input.host === "opencode" && !input.source.hasRealSource) {
+    return {
+      code: "missing_config",
+      category: "oms",
+      reason: "No OMS config file was found, so OpenCode is using synthesized defaults.",
+    }
+  }
+
+  if (!input.enabled) {
+    return {
+      code: "disabled",
+      category: "oms",
+      reason: "OMS is currently disabled for this workspace.",
+    }
+  }
+
+  if (input.compatibility?.status === "not_detected") {
+    return {
+      code: "upstream_not_detected",
+      category: "upstream",
+      reason: input.compatibility.reason,
+    }
+  }
+
+  if (input.compatibility?.status === "incompatible") {
+    return {
+      code: "upstream_incompatible",
+      category: "upstream",
+      reason: input.compatibility.reason,
+    }
+  }
+
+  if (input.host === "opencode" && input.artifactSummary.missing.length > 0) {
+    return {
+      code: "artifacts_out_of_sync",
+      category: "host",
+      reason: "Expected OMS-managed OpenCode artifacts are missing or need to be re-synced.",
+    }
+  }
+
+  return {
+    code: "healthy",
+    category: "oms",
+    reason: "OMS is enabled and expected OpenCode artifacts are present.",
+  }
+}
+
+export function buildOpenCodeNextAction(input: {
+  host: SupportedSuperpowersHost | "qwen"
+  state: OpenCodeStatusState
+  activePresetShort: string
+}): ControlPlaneNextAction | null {
+  switch (input.state.code) {
+    case "missing_config":
+    case "artifacts_out_of_sync":
+      return {
+        command: `oh-my-superagents sync --host ${input.host}`,
+        reason: "Materialize the expected OMS-managed host artifacts.",
+      }
+    case "disabled":
+      return {
+        command: `oh-my-superagents use ${input.activePresetShort} --host ${input.host}`,
+        reason: "Re-enable OMS by selecting the active preset again.",
+      }
+    default:
+      return null
   }
 }
 

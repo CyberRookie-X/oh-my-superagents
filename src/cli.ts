@@ -2,7 +2,14 @@ import * as fs from "node:fs/promises"
 import path from "node:path"
 import { cwd as getCwd } from "node:process"
 import { BUILT_IN_PHASES, discoverConfigPath, loadRouterConfig } from "./config.js"
-import { prepareControlPlaneStateWrite, resolveControlPlane, type ResolvedControlPlane } from "./control-plane.js"
+import {
+  buildOpenCodeNextAction,
+  buildOpenCodeStatusState,
+  prepareControlPlaneStateWrite,
+  resolveControlPlane,
+  summarizeControlPlaneArtifacts,
+  type ResolvedControlPlane,
+} from "./control-plane.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
 import { hasArtifactOwnershipMarker, materializeArtifacts } from "./materialize.js"
@@ -595,11 +602,22 @@ async function inspectArtifacts(cwd: string, filePaths: string[], host: CliHost,
   const states = await Promise.all(filePaths.map(async (filePath) => ({ filePath, present: await deps.artifactExists(filePath) })))
   const discovered = await discoverOwnedArtifacts(cwd, host, deps)
   const specialPaths = new Set(host === "codex" ? [path.join(cwd, CODEX_MARKETPLACE_PATH)] : [])
-  const present = new Set(
-    states
-      .filter((state) => (specialPaths.has(state.filePath) ? discovered.specialPresent.includes(state.filePath) : state.present))
-      .map((state) => state.filePath),
-  )
+  const expectedSet = new Set(filePaths)
+  const ownedPresent = new Set([...discovered.paths, ...discovered.specialPresent])
+  const expectedPresent = states
+    .filter((state) => {
+      if (specialPaths.has(state.filePath)) {
+        return discovered.specialPresent.includes(state.filePath)
+      }
+
+      if (host === "opencode") {
+        return state.present && ownedPresent.has(state.filePath)
+      }
+
+      return state.present
+    })
+    .map((state) => state.filePath)
+  const present = new Set(expectedPresent)
 
   for (const filePath of discovered.paths) {
     present.add(filePath)
@@ -609,12 +627,26 @@ async function inspectArtifacts(cwd: string, filePaths: string[], host: CliHost,
     present.add(filePath)
   }
 
+  const stale = [...present]
+    .filter((filePath) => !expectedSet.has(filePath))
+    .sort()
+
   return {
     present: [...present].sort(),
     missing: states
-      .filter((state) => (specialPaths.has(state.filePath) ? !discovered.specialPresent.includes(state.filePath) : !state.present))
+      .filter((state) => !expectedPresent.includes(state.filePath))
       .map((state) => state.filePath),
+    expectedPresent: expectedPresent.sort(),
+    stale,
     ...(discovered.warnings.length > 0 ? { discoveryWarnings: discovered.warnings } : {}),
+  }
+}
+
+function formatArtifactInspection(artifacts: Awaited<ReturnType<typeof inspectArtifacts>>) {
+  return {
+    present: artifacts.present,
+    missing: artifacts.missing,
+    ...(artifacts.discoveryWarnings ? { discoveryWarnings: artifacts.discoveryWarnings } : {}),
   }
 }
 
@@ -735,6 +767,30 @@ async function buildControlPlaneStatus(
   const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath })
   const compatibility = await resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps)
   const artifacts = await inspectArtifacts(cwd, await getExpectedArtifacts(cwd, resolved.config, host, deps), host, deps)
+  const formattedArtifacts = formatArtifactInspection(artifacts)
+  const openCodeStatus = host === "opencode"
+    ? (() => {
+      const artifactSummary = summarizeControlPlaneArtifacts({
+        present: artifacts.expectedPresent,
+        missing: artifacts.missing,
+        stale: artifacts.stale,
+      })
+      const state = buildOpenCodeStatusState({
+        host,
+        source: resolved.source,
+        enabled: resolved.config.settings.enabled,
+        compatibility,
+        artifactSummary,
+      })
+      const nextAction = buildOpenCodeNextAction({
+        host,
+        state,
+        activePresetShort: resolved.activePreset.preset.short,
+      })
+
+      return { state, nextAction, artifactSummary }
+    })()
+    : undefined
 
   return {
     enabled: resolved.config.settings.enabled,
@@ -750,7 +806,8 @@ async function buildControlPlaneStatus(
     source: formatControlPlaneSource(resolved),
     host,
     compatibility,
-    artifacts,
+    artifacts: formattedArtifacts,
+    ...openCodeStatus,
   }
 }
 
@@ -763,6 +820,7 @@ async function buildControlPlaneDoctor(
   const resolved = await deps.resolveControlPlane({ command: "doctor", cwd, explicitPath })
   const compatibility = await resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps)
   const artifacts = await inspectArtifacts(cwd, await getExpectedArtifacts(cwd, resolved.config, host, deps), host, deps)
+  const formattedArtifacts = formatArtifactInspection(artifacts)
 
   return {
     activePreset: {
@@ -777,7 +835,7 @@ async function buildControlPlaneDoctor(
       ...resolved.config.settings.commands,
     },
     compatibility,
-    artifacts,
+    artifacts: formattedArtifacts,
   }
 }
 
