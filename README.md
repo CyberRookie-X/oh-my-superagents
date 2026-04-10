@@ -1,6 +1,47 @@
 # oh-my-superagents
 
+[English](./README.md) | [简体中文](./README.zh-CN.md)
+
+Architecture: [English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
+
 Thin routing and host-local OMS control-plane support for `superpowers` on OpenCode, Codex, and Qwen.
+
+## Support Matrix
+
+| Capability | OpenCode | Codex | Qwen | Claude Code |
+| --- | --- | --- | --- | --- |
+| Phase routing | Full | Full | Partial | Not planned |
+| OMS control plane | Full | Full | Full | Not planned |
+| Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | Not planned |
+| Compatibility monitor | Full | Full | None yet | Not planned |
+| Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | None |
+
+Support level notes:
+
+- `Full`: implemented and part of the supported surface
+- `Partial`: implemented with explicit stage limits documented below
+- `None yet`: not implemented in the current release
+- `Not planned`: intentionally out of scope for now
+
+## Implementation Footprint
+
+The project is intentionally split into a thin host adapter layer plus a shared OMS core.
+The table below uses current source line counts from the implementation files only; it excludes tests and docs.
+
+| Layer | Main files | Approx. source LOC | Thickness |
+| --- | --- | ---: | --- |
+| OMS control plane core | `src/control-plane.ts`, `src/config.ts`, `src/cli.ts` | 1853 | Medium |
+| OpenCode adapter | `src/opencode.ts` | 242 | Thin |
+| Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 565 | Medium |
+| Qwen adapter | `src/qwen.ts` | 220 | Thin |
+| Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1051 | Medium |
+| Shared artifact reconciliation | `src/materialize.ts` | 345 | Thin-to-medium |
+
+How to read this:
+
+- `Thin`: mostly host-specific rendering or lightweight integration glue
+- `Medium`: shared policy, config resolution, lifecycle, or bootstrap behavior
+- OMS is intentionally thicker in the shared core than in any single host adapter
 
 ## Scope
 
