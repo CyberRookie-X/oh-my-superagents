@@ -30,6 +30,7 @@ const CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string>
   sync: "Sync OMS artifacts for OpenCode.",
   doctor: "Inspect OMS diagnostics for OpenCode.",
 }
+const TEMPORARY_DISABLE_COMMAND_FILE = "oms-no-superpowers.md"
 
 const RESERVED_PHASE_COMMAND_FILES = new Set(
   Object.values(PHASE_TO_COMMAND).map((commandName) => `${commandName.slice(1)}.md`),
@@ -129,6 +130,34 @@ export function renderControlPlaneCommandFile(input: {
     `Run \`oh-my-superagents ${input.logicalCommand} --host opencode $ARGUMENTS\` from the repository root.`,
     "",
   ].join("\n")
+}
+
+function renderTemporaryDisableHelperFile() {
+  return [
+    "---",
+    `description: ${yamlScalar("Temporarily disable superpowers for this conversation.")}`,
+    "---",
+    "",
+    MARKER,
+    "",
+    "Tell the assistant:",
+    "- do not use superpowers in this conversation",
+    "- do not proactively load superpowers skills, workflows, or phase agents",
+    "- Only use superpowers again if I explicitly ask",
+    "",
+    "Extra instruction: $ARGUMENTS",
+    "",
+  ].join("\n")
+}
+
+function buildTemporaryDisableHelperArtifact(): GeneratedArtifact {
+  return {
+    kind: "command",
+    directory: ".opencode/commands",
+    fileName: TEMPORARY_DISABLE_COMMAND_FILE,
+    ownerPrefix: "oms-",
+    content: renderTemporaryDisableHelperFile(),
+  }
 }
 
 export function listRenderedOpenCodeControlPlaneCommands(settings: OpenCodeControlPlaneSettings) {
@@ -245,6 +274,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
 
   if (controlPlaneSettings) {
     commands.push(...buildControlPlaneCommandArtifacts(controlPlaneSettings))
+    commands.push(buildTemporaryDisableHelperArtifact())
   }
 
   return {
