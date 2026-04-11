@@ -23,21 +23,23 @@ const PHASE_TO_SKILL = {
 } as const satisfies Record<BuiltInPhase, string>
 
 const EFFORT_TO_CODEX = {
-  fast: { reasoningEffort: "low", serviceTier: "fast" },
+  fast: { reasoningEffort: "low" },
   balanced: { reasoningEffort: "medium" },
   deep: { reasoningEffort: "high" },
   max: { reasoningEffort: "xhigh" },
 } as const
 
-function getCodexEffortConfig(effort?: "fast" | "balanced" | "deep" | "max") {
-  if (!effort) {
-    return undefined
-  }
+function getCodexEffortConfig(selection: {
+  effort?: "fast" | "balanced" | "deep" | "max"
+  codexFast?: boolean
+}) {
+  const reasoningEffort = selection.effort
+    ? EFFORT_TO_CODEX[selection.effort].reasoningEffort
+    : undefined
 
-  const config = EFFORT_TO_CODEX[effort]
   return {
-    reasoningEffort: config.reasoningEffort,
-    serviceTier: "serviceTier" in config ? config.serviceTier : undefined,
+    reasoningEffort,
+    serviceTier: selection.codexFast || selection.effort === "fast" ? "fast" : undefined,
   }
 }
 
@@ -69,7 +71,7 @@ export function renderCodexAgentFile(input: {
 
 export function explainCodexPhase(config: RouterConfig, phase: BuiltInPhase) {
   const resolved = resolvePhase(config, phase)
-  const codexEffort = getCodexEffortConfig(resolved.selection.effort)
+  const codexEffort = getCodexEffortConfig(resolved.selection)
 
   return {
     phase,
@@ -92,7 +94,7 @@ export function buildCodexArtifacts(config: RouterConfig) {
 
   for (const phase of BUILT_IN_PHASES) {
     const resolved = resolvePhase(config, phase)
-    const codexEffort = getCodexEffortConfig(resolved.selection.effort)
+    const codexEffort = getCodexEffortConfig(resolved.selection)
     const agentName = PHASE_TO_CODEX_AGENT[phase]
     const skillName = PHASE_TO_SKILL[phase]
 

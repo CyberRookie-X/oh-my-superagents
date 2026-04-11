@@ -63,7 +63,8 @@ export function buildStarterCodexConfig() {
       },
       build: {
         model: "gpt-5.3-codex-spark",
-        effort: "fast",
+        effort: "balanced",
+        codexFast: true,
       },
     },
     routes: {

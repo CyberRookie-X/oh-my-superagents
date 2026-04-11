@@ -61,4 +61,28 @@ describe("buildCodexArtifacts", () => {
     const review = artifacts.agents.find((item) => item.fileName === "oms-review.toml")
     expect(review?.content).toContain('model_reasoning_effort = "xhigh"')
   })
+
+  it("enables native Codex fast tier when codexFast is true without changing deep effort", () => {
+    const artifacts = buildCodexArtifacts({
+      profiles: { build: { model: "gpt-5.4", effort: "deep", codexFast: true } },
+      routes: {},
+      defaultRoute: "build",
+    })
+
+    const agent = artifacts.agents.find((item) => item.fileName === "oms-plan.toml")
+    expect(agent?.content).toContain('model_reasoning_effort = "high"')
+    expect(agent?.content).toContain('service_tier = "fast"')
+  })
+
+  it("preserves existing Codex fast behavior for legacy effort-fast profiles", () => {
+    const artifacts = buildCodexArtifacts({
+      profiles: { build: { model: "gpt-5.4", effort: "fast" } },
+      routes: {},
+      defaultRoute: "build",
+    })
+
+    const agent = artifacts.agents.find((item) => item.fileName === "oms-plan.toml")
+    expect(agent?.content).toContain('model_reasoning_effort = "low"')
+    expect(agent?.content).toContain('service_tier = "fast"')
+  })
 })

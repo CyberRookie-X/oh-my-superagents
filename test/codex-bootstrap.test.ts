@@ -128,6 +128,8 @@ describe("buildStarterCodexConfig", () => {
     expect(result.path).toBe("oh-my-superagents.config.jsonc")
     expect(result.content).toContain('"model": "gpt-5.4"')
     expect(result.content).toContain('"model": "gpt-5.3-codex-spark"')
+    expect(result.content).toContain('"codexFast": true')
+    expect(result.content).not.toContain('"effort": "fast"')
     expect(result.content).toContain('"defaultRoute": "build"')
   })
 })
