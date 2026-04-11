@@ -32,6 +32,8 @@ export type BuiltInPhase = (typeof BUILT_IN_PHASES)[number]
 export type ResolvedRoute = {
   phaseId: BuiltInPhase
   profileId: string
+  routeSource: "preset-route" | "lane-route" | "lane-default" | "preset-default"
+  effectiveLane?: string
   selection: {
     model: string
     variant?: string
@@ -42,8 +44,35 @@ export type ResolvedRoute = {
   description: string
 }
 
-export function resolvePhase(config: RouterConfig, phase: BuiltInPhase): ResolvedRoute {
-  const profileId = config.routes[phase] ?? config.defaultRoute
+type LaneContext = {
+  effectiveLane?: string
+}
+
+type LaneAwareRouterConfig = RouterConfig & {
+  lanes?: Record<
+    string,
+    {
+      routes: Record<string, string>
+      defaultRoute: string
+    }
+  >
+}
+
+export function resolvePhase(config: RouterConfig, phase: BuiltInPhase, laneContext: LaneContext = {}): ResolvedRoute {
+  const effectiveLane = laneContext.effectiveLane
+  const lane = effectiveLane ? (config as LaneAwareRouterConfig).lanes?.[effectiveLane] : undefined
+
+  const presetRoute = config.routes[phase]
+  const laneRoute = lane?.routes[phase]
+  const laneDefaultRoute = lane?.defaultRoute
+  const profileId = presetRoute ?? laneRoute ?? laneDefaultRoute ?? config.defaultRoute
+  const routeSource = presetRoute
+    ? "preset-route"
+    : laneRoute
+      ? "lane-route"
+      : laneDefaultRoute
+        ? "lane-default"
+        : "preset-default"
 
   if (!profileId) {
     throw new Error(`No route configured for phase: ${phase}`)
@@ -57,6 +86,8 @@ export function resolvePhase(config: RouterConfig, phase: BuiltInPhase): Resolve
   return {
     phaseId: phase,
     profileId,
+    routeSource,
+    effectiveLane,
     selection: {
       model: profile.model,
       effort: profile.effort,
@@ -64,16 +95,18 @@ export function resolvePhase(config: RouterConfig, phase: BuiltInPhase): Resolve
       temperature: profile.temperature,
       variant: profile.variant ?? (profile.effort ? EFFORT_TO_VARIANT[profile.effort] : undefined),
     },
-    description: `${phase} routed to ${profileId}`,
+    description: `${phase} routed to ${profileId} via ${routeSource}`,
   }
 }
 
-export function explainPhase(config: RouterConfig, phase: BuiltInPhase) {
-  const resolved = resolvePhase(config, phase)
+export function explainPhase(config: RouterConfig, phase: BuiltInPhase, laneContext: LaneContext = {}) {
+  const resolved = resolvePhase(config, phase, laneContext)
 
   return {
     phase,
     profileId: resolved.profileId,
+    effectiveLane: resolved.effectiveLane,
+    routeSource: resolved.routeSource,
     model: resolved.selection.model,
     variant: resolved.selection.variant,
     commandName: PHASE_TO_COMMAND[phase],
@@ -81,6 +114,6 @@ export function explainPhase(config: RouterConfig, phase: BuiltInPhase) {
   }
 }
 
-export function explainAll(config: RouterConfig) {
-  return BUILT_IN_PHASES.map((phase) => explainPhase(config, phase))
+export function explainAll(config: RouterConfig, laneContext: LaneContext = {}) {
+  return BUILT_IN_PHASES.map((phase) => explainPhase(config, phase, laneContext))
 }

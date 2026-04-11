@@ -17,8 +17,45 @@ describe("resolvePhase", () => {
     expect(resolvePhase(config, "brainstorming").profileId).toBe("review")
   })
 
+  it("routes through the effective lane before falling back to preset defaultRoute", () => {
+    const laneAwareConfig = {
+      profiles: {
+        "frontend-strategy": { model: "frontend-model", effort: "deep" as const },
+        "frontend-build": { model: "frontend-build-model" },
+        "backend-build": { model: "backend-model" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { brainstorming: "frontend-strategy" },
+          defaultRoute: "frontend-build",
+        },
+      },
+      routes: {},
+      defaultRoute: "backend-build",
+    }
+
+    expect(resolvePhase(laneAwareConfig as never, "brainstorming", { effectiveLane: "frontend" }).profileId).toBe(
+      "frontend-strategy",
+    )
+    expect(resolvePhase(laneAwareConfig as never, "writing-plans", { effectiveLane: "frontend" }).profileId).toBe(
+      "frontend-build",
+    )
+  })
+
   it("falls back to default route for other built-in phases", () => {
     expect(resolvePhase(config, "webapp-testing").profileId).toBe("build")
+  })
+
+  it("falls back to preset defaultRoute when there is no effective lane", () => {
+    const laneAwareConfig = {
+      profiles: { build: { model: "openai/gpt-5" } },
+      lanes: {},
+      routes: {},
+      defaultRoute: "build",
+    }
+
+    expect(resolvePhase(laneAwareConfig as never, "writing-plans").profileId).toBe("build")
   })
 
   it("keeps effort and codexFast as independent resolved route properties", () => {
@@ -51,6 +88,30 @@ describe("explainPhase", () => {
       agentName: "spr-review",
       model: "openai/gpt-5",
       variant: "medium",
+    })
+  })
+
+  it("includes lane metadata when routing through an effective lane", () => {
+    const laneAwareConfig = {
+      profiles: {
+        "frontend-build": { model: "frontend-build-model" },
+        "backend-build": { model: "backend-model" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: {},
+          defaultRoute: "frontend-build",
+        },
+      },
+      routes: {},
+      defaultRoute: "backend-build",
+    }
+
+    expect(explainPhase(laneAwareConfig as never, "writing-plans", { effectiveLane: "frontend" })).toMatchObject({
+      profileId: "frontend-build",
+      effectiveLane: "frontend",
+      routeSource: "lane-default",
     })
   })
 })
