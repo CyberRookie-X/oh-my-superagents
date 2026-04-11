@@ -17,7 +17,7 @@ import {
   readControlPlaneSourceDocument,
   resolvePresetReuse,
 } from "./config.js"
-import type { BuiltInPhase } from "./router.js"
+import { resolvePhase, type BuiltInPhase } from "./router.js"
 import type { SuperpowersCompatibilityResult, SupportedSuperpowersHost } from "./superpowers-compatibility.js"
 
 const READ_ONLY_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "doctor"])
@@ -52,6 +52,10 @@ export type ResolvedControlPlane = {
     activePresetDefinition?: { path: string; preset: ControlPlanePreset }
     parentPresetDefinition?: { path: string; preset: ControlPlanePreset }
   }
+  layers?: Array<{
+    path: string
+    config: LayeredControlPlaneConfigInput
+  }>
   laneState: {
     allowedLanes: string[]
     presetDefaultLane?: string
@@ -222,30 +226,79 @@ export function buildControlPlaneExplainTrace(input: {
   resolved: ResolvedControlPlane
   phase: BuiltInPhase
 }): ExplainTrace {
+  const laneState = input.resolved.laneState ?? resolveLaneState(input.resolved.config, input.resolved.activePreset)
+  const routerConfig = {
+    profiles: {
+      ...(input.resolved.config.profiles ?? {}),
+      ...(input.resolved.activePreset.preset.profiles ?? {}),
+    },
+    lanes: input.resolved.config.lanes,
+    routes: input.resolved.activePreset.preset.routes,
+    defaultRoute: input.resolved.activePreset.preset.defaultRoute,
+    effectiveLane: laneState.effectiveLane,
+    superpowersCompatibility: input.resolved.config.settings.superpowersCompatibility,
+  }
+  const resolvedRoute = resolvePhase(routerConfig, input.phase)
   const activeDefinition = input.resolved.trace?.activePresetDefinition
   const parentDefinition = input.resolved.trace?.parentPresetDefinition
   const fallbackPath = input.resolved.source.kind === "file" ? input.resolved.source.path : undefined
-  const selectedProfileId = input.resolved.activePreset.preset.routes[input.phase] ?? input.resolved.activePreset.preset.defaultRoute
-  const decisivePath = activeDefinition?.preset.routes[input.phase]
-    ? activeDefinition.path
-    : parentDefinition?.preset.routes[input.phase]
-      ? parentDefinition.path
+  const selectedProfileId = resolvedRoute.profileId
+  const laneDefinition = laneState.effectiveLane
+    ? resolveLaneDefinitionFromLayers(input.resolved.layers ?? [], laneState.effectiveLane)
+    : undefined
+  const decisivePath = resolvedRoute.routeSource === "preset-route"
+    ? activeDefinition?.preset.routes[input.phase]
+      ? activeDefinition.path
+      : parentDefinition?.preset.routes[input.phase]
+        ? parentDefinition.path
+        : activeDefinition?.path ?? fallbackPath
+    : resolvedRoute.routeSource === "lane-route" || resolvedRoute.routeSource === "lane-default"
+      ? laneDefinition?.path ?? fallbackPath
       : activeDefinition?.path ?? fallbackPath
   const selectedProfilePath = activeDefinition?.preset.profiles?.[selectedProfileId]
     ? activeDefinition.path
     : parentDefinition?.preset.profiles?.[selectedProfileId]
       ? parentDefinition.path
-      : input.resolved.config.profiles?.[selectedProfileId]
-        ? fallbackPath
-        : undefined
+      : resolveTopLevelProfileDefinitionFromLayers(input.resolved.layers ?? [], selectedProfileId)?.path
+        ?? (input.resolved.config.profiles?.[selectedProfileId] ? fallbackPath : undefined)
 
   return {
-    routeSource: input.resolved.activePreset.preset.routes[input.phase] ? "explicit_route" : "default_route",
+    routeSource: resolvedRoute.routeSource === "preset-route" ? "explicit_route" : "default_route",
     configSource: input.resolved.source.kind === "default"
       ? "default"
       : chooseMostLocalConfigSource([decisivePath, selectedProfilePath], input.cwd),
     reuseRelationship: input.resolved.activePreset.preset.extends ? "extends" : "none",
   }
+}
+
+function resolveLaneDefinitionFromLayers(
+  layers: Array<{ path: string; config: LayeredControlPlaneConfigInput }>,
+  laneKey: string,
+) {
+  for (let index = layers.length - 1; index >= 0; index -= 1) {
+    const layer = layers[index]!
+    const lane = layer.config.lanes?.[laneKey]
+    if (lane) {
+      return { path: layer.path, lane }
+    }
+  }
+
+  return undefined
+}
+
+function resolveTopLevelProfileDefinitionFromLayers(
+  layers: Array<{ path: string; config: LayeredControlPlaneConfigInput }>,
+  profileKey: string,
+) {
+  for (let index = layers.length - 1; index >= 0; index -= 1) {
+    const layer = layers[index]!
+    const profile = layer.config.profiles?.[profileKey]
+    if (profile) {
+      return { path: layer.path, profile }
+    }
+  }
+
+  return undefined
 }
 
 export function summarizeRoutingValidation(
@@ -758,6 +811,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       },
       config: loaded.config,
       activePreset,
+      layers: loaded.layers,
       laneState,
       trace: {
         activePresetDefinition,
@@ -784,6 +838,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       },
       config,
       activePreset,
+      layers: [],
       laneState,
     }
   }

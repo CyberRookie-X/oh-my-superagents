@@ -2,6 +2,7 @@ import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { runCli } from "../src/cli.js"
 import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-plane.js"
+import { explainCodexPhase } from "../src/codex.js"
 import { MARKER_TEXT } from "../src/opencode.js"
 import { explainPhase } from "../src/router.js"
 
@@ -564,6 +565,74 @@ describe("runCli", () => {
     expect(output.runtimeLane).toBe("frontend")
   })
 
+  it("applies --lane in codex explain when laneSelection.mode is auto", async () => {
+    const laneAwareControlPlaneConfig = {
+      ...controlPlaneConfig,
+      settings: {
+        ...controlPlaneConfig.settings,
+        laneSelection: { mode: "auto" as const },
+      },
+      profiles: {
+        "frontend-strategy": {
+          model: "gpt-5.4",
+          effort: "deep" as const,
+        },
+        build: { model: "gpt-5.4-mini" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { brainstorming: "frontend-strategy" },
+          defaultRoute: "build",
+        },
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          profiles: undefined,
+          usesLanes: ["frontend"],
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    const result = await runCli(["explain", "--host", "codex", "--phase", "brainstorming", "--lane", "frontend"], createCliDeps({
+      explainPhaseForHost: (config: any, host: "opencode" | "codex", phase: any) => (
+        host === "codex" ? explainCodexPhase(config, phase) : explainPhase(config, phase)
+      ),
+      resolveControlPlane: async (input: { runtimeLane?: string }) => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: laneAwareControlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: laneAwareControlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend"],
+          defaultLane: undefined,
+          presetDefaultLane: undefined,
+          effectiveLane: input.runtimeLane,
+          runtimeLane: input.runtimeLane,
+          mode: "auto" as const,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.profileId).toBe("frontend-strategy")
+    expect(output.model).toBe("gpt-5.4")
+    expect(output.effectiveLane).toBe("frontend")
+  })
+
   it("includes lane diagnostics in explain output", async () => {
     const laneAwareControlPlaneConfig = {
       ...controlPlaneConfig,
@@ -907,6 +976,69 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(output.configSource).toBe("project")
     expect(output.reuseRelationship).toBe("extends")
+  })
+
+  it("attributes configSource to the lane route and selected profile winner", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "profiles": {
+          "frontend-strategy": { "model": "anthropic/claude-sonnet-4-5-20250929", "variant": "high" },
+          "build": { "model": "openai/gpt-5", "effort": "balanced" }
+        },
+        "lanes": {
+          "frontend": {
+            "label": "Frontend",
+            "routes": {
+              "brainstorming": "frontend-strategy"
+            },
+            "defaultRoute": "build"
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "default",
+          "laneSelection": { "mode": "auto" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["frontend"],
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming", "--lane", "frontend"], createCliDeps({
+      explainPhaseForHost: (config: any, host: "opencode" | "codex", phase: any) => (
+        host === "opencode" ? explainPhase(config, phase) : explainCodexPhase(config, phase)
+      ),
+      resolveControlPlane: async () => resolveOmsControlPlane({
+        command: "status",
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        exists: createExists(files),
+        readFile: createReadFile(files),
+        runtimeLane: "frontend",
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.profileId).toBe("frontend-strategy")
+    expect(output.configSource).toBe("global")
   })
 
   it("includes compatibility warning text and continues in warn-mode sync", async () => {

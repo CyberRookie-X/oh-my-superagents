@@ -1095,7 +1095,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
     if (command === "explain") {
       const loaded = await deps.loadConfig({ cwd, explicitPath })
-      const resolved = host === "opencode"
+      const resolved = host === "opencode" || (host === "codex" && runtimeLane)
         ? await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
         : null
 
