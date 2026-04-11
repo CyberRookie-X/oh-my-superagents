@@ -214,14 +214,16 @@ export function buildControlPlaneExplainTrace(input: {
 export function summarizeRoutingValidation(
   config: ControlPlaneConfig,
   presetKey: string,
+  localPresetDefinition?: ControlPlanePreset,
 ): RoutingValidationSummary {
   const preset = config.presets[presetKey]
   if (!preset) {
     throw new Error(`Unknown preset: ${presetKey}`)
   }
 
-  const explicitRoutedPhases = BUILT_IN_PHASES.filter((phase) => phase in preset.routes)
-  const defaultRoutedPhases = BUILT_IN_PHASES.filter((phase) => !(phase in preset.routes))
+  const explicitRouteSource = localPresetDefinition ?? preset
+  const explicitRoutedPhases = BUILT_IN_PHASES.filter((phase) => phase in explicitRouteSource.routes)
+  const defaultRoutedPhases = BUILT_IN_PHASES.filter((phase) => !(phase in explicitRouteSource.routes))
   const usedProfiles = new Set<string>([preset.defaultRoute, ...Object.values(preset.routes)])
   const reuseRelationship: RoutingValidationSummary["reuseRelationship"] = preset.extends
     ? {

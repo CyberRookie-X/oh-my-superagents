@@ -602,10 +602,11 @@ async function discoverOwnedArtifacts(
   cwd: string,
   host: CliHost,
   deps: CliDeps,
-): Promise<{ paths: string[]; warnings: string[]; specialPresent: string[] }> {
+): Promise<{ paths: string[]; warnings: string[]; specialPresent: string[]; unverifiedDirectories: string[] }> {
   const discovered = new Set<string>()
   const warnings: string[] = []
   const specialPresent = new Set<string>()
+  const unverifiedDirectories = new Set<string>()
 
   for (const rule of OWNED_ARTIFACT_RULES[host]) {
     const directory = path.join(cwd, rule.directory)
@@ -616,6 +617,7 @@ async function discoverOwnedArtifacts(
     } catch (error) {
       if (!isMissingFsError(error)) {
         warnings.push(`Failed to scan OMS-owned artifact directory ${directory}: ${error instanceof Error ? error.message : String(error)}`)
+        unverifiedDirectories.add(directory)
       }
       continue
     }
@@ -674,6 +676,7 @@ async function discoverOwnedArtifacts(
     paths: [...discovered].sort(),
     warnings,
     specialPresent: [...specialPresent].sort(),
+    unverifiedDirectories: [...unverifiedDirectories].sort(),
   }
 }
 
@@ -683,6 +686,7 @@ async function inspectArtifacts(cwd: string, filePaths: string[], host: CliHost,
   const specialPaths = new Set(host === "codex" ? [path.join(cwd, CODEX_MARKETPLACE_PATH)] : [])
   const expectedSet = new Set(filePaths)
   const ownedPresent = new Set([...discovered.paths, ...discovered.specialPresent])
+  const unverifiedDirectories = new Set(discovered.unverifiedDirectories)
   const expectedPresent = states
     .filter((state) => {
       if (specialPaths.has(state.filePath)) {
@@ -690,7 +694,7 @@ async function inspectArtifacts(cwd: string, filePaths: string[], host: CliHost,
       }
 
       if (host === "opencode") {
-        return state.present && ownedPresent.has(state.filePath)
+        return state.present && (ownedPresent.has(state.filePath) || unverifiedDirectories.has(path.dirname(state.filePath)))
       }
 
       return state.present
@@ -937,7 +941,11 @@ async function buildControlPlaneDoctor(
     ...(artifactSummary ? { artifactSummary } : {}),
     ...(host === "opencode"
       ? {
-          routing: summarizeRoutingValidation(resolved.config, resolved.activePreset.key),
+          routing: summarizeRoutingValidation(
+            resolved.config,
+            resolved.activePreset.key,
+            resolved.trace?.activePresetDefinition?.preset,
+          ),
         }
       : {}),
   }

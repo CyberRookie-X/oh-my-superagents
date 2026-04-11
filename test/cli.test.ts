@@ -1901,6 +1901,65 @@ describe("runCli", () => {
     })
   })
 
+  it("treats inherited routes as default-routed in the child doctor view when the child has no local override", async () => {
+    const localChildPreset = {
+      ...controlPlaneConfig.presets.default,
+      label: "Child",
+      short: "child",
+      extends: "default",
+      routes: {},
+    }
+    const resolvedChildPreset = {
+      ...localChildPreset,
+      routes: {
+        brainstorming: "strategy",
+      },
+    }
+    const routedConfig = {
+      ...controlPlaneConfig,
+      settings: {
+        ...controlPlaneConfig.settings,
+        activePreset: "child",
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        child: resolvedChildPreset,
+      },
+    }
+
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: routedConfig,
+        activePreset: {
+          key: "child",
+          preset: resolvedChildPreset,
+        },
+        trace: {
+          activePresetDefinition: {
+            path: "/workspace/project/oh-my-superagents.config.jsonc",
+            preset: localChildPreset,
+          },
+          parentPresetDefinition: {
+            path: "/workspace/project/oh-my-superagents.config.jsonc",
+            preset: controlPlaneConfig.presets.default,
+          },
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.routing.explicitRoutedPhases).toEqual([])
+    expect(output.routing.defaultRoutedPhases).toContain("brainstorming")
+  })
+
   it("includes a discovery warning in status output when an owned-path scan fails", async () => {
     const result = await runCli(["status", "--host", "opencode"], createCliDeps({
       readdir: async (directory: string) => {
@@ -1918,6 +1977,51 @@ describe("runCli", () => {
     expect(parsed.artifacts.discoveryWarnings).toEqual([
       expect.stringContaining(".opencode/commands"),
     ])
+  })
+
+  it("does not report artifact drift from a discovery warning alone when expected OpenCode files still exist", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      ...createArtifactFs({
+        "/workspace/project/.opencode/agents/spr-build.md": renderOwnedMarkdownArtifact("spr-build"),
+        "/workspace/project/.opencode/commands/oms-sync.md": renderOwnedMarkdownArtifact("oms-sync"),
+      }),
+      buildArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".opencode/agents",
+            fileName: "spr-build.md",
+            ownerPrefix: "spr-",
+            content: "",
+          },
+        ],
+        commands: [
+          {
+            kind: "command" as const,
+            directory: ".opencode/commands",
+            fileName: "oms-sync.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+      }),
+      readdir: async (directory: string) => {
+        if (directory === "/workspace/project/.opencode/commands") {
+          throw new Error("EACCES: cannot scan commands")
+        }
+
+        return defaultArtifactFs.readdir(directory)
+      },
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.artifacts.discoveryWarnings).toEqual([
+      expect.stringContaining(".opencode/commands"),
+    ])
+    expect(output.artifactSummary.missing).toEqual([])
+    expect(output.state.code).toBe("healthy")
   })
 
   it("reports stale OMS-owned files even when they are outside the current generated inventory", async () => {
