@@ -1065,6 +1065,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         written: string[]
         removed: string[]
         changed: boolean
+        source: ReturnType<typeof formatControlPlaneSource>
         activePreset: {
           key: string
           label: string
@@ -1085,13 +1086,14 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           written: [prepared.path, ...result.written],
           removed: result.removed,
           changed,
+          source: formatControlPlaneSource(resolved),
           activePreset: {
             key: nextPreset,
             label: activePreset.label,
             short: activePreset.short,
             ...(activePreset.description ? { description: activePreset.description } : {}),
           },
-          ...(cliHost === "opencode" && changed && result.exitCode !== 0
+          ...(cliHost === "opencode" && changed && result.exitCode === 2
             ? {
               nextAction: {
                 command: "oh-my-superagents sync --host opencode",

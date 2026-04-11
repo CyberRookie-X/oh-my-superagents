@@ -816,6 +816,12 @@ describe("runCli", () => {
 
     expect(result.exitCode).toBe(0)
     expect(output.changed).toBe(true)
+    expect(output.source).toEqual({
+      kind: "file",
+      hasRealSource: true,
+      path: "/workspace/project/oh-my-superagents.config.jsonc",
+      sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+    })
     expect(output.activePreset.key).toBe("review")
     expect(output.nextAction).toBeUndefined()
   })
@@ -884,6 +890,22 @@ describe("runCli", () => {
 
     expect(result.exitCode).toBe(2)
     expect(output.nextAction.command).toBe("oh-my-superagents sync --host opencode")
+  })
+
+  it("does not recommend a blind sync retry after use when OpenCode refresh fails hard", async () => {
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      materializeArtifacts: async () => ({
+        exitCode: 1 as const,
+        warnings: ["materialization failed"],
+        written: [],
+        removed: [],
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(1)
+    expect(output.nextAction).toBeUndefined()
   })
 
   it("rejects an unknown preset in use", async () => {
