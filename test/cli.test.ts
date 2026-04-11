@@ -2251,6 +2251,7 @@ describe("runCli", () => {
       "/workspace/project/.codex/agents/oms-review.toml",
       "/workspace/project/plugins/oh-my-superagents-codex/skills/oms-sync/SKILL.md",
     ]))
+    expect(parsed.routeImpact).toBeUndefined()
     expect(persistedFiles.get("/workspace/project/.agents/plugins/marketplace.json")).toContain("oh-my-superagents-codex")
   })
 

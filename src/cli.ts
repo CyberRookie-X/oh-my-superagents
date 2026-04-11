@@ -1100,7 +1100,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           artifacts: await getArtifactsForHost(cwd, toRouterConfig(prepared.config), cliHost, deps, prepared.config.settings),
           fs: nodeFs,
         })
-      const routeImpact = buildUseRouteImpact(resolved.config, prepared.config)
+      const routeImpact = cliHost === "opencode"
+        ? buildUseRouteImpact(resolved.config, prepared.config)
+        : undefined
       const artifactsDiffer = result.exitCode !== 0
       const payload: {
         exitCode: 0 | 1 | 2
@@ -1110,7 +1112,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         changed: boolean
         source: ReturnType<typeof formatControlPlaneSource>
         artifactsDiffer: boolean
-        routeImpact: {
+        routeImpact?: {
           changedPhases: BuiltInPhase[]
         }
         activePreset: {
@@ -1135,7 +1137,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           changed,
           source: formatPostWriteControlPlaneSource(resolved, prepared),
           artifactsDiffer,
-          routeImpact,
+          ...(routeImpact ? { routeImpact } : {}),
           activePreset: {
             key: nextPreset,
             label: activePreset.label,
