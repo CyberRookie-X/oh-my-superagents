@@ -66,6 +66,7 @@ describe("buildCodexBootstrapFiles", () => {
       "plugins/oh-my-superagents-codex/skills/oms-sy/SKILL.md",
       "plugins/oh-my-superagents-codex/skills/oms-doctor/SKILL.md",
       "plugins/oh-my-superagents-codex/skills/oms-dr/SKILL.md",
+      "plugins/oh-my-superagents-codex/skills/oms-no-superpowers/SKILL.md",
     ])
 
     const marketplace = result.files.find((file) => file.path === ".agents/plugins/marketplace.json")
@@ -138,6 +139,25 @@ describe("buildCodexBootstrapFiles", () => {
     expect(syncSkill?.content).toContain(
       "npx oh-my-superagents sync --host codex --config 'configs/with spaces/oh-my-superagents.config.jsonc' $ARGUMENTS",
     )
+  })
+
+  it("adds a fixed Codex helper skill for temporarily disabling superpowers", () => {
+    const result = buildCodexBootstrapFiles({
+      packageVersion: "0.1.0",
+      includeConfig: false,
+      controlPlaneSettings: createDefaultControlPlaneConfig().settings,
+    })
+
+    const helper = result.files.find(
+      (file) => file.path === "plugins/oh-my-superagents-codex/skills/oms-no-superpowers/SKILL.md",
+    )
+
+    expect(helper?.content).toContain("name: oms-no-superpowers")
+    expect(helper?.content).toContain("do not use superpowers in this conversation")
+    expect(helper?.content).toContain("do not proactively load superpowers skills, workflows, or phase agents")
+    expect(helper?.content).toContain("only use superpowers again if I explicitly ask")
+    expect(helper?.content).toContain("Extra instruction: $ARGUMENTS")
+    expect(helper?.content).not.toContain("oh-my-superagents disable --host codex")
   })
 
   it("rejects duplicate rendered Codex skill names across primary names and aliases", () => {

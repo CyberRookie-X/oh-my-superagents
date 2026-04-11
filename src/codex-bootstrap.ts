@@ -259,6 +259,25 @@ function buildControlPlaneSkillFiles(
   })
 }
 
+function buildTemporaryDisableSkill(): CodexBootstrapFile {
+  return {
+    path: "plugins/oh-my-superagents-codex/skills/oms-no-superpowers/SKILL.md",
+    content: `---
+name: oms-no-superpowers
+description: Temporarily disable superpowers for this conversation.
+---
+
+<!-- generated-by: oh-my-superagents; do-not-edit: true -->
+Tell the assistant:
+- do not use superpowers in this conversation
+- do not proactively load superpowers skills, workflows, or phase agents
+- only use superpowers again if I explicitly ask
+
+Extra instruction: $ARGUMENTS
+`,
+  }
+}
+
 export function buildCodexBootstrapFiles(input: {
   packageVersion: string
   includeConfig: boolean
@@ -279,6 +298,7 @@ export function buildCodexBootstrapFiles(input: {
       content: buildPluginManifest(input.packageVersion, controlPlaneSettings),
     },
     ...controlPlaneSkillFiles,
+    buildTemporaryDisableSkill(),
   ]
 
   if (input.includeConfig) {
