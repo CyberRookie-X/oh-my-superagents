@@ -2024,6 +2024,53 @@ describe("runCli", () => {
     expect(output.state.code).toBe("healthy")
   })
 
+  it("does not report artifact drift from a per-file inspection warning when an expected OpenCode file still exists", async () => {
+    const artifactFs = createArtifactFs({
+      "/workspace/project/.opencode/agents/spr-build.md": renderOwnedMarkdownArtifact("spr-build"),
+      "/workspace/project/.opencode/commands/oms-sync.md": renderOwnedMarkdownArtifact("oms-sync"),
+    })
+
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      ...artifactFs,
+      buildArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".opencode/agents",
+            fileName: "spr-build.md",
+            ownerPrefix: "spr-",
+            content: "",
+          },
+        ],
+        commands: [
+          {
+            kind: "command" as const,
+            directory: ".opencode/commands",
+            fileName: "oms-sync.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+      }),
+      artifactStat: async (filePath: string) => {
+        if (filePath === "/workspace/project/.opencode/commands/oms-sync.md") {
+          throw new Error("EACCES: cannot inspect command file")
+        }
+
+        return artifactFs.artifactStat(filePath)
+      },
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.artifacts.discoveryWarnings).toEqual([
+      expect.stringContaining("oms-sync.md"),
+    ])
+    expect(output.artifactSummary.missing).toEqual([])
+    expect(output.state.code).toBe("healthy")
+  })
+
   it("reports stale OMS-owned files even when they are outside the current generated inventory", async () => {
     const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
       ...createArtifactFs({

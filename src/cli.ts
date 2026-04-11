@@ -602,11 +602,18 @@ async function discoverOwnedArtifacts(
   cwd: string,
   host: CliHost,
   deps: CliDeps,
-): Promise<{ paths: string[]; warnings: string[]; specialPresent: string[]; unverifiedDirectories: string[] }> {
+): Promise<{
+  paths: string[]
+  warnings: string[]
+  specialPresent: string[]
+  unverifiedDirectories: string[]
+  unverifiedFiles: string[]
+}> {
   const discovered = new Set<string>()
   const warnings: string[] = []
   const specialPresent = new Set<string>()
   const unverifiedDirectories = new Set<string>()
+  const unverifiedFiles = new Set<string>()
 
   for (const rule of OWNED_ARTIFACT_RULES[host]) {
     const directory = path.join(cwd, rule.directory)
@@ -644,6 +651,7 @@ async function discoverOwnedArtifacts(
       } catch (error) {
         if (!isMissingFsError(error)) {
           warnings.push(`Failed to inspect OMS-owned artifact ${filePath}: ${error instanceof Error ? error.message : String(error)}`)
+          unverifiedFiles.add(filePath)
         }
         continue
       }
@@ -677,6 +685,7 @@ async function discoverOwnedArtifacts(
     warnings,
     specialPresent: [...specialPresent].sort(),
     unverifiedDirectories: [...unverifiedDirectories].sort(),
+    unverifiedFiles: [...unverifiedFiles].sort(),
   }
 }
 
@@ -687,6 +696,7 @@ async function inspectArtifacts(cwd: string, filePaths: string[], host: CliHost,
   const expectedSet = new Set(filePaths)
   const ownedPresent = new Set([...discovered.paths, ...discovered.specialPresent])
   const unverifiedDirectories = new Set(discovered.unverifiedDirectories)
+  const unverifiedFiles = new Set(discovered.unverifiedFiles)
   const expectedPresent = states
     .filter((state) => {
       if (specialPaths.has(state.filePath)) {
@@ -694,7 +704,11 @@ async function inspectArtifacts(cwd: string, filePaths: string[], host: CliHost,
       }
 
       if (host === "opencode") {
-        return state.present && (ownedPresent.has(state.filePath) || unverifiedDirectories.has(path.dirname(state.filePath)))
+        return state.present && (
+          ownedPresent.has(state.filePath)
+          || unverifiedDirectories.has(path.dirname(state.filePath))
+          || unverifiedFiles.has(state.filePath)
+        )
       }
 
       return state.present
