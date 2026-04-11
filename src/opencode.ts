@@ -31,6 +31,7 @@ const CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string>
   doctor: "Inspect OMS diagnostics for OpenCode.",
 }
 const TEMPORARY_DISABLE_COMMAND_FILE = "oms-no-superpowers.md"
+const TEMPORARY_DISABLE_COMMAND_OWNER_PREFIX = TEMPORARY_DISABLE_COMMAND_FILE
 
 const RESERVED_PHASE_COMMAND_FILES = new Set(
   Object.values(PHASE_TO_COMMAND).map((commandName) => `${commandName.slice(1)}.md`),
@@ -143,9 +144,9 @@ function renderTemporaryDisableHelperFile() {
     "Tell the assistant:",
     "- do not use superpowers in this conversation",
     "- do not proactively load superpowers skills, workflows, or phase agents",
-    "- Only use superpowers again if I explicitly ask",
+    "- only use superpowers again if I explicitly ask",
     "",
-    "Extra instruction: $ARGUMENTS",
+    "You can add extra freeform arguments via $ARGUMENTS.",
     "",
   ].join("\n")
 }
@@ -155,7 +156,7 @@ function buildTemporaryDisableHelperArtifact(): GeneratedArtifact {
     kind: "command",
     directory: ".opencode/commands",
     fileName: TEMPORARY_DISABLE_COMMAND_FILE,
-    ownerPrefix: "oms-",
+    ownerPrefix: TEMPORARY_DISABLE_COMMAND_OWNER_PREFIX,
     content: renderTemporaryDisableHelperFile(),
   }
 }
@@ -185,6 +186,10 @@ function buildControlPlaneCommandArtifacts(settings: OpenCodeControlPlaneSetting
 
       if (RESERVED_PHASE_COMMAND_FILES.has(fileName)) {
         throw new Error(`OMS command file collides with reserved OpenCode phase command: ${fileName}`)
+      }
+
+      if (fileName === TEMPORARY_DISABLE_COMMAND_FILE) {
+        throw new Error(`OMS command file collides with fixed OpenCode helper command: ${fileName}`)
       }
 
       const existingCommand = seenFileNames.get(fileName)

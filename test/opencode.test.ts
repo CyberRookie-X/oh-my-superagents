@@ -247,7 +247,7 @@ describe("buildArtifacts", () => {
     ).toThrow(/duplicate|unique|status/i)
   })
 
-  it("renders a fixed OpenCode helper command for temporarily disabling superpowers", () => {
+  it("renders a fixed OpenCode helper command with the required temporary-disable wording", () => {
     const artifacts = buildArtifactsWithControlPlane(
       createRouterConfig(),
       createDefaultControlPlaneConfig().settings,
@@ -256,13 +256,24 @@ describe("buildArtifacts", () => {
     const helper = artifacts.commands.find((item) => item.fileName === "oms-no-superpowers.md")
 
     expect(helper).toBeDefined()
-    expect(helper?.ownerPrefix).toBe("oms-")
     expect(helper?.content).toContain("do not use superpowers in this conversation")
     expect(helper?.content).toContain(
       "do not proactively load superpowers skills, workflows, or phase agents",
     )
-    expect(helper?.content).toContain("Only use superpowers again if I explicitly ask")
-    expect(helper?.content).toContain("Extra instruction: $ARGUMENTS")
+    expect(helper?.content).toContain("only use superpowers again if I explicitly ask")
+    expect(helper?.content).toContain("You can add extra freeform arguments via $ARGUMENTS.")
+  })
+
+  it("uses helper-specific ownership for the temporary-disable helper", () => {
+    const artifacts = buildArtifactsWithControlPlane(
+      createRouterConfig(),
+      createDefaultControlPlaneConfig().settings,
+    )
+
+    const helper = artifacts.commands.find((item) => item.fileName === "oms-no-superpowers.md")
+
+    expect(helper?.ownerPrefix).toBe("oms-no-superpowers.md")
+    expect(helper?.ownerPrefix).not.toBe("oms-")
   })
 
   it("keeps the temporary-disable helper outside the configurable control-plane command set", () => {
@@ -272,8 +283,28 @@ describe("buildArtifacts", () => {
       commandPrefix: "team",
     })
 
+    const helper = artifacts.commands.find((item) => item.fileName === "oms-no-superpowers.md")
+
     expect(artifacts.commands.map((item) => item.fileName)).toContain("oms-no-superpowers.md")
     expect(artifacts.commands.map((item) => item.fileName)).not.toContain("team-no-superpowers.md")
+    expect(helper?.ownerPrefix).toBe("oms-no-superpowers.md")
+  })
+
+  it("rejects configurable OMS commands that collide with the fixed temporary-disable helper path", () => {
+    const defaults = createDefaultControlPlaneConfig().settings
+
+    expect(() =>
+      buildArtifactsWithControlPlane(createRouterConfig(), {
+        ...defaults,
+        commands: {
+          ...defaults.commands,
+          status: {
+            name: "no-superpowers",
+            aliases: [],
+          },
+        },
+      }),
+    ).toThrow(/duplicate|collision|oms-no-superpowers/i)
   })
 })
 
