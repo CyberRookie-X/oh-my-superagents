@@ -169,6 +169,10 @@ export type LoadControlPlaneConfigInput = {
 export type LoadedControlPlaneConfig = {
   path: string
   sources: string[]
+  layers: Array<{
+    path: string
+    config: LayeredControlPlaneConfigInput
+  }>
   hasRealSource: boolean
   config: ControlPlaneConfig
 }
@@ -527,14 +531,17 @@ export async function loadControlPlaneConfig(
   }
 
   let merged: LayeredControlPlaneConfigInput | undefined
+  const layers: LoadedControlPlaneConfig["layers"] = []
   for (const filePath of sources) {
     const loaded = await readConfigFile(filePath, reader)
+    layers.push({ path: filePath, config: loaded })
     merged = merged ? mergeLayeredConfigs(merged, loaded) : loaded
   }
 
   return {
     path: sources[sources.length - 1]!,
     sources,
+    layers,
     hasRealSource: true,
     config: resolvePresetReuse(finalizeConfig(merged ?? { presets: {} })),
   }

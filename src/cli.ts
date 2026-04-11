@@ -17,7 +17,7 @@ import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex
 import { hasArtifactOwnershipMarker, materializeArtifacts } from "./materialize.js"
 import { buildArtifacts, listRenderedOpenCodeControlPlaneCommands } from "./opencode.js"
 import { buildQwenArtifacts } from "./qwen.js"
-import { explainAll, explainPhase, type BuiltInPhase } from "./router.js"
+import { explainAll, explainPhase, resolvePhase, type BuiltInPhase } from "./router.js"
 import {
   evaluateSuperpowersCompatibility,
   type SuperpowersCompatibilityMode,
@@ -211,7 +211,7 @@ function withExplainTrace(payload: Record<string, unknown>, trace: ExplainTrace)
     ...payload,
     routeSource: typeof payload.routeSource === "string" ? payload.routeSource : trace.routeSource,
     configSource: typeof payload.configSource === "string" ? payload.configSource : trace.configSource,
-    presetSource: typeof payload.presetSource === "string" ? payload.presetSource : trace.presetSource,
+    reuseRelationship: typeof payload.reuseRelationship === "string" ? payload.reuseRelationship : trace.reuseRelationship,
   }
 }
 
@@ -237,51 +237,15 @@ function buildUseRouteImpact(previous: ResolvedControlPlane["config"], next: Res
 
   return {
     changedPhases: BUILT_IN_PHASES.filter((phase) => {
-      const previousExplain = explainPhase(previousRouter, phase)
-      const nextExplain = explainPhase(nextRouter, phase)
+      const previousResolved = resolvePhase(previousRouter, phase)
+      const nextResolved = resolvePhase(nextRouter, phase)
 
       return (
-        previousExplain.profileId !== nextExplain.profileId
-        || previousExplain.model !== nextExplain.model
-        || previousExplain.variant !== nextExplain.variant
+        previousResolved.profileId !== nextResolved.profileId
+        || JSON.stringify(previousResolved.selection) !== JSON.stringify(nextResolved.selection)
       )
     }),
   }
-}
-
-function serializeArtifacts(artifacts: Awaited<ReturnType<typeof getArtifactsForHost>>) {
-  return artifacts
-    .map((artifact) => `${artifact.directory}/${artifact.fileName}\n${artifact.content}`)
-    .sort()
-}
-
-async function computeArtifactsDiffer(
-  cwd: string,
-  host: CliHost,
-  resolved: ResolvedControlPlane,
-  prepared: Awaited<ReturnType<typeof prepareControlPlaneStateWrite>>,
-  deps: CliDeps,
-) {
-  const previousArtifacts = await getArtifactsForHost(
-    cwd,
-    toRouterConfig(resolved.config),
-    host,
-    deps,
-    resolved.config.settings,
-  )
-  const nextArtifacts = await getArtifactsForHost(
-    cwd,
-    toRouterConfig(prepared.config),
-    host,
-    deps,
-    prepared.config.settings,
-  )
-
-  const previousSerialized = serializeArtifacts(previousArtifacts)
-  const nextSerialized = serializeArtifacts(nextArtifacts)
-
-  return previousSerialized.length !== nextSerialized.length
-    || previousSerialized.some((artifact, index) => artifact !== nextSerialized[index])
 }
 
 function attachExplainTrace(
@@ -1130,7 +1094,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           fs: nodeFs,
         })
       const routeImpact = buildUseRouteImpact(resolved.config, prepared.config)
-      const artifactsDiffer = await computeArtifactsDiffer(cwd, cliHost, resolved, prepared, deps)
+      const artifactsDiffer = result.exitCode !== 0
       const payload: {
         exitCode: 0 | 1 | 2
         warnings: string[]

@@ -1,6 +1,7 @@
 import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { runCli } from "../src/cli.js"
+import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-plane.js"
 import { MARKER_TEXT } from "../src/opencode.js"
 
 const baseConfig = {
@@ -223,6 +224,21 @@ function createArtifactFs(files: Record<string, string>) {
   }
 }
 
+function createExists(files: Record<string, string>) {
+  return async (filePath: string) => filePath in files
+}
+
+function createReadFile(files: Record<string, string>) {
+  return async (filePath: string) => {
+    const value = files[filePath]
+    if (value === undefined) {
+      throw new Error(`Unexpected read: ${filePath}`)
+    }
+
+    return value
+  }
+}
+
 const defaultArtifactFs = createArtifactFs({
   "/workspace/project/.opencode/agents/spr-build.md": renderOwnedMarkdownArtifact("spr-build"),
   "/workspace/project/.opencode/agents/spr-strategy.md": renderOwnedMarkdownArtifact("spr-strategy"),
@@ -400,7 +416,7 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(output.routeSource).toBe("explicit_route")
     expect(output.configSource).toBe("project")
-    expect(output.presetSource).toBe("preset_local")
+    expect(output.reuseRelationship).toBe("none")
   })
 
   it("keeps configSource rooted in the real file source when inheritance is not proven per phase", async () => {
@@ -441,7 +457,53 @@ describe("runCli", () => {
 
     expect(result.exitCode).toBe(0)
     expect(output.configSource).toBe("project")
-    expect(output.presetSource).toBe("reuse_relationship")
+    expect(output.reuseRelationship).toBe("extends")
+  })
+
+  it("reports the global layer when a project config only selects a preset but the decisive route comes from global", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "strategy": { "model": "anthropic/claude-sonnet-4-5-20250929", "variant": "high" },
+              "build": { "model": "openai/gpt-5", "effort": "balanced" }
+            },
+            "routes": {
+              "brainstorming": "strategy"
+            },
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {}
+      }`,
+    }
+
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      resolveControlPlane: async () => resolveOmsControlPlane({
+        command: "status",
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        exists: createExists(files),
+        readFile: createReadFile(files),
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.configSource).toBe("global")
+    expect(output.reuseRelationship).toBe("none")
   })
 
   it("includes compatibility warning text and continues in warn-mode sync", async () => {
@@ -883,10 +945,64 @@ describe("runCli", () => {
       path: "/workspace/project/oh-my-superagents.config.jsonc",
       sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
     })
-    expect(output.artifactsDiffer).toBe(true)
+    expect(output.artifactsDiffer).toBe(false)
     expect(output.routeImpact.changedPhases).toContain("writing-plans")
     expect(output.activePreset.key).toBe("review")
     expect(output.nextAction).toBeUndefined()
+  })
+
+  it("marks a phase as changed when only the resolved temperature changes", async () => {
+    const temperatureConfig = {
+      ...controlPlaneConfig,
+      presets: {
+        ...controlPlaneConfig.presets,
+        review: {
+          ...controlPlaneConfig.presets.review,
+          profiles: {
+            build: {
+              model: "openai/gpt-5",
+              effort: "balanced" as const,
+              temperature: 0.4,
+            },
+          },
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: temperatureConfig,
+        activePreset: {
+          key: "default",
+          preset: temperatureConfig.presets.default,
+        },
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({ settings: nextState }, null, 2),
+        config: {
+          ...temperatureConfig,
+          settings: {
+            ...temperatureConfig.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.routeImpact.changedPhases).toContain("writing-plans")
   })
 
   it("omits activePreset.description in use output when the selected preset has no description", async () => {
@@ -982,6 +1098,7 @@ describe("runCli", () => {
     const output = JSON.parse(result.stdout)
 
     expect(result.exitCode).toBe(1)
+    expect(output.artifactsDiffer).toBe(true)
     expect(output.nextAction).toBeUndefined()
   })
 

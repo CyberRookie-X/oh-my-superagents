@@ -46,6 +46,10 @@ export type ResolvedControlPlane = {
     key: string
     preset: ControlPlanePreset
   }
+  trace?: {
+    activePresetDefinition?: { path: string; preset: ControlPlanePreset }
+    parentPresetDefinition?: { path: string; preset: ControlPlanePreset }
+  }
 }
 
 export type OpenCodeStatusState = {
@@ -75,7 +79,15 @@ export type ControlPlaneArtifactSummary = {
 export type ExplainTrace = {
   routeSource: "explicit_route" | "default_route"
   configSource: "project" | "global" | "default"
-  presetSource: "preset_local" | "reuse_relationship"
+  reuseRelationship: "none" | "extends"
+}
+
+function classifyConfigSource(filePath: string | undefined, cwd: string): ExplainTrace["configSource"] {
+  if (!filePath) {
+    return "default"
+  }
+
+  return filePath === getProjectConfigPath(cwd) ? "project" : "global"
 }
 
 export function summarizeControlPlaneArtifacts(input: {
@@ -150,15 +162,37 @@ export function buildControlPlaneExplainTrace(input: {
   resolved: ResolvedControlPlane
   phase: BuiltInPhase
 }): ExplainTrace {
+  const activeDefinition = input.resolved.trace?.activePresetDefinition
+  const parentDefinition = input.resolved.trace?.parentPresetDefinition
+  const fallbackPath = input.resolved.source.kind === "file" ? input.resolved.source.path : undefined
+  const decisivePath = activeDefinition?.preset.routes[input.phase]
+    ? activeDefinition.path
+    : parentDefinition?.preset.routes[input.phase]
+      ? parentDefinition.path
+      : activeDefinition?.path ?? fallbackPath
+
   return {
     routeSource: input.resolved.activePreset.preset.routes[input.phase] ? "explicit_route" : "default_route",
     configSource: input.resolved.source.kind === "default"
       ? "default"
-      : input.resolved.source.path === getProjectConfigPath(input.cwd)
-        ? "project"
-        : "global",
-    presetSource: input.resolved.activePreset.preset.extends ? "reuse_relationship" : "preset_local",
+      : classifyConfigSource(decisivePath, input.cwd),
+    reuseRelationship: input.resolved.activePreset.preset.extends ? "extends" : "none",
   }
+}
+
+function resolvePresetDefinitionFromLayers(
+  layers: Array<{ path: string; config: LayeredControlPlaneConfigInput }>,
+  presetKey: string,
+) {
+  for (let index = layers.length - 1; index >= 0; index -= 1) {
+    const layer = layers[index]!
+    const preset = layer.config.presets[presetKey]
+    if (preset) {
+      return { path: layer.path, preset }
+    }
+  }
+
+  return undefined
 }
 
 export function buildOpenCodeNextAction(input: {
@@ -462,6 +496,10 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
   try {
     const loaded = await loadControlPlaneConfig(input)
     const activePreset = validateControlPlaneConfig(loaded.config)
+    const activePresetDefinition = resolvePresetDefinitionFromLayers(loaded.layers, activePreset.key)
+    const parentPresetDefinition = activePreset.preset.extends
+      ? resolvePresetDefinitionFromLayers(loaded.layers, activePreset.preset.extends)
+      : undefined
 
     return {
       source: {
@@ -472,6 +510,10 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       },
       config: loaded.config,
       activePreset,
+      trace: {
+        activePresetDefinition,
+        parentPresetDefinition,
+      },
     }
   } catch (error) {
     if (!(error instanceof MissingControlPlaneConfigError)) {
