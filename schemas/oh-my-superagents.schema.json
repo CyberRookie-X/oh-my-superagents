@@ -9,6 +9,16 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "activePreset": { "type": "string", "minLength": 1 },
+        "defaultLane": { "type": "string", "minLength": 1 },
+        "laneSelection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": ["manual", "suggest", "auto"]
+            }
+          }
+        },
         "commandPrefix": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
         "commands": {
           "type": "object",
@@ -42,7 +52,7 @@
       },
       "additionalProperties": {
         "type": "object",
-        "required": ["label", "short", "profiles", "routes", "defaultRoute"],
+        "required": ["label", "short", "routes", "defaultRoute"],
         "additionalProperties": false,
         "properties": {
           "label": { "type": "string", "minLength": 1 },
@@ -59,6 +69,11 @@
               "$ref": "#/$defs/profile"
             }
           },
+          "usesLanes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "defaultLane": { "type": "string", "minLength": 1 },
           "routes": {
             "$ref": "#/$defs/routes"
           },
@@ -74,6 +89,26 @@
       },
       "additionalProperties": {
         "$ref": "#/$defs/profile"
+      }
+    },
+    "lanes": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["label", "routes", "defaultRoute"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "routes": {
+            "$ref": "#/$defs/routes"
+          },
+          "defaultRoute": { "type": "string", "minLength": 1 }
+        }
       }
     },
     "routes": {
@@ -94,6 +129,16 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "activePreset": { "type": "string", "minLength": 1 },
+            "defaultLane": { "type": "string", "minLength": 1 },
+            "laneSelection": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "enum": ["manual", "suggest", "auto"]
+                }
+              }
+            },
             "commandPrefix": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
             "commands": {
               "type": "object",
@@ -119,6 +164,57 @@
             "superpowersCompatibility": { "$ref": "#/$defs/compatibility" }
           }
         },
+        "profiles": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["model"],
+            "additionalProperties": false,
+            "properties": {
+              "model": { "type": "string", "minLength": 1 },
+              "variant": { "type": "string", "minLength": 1 },
+              "effort": { "enum": ["fast", "balanced", "deep", "max"] },
+              "codexFast": { "type": "boolean" },
+              "temperature": { "type": "number" }
+            }
+          }
+        },
+        "lanes": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["label", "routes", "defaultRoute"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string", "minLength": 1 },
+              "description": { "type": "string", "minLength": 1 },
+              "routes": {
+                "type": "object",
+                "propertyNames": {
+                  "enum": [
+                    "brainstorming",
+                    "writing-plans",
+                    "subagent-driven-development",
+                    "requesting-code-review",
+                    "verification-before-completion",
+                    "frontend-design",
+                    "webapp-testing"
+                  ]
+                },
+                "additionalProperties": { "type": "string", "minLength": 1 }
+              },
+              "defaultRoute": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
         "presets": {
           "type": "object",
           "propertyNames": {
@@ -127,7 +223,7 @@
           },
           "additionalProperties": {
             "type": "object",
-            "required": ["label", "short", "profiles", "routes", "defaultRoute"],
+            "required": ["label", "short", "routes", "defaultRoute"],
             "additionalProperties": false,
             "properties": {
               "label": { "type": "string", "minLength": 1 },
@@ -141,9 +237,23 @@
                   "minLength": 1
                 },
                 "additionalProperties": {
-                  "$ref": "#/$defs/profile"
+                  "type": "object",
+                  "required": ["model"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "model": { "type": "string", "minLength": 1 },
+                    "variant": { "type": "string", "minLength": 1 },
+                    "effort": { "enum": ["fast", "balanced", "deep", "max"] },
+                    "codexFast": { "type": "boolean" },
+                    "temperature": { "type": "number" }
+                  }
                 }
               },
+              "usesLanes": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "defaultLane": { "type": "string", "minLength": 1 },
               "routes": {
                 "$ref": "#/$defs/routes"
               },

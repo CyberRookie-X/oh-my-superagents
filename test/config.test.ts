@@ -221,6 +221,80 @@ describe("loadControlPlaneConfig", () => {
     expect(result.config.presets).toHaveProperty("project")
   })
 
+  it("loads a layered config with global profiles, global lanes, preset lane constraints, settings.defaultLane, and laneSelection.mode", async () => {
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default",
+          "defaultLane": "backend",
+          "laneSelection": { "mode": "suggest" }
+        },
+        "profiles": {
+          "frontend-build": { "model": "openai/gpt-5" },
+          "backend-build": { "model": "gpt-5.4", "codexFast": true }
+        },
+        "lanes": {
+          "frontend": {
+            "label": "Frontend",
+            "routes": {},
+            "defaultRoute": "frontend-build"
+          },
+          "backend": {
+            "label": "Backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["frontend", "backend"],
+            "defaultLane": "backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.config.settings.defaultLane).toBe("backend")
+    expect(result.config.settings.laneSelection.mode).toBe("suggest")
+    expect(result.config.profiles["backend-build"].codexFast).toBe(true)
+    expect(result.config.lanes.backend.defaultRoute).toBe("backend-build")
+    expect(result.config.presets.default.usesLanes).toEqual(["frontend", "backend"])
+  })
+
+  it("rejects a preset that references a missing lane", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "settings": { "activePreset": "default" },
+          "profiles": { "build": { "model": "openai/gpt-5" } },
+          "lanes": {},
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "usesLanes": ["frontend"],
+              "defaultLane": "frontend",
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/lane/i)
+  })
+
   it("replaces a same-named project preset instead of deep-merging it", async () => {
     const files = {
       "/home/tester/.config/oh-my-superagents/config.jsonc": `{
@@ -401,6 +475,12 @@ describe("loadControlPlaneConfig", () => {
           settings?: {
             properties?: {
               commandPrefix?: { pattern?: string }
+              defaultLane?: { type?: string; minLength?: number }
+              laneSelection?: {
+                properties?: {
+                  mode?: { enum?: string[] }
+                }
+              }
               commands?: {
                 properties?: {
                   status?: {
@@ -418,6 +498,26 @@ describe("loadControlPlaneConfig", () => {
               properties?: {
                 extends?: { type?: string; minLength?: number }
                 short?: { pattern?: string }
+                usesLanes?: {
+                  items?: { type?: string; minLength?: number }
+                }
+                defaultLane?: { type?: string; minLength?: number }
+              }
+            }
+          }
+          profiles?: {
+            additionalProperties?: {
+              properties?: {
+                codexFast?: { type?: string }
+              }
+            }
+          }
+          lanes?: {
+            additionalProperties?: {
+              properties?: {
+                label?: { type?: string; minLength?: number }
+                routes?: { type?: string }
+                defaultRoute?: { type?: string; minLength?: number }
               }
             }
           }
@@ -435,11 +535,36 @@ describe("loadControlPlaneConfig", () => {
     expect(
       layeredShape?.properties?.settings?.properties?.commands?.properties?.status?.properties?.aliases?.items?.pattern,
     ).toBe("^[a-z0-9-]+$")
+    expect(layeredShape?.properties?.settings?.properties?.defaultLane?.type).toBe("string")
+    expect(layeredShape?.properties?.settings?.properties?.defaultLane?.minLength).toBe(1)
+    expect(layeredShape?.properties?.settings?.properties?.laneSelection?.properties?.mode?.enum).toEqual([
+      "manual",
+      "suggest",
+      "auto",
+    ])
     expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.extends?.type).toBe("string")
     expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.extends?.minLength).toBe(1)
     expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.short?.pattern).toBe(
       "^[a-z0-9-]+$",
     )
+    expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.usesLanes?.items?.type).toBe(
+      "string",
+    )
+    expect(
+      layeredShape?.properties?.presets?.additionalProperties?.properties?.usesLanes?.items?.minLength,
+    ).toBe(1)
+    expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.defaultLane?.type).toBe(
+      "string",
+    )
+    expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.defaultLane?.minLength).toBe(1)
+    expect(layeredShape?.properties?.profiles?.additionalProperties?.properties?.codexFast?.type).toBe("boolean")
+    expect(layeredShape?.properties?.lanes?.additionalProperties?.properties?.label?.type).toBe("string")
+    expect(layeredShape?.properties?.lanes?.additionalProperties?.properties?.label?.minLength).toBe(1)
+    expect(layeredShape?.properties?.lanes?.additionalProperties?.properties?.routes?.type).toBe("object")
+    expect(layeredShape?.properties?.lanes?.additionalProperties?.properties?.defaultRoute?.type).toBe(
+      "string",
+    )
+    expect(layeredShape?.properties?.lanes?.additionalProperties?.properties?.defaultRoute?.minLength).toBe(1)
     expect(legacyShape?.required).toContain("profiles")
     expect(legacyShape?.required).toContain("defaultRoute")
   })

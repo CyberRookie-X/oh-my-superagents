@@ -23,8 +23,7 @@ const BUILT_IN_PHASE_SET = new Set<string>(BUILT_IN_PHASES)
 
 export const CONTROL_PLANE_COMMAND_KEYS = ["status", "use", "disable", "sync", "doctor"] as const
 
-const LEGACY_TOP_LEVEL_KEYS = [
-  "profiles",
+const LEGACY_ROUTER_ONLY_KEYS = [
   "routes",
   "defaultRoute",
   "superpowersCompatibility",
@@ -43,6 +42,21 @@ const ProfileSchema = z
 const CompatibilitySchema = z
   .object({
     mode: z.enum(SUPERPOWERS_COMPATIBILITY_MODES).default("warn"),
+  })
+  .strict()
+
+const LaneSelectionSchema = z
+  .object({
+    mode: z.enum(["manual", "suggest", "auto"]).default("suggest"),
+  })
+  .strict()
+
+const LaneSchema = z
+  .object({
+    label: z.string().min(1),
+    description: z.string().min(1).optional(),
+    routes: z.record(z.string().min(1), z.string().min(1)),
+    defaultRoute: z.string().min(1),
   })
   .strict()
 
@@ -76,6 +90,8 @@ const LayeredSettingsSchema = z
   .object({
     enabled: z.boolean().optional(),
     activePreset: z.string().min(1).optional(),
+    defaultLane: z.string().min(1).optional(),
+    laneSelection: LaneSelectionSchema.optional(),
     commandPrefix: z.string().min(1).optional(),
     commands: CommandsOverrideSchema.optional(),
     superpowersCompatibility: CompatibilitySchema.optional(),
@@ -88,7 +104,9 @@ const ControlPlanePresetSchema = z
     short: z.string().min(1),
     description: z.string().min(1).optional(),
     extends: z.string().min(1).optional(),
-    profiles: z.record(z.string().min(1), ProfileSchema),
+    profiles: z.record(z.string().min(1), ProfileSchema).optional(),
+    usesLanes: z.array(z.string().min(1)).optional(),
+    defaultLane: z.string().min(1).optional(),
     routes: z.record(z.string().min(1), z.string().min(1)),
     defaultRoute: z.string().min(1),
   })
@@ -97,6 +115,8 @@ const ControlPlanePresetSchema = z
 const LayeredControlPlaneConfigSchema = z
   .object({
     settings: LayeredSettingsSchema.optional(),
+    profiles: z.record(z.string().min(1), ProfileSchema).optional(),
+    lanes: z.record(z.string().min(1), LaneSchema).optional(),
     presets: z.record(z.string().min(1), ControlPlanePresetSchema),
   })
   .strict()
@@ -124,15 +144,21 @@ export type ControlPlaneCommandConfig = {
   aliases: string[]
 }
 export type ControlPlaneProfile = z.infer<typeof ProfileSchema>
+export type ControlPlaneLaneSelection = z.infer<typeof LaneSelectionSchema>
+export type ControlPlaneLane = z.infer<typeof LaneSchema>
 export type ControlPlanePreset = z.infer<typeof ControlPlanePresetSchema>
 export type ControlPlaneConfig = {
   settings: {
     enabled: boolean
     activePreset: string
+    defaultLane?: string
+    laneSelection: ControlPlaneLaneSelection
     commandPrefix: string
     commands: Record<ControlPlaneCommandKey, ControlPlaneCommandConfig>
     superpowersCompatibility: SuperpowersCompatibilityConfig
   }
+  profiles: Record<string, ControlPlaneProfile>
+  lanes: Record<string, ControlPlaneLane>
   presets: Record<string, ControlPlanePreset>
 }
 
@@ -236,6 +262,22 @@ function synthesizeCommands(
   }
 }
 
+function cloneProfiles(profiles: Record<string, ControlPlaneProfile> | undefined) {
+  if (!profiles) {
+    return undefined
+  }
+
+  return Object.fromEntries(
+    Object.entries(profiles).map(([key, profile]) => [key, { ...profile }]),
+  )
+}
+
+function cloneLanes(lanes: Record<string, ControlPlaneLane>) {
+  return Object.fromEntries(
+    Object.entries(lanes).map(([key, lane]) => [key, { ...lane, routes: { ...lane.routes } }]),
+  )
+}
+
 function createDefaultPreset(): ControlPlanePreset {
   return {
     label: "Default",
@@ -253,16 +295,21 @@ function createDefaultPreset(): ControlPlanePreset {
 }
 
 export function createDefaultControlPlaneConfig(): ControlPlaneConfig {
+  const defaultPreset = createDefaultPreset()
+
   return {
     settings: {
       enabled: true,
       activePreset: "default",
+      laneSelection: { mode: "suggest" },
       commandPrefix: "oms",
       commands: synthesizeCommands(undefined),
       superpowersCompatibility: { mode: "warn" },
     },
+    profiles: cloneProfiles(defaultPreset.profiles) ?? {},
+    lanes: {},
     presets: {
-      default: createDefaultPreset(),
+      default: defaultPreset,
     },
   }
 }
@@ -273,7 +320,7 @@ function hasOwnKey(value: object, key: string) {
 
 function isMixedShape(rawConfig: Record<string, unknown>) {
   const isLayered = hasOwnKey(rawConfig, "settings") || hasOwnKey(rawConfig, "presets")
-  const hasLegacyKeys = LEGACY_TOP_LEVEL_KEYS.some((key) => hasOwnKey(rawConfig, key))
+  const hasLegacyKeys = LEGACY_ROUTER_ONLY_KEYS.some((key) => hasOwnKey(rawConfig, key))
   return isLayered && hasLegacyKeys
 }
 
@@ -284,6 +331,7 @@ function migrateLegacyConfig(rawConfig: unknown): LayeredControlPlaneConfigInput
     settings: parsed.superpowersCompatibility
       ? { superpowersCompatibility: parsed.superpowersCompatibility }
       : undefined,
+    profiles: parsed.profiles,
     presets: {
       default: {
         label: "Default",
@@ -331,6 +379,14 @@ function mergeLayeredConfigs(
         ...higherPriority.settings?.commands,
       },
     },
+    profiles: {
+      ...lowerPriority.profiles,
+      ...higherPriority.profiles,
+    },
+    lanes: {
+      ...lowerPriority.lanes,
+      ...higherPriority.lanes,
+    },
     presets: {
       ...lowerPriority.presets,
       ...higherPriority.presets,
@@ -338,25 +394,47 @@ function mergeLayeredConfigs(
   }
 }
 
+function validateLaneReferences(config: ControlPlaneConfig) {
+  const availableLanes = new Set(Object.keys(config.lanes))
+
+  for (const [presetKey, preset] of Object.entries(config.presets)) {
+    for (const laneKey of preset.usesLanes ?? []) {
+      if (!availableLanes.has(laneKey)) {
+        throw new Error(`Preset ${presetKey} references unknown lane: ${laneKey}`)
+      }
+    }
+
+    if (preset.defaultLane && !availableLanes.has(preset.defaultLane)) {
+      throw new Error(`Preset ${presetKey} references unknown lane: ${preset.defaultLane}`)
+    }
+  }
+}
+
 function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneConfig {
-  return {
+  const finalized: ControlPlaneConfig = {
     settings: {
       enabled: merged.settings?.enabled ?? true,
       activePreset: merged.settings?.activePreset ?? "default",
+      defaultLane: merged.settings?.defaultLane,
+      laneSelection: merged.settings?.laneSelection ?? { mode: "suggest" },
       commandPrefix: merged.settings?.commandPrefix ?? "oms",
       commands: synthesizeCommands(merged.settings?.commands),
       superpowersCompatibility: merged.settings?.superpowersCompatibility ?? { mode: "warn" },
     },
+    profiles: cloneProfiles(merged.profiles) ?? {},
+    lanes: cloneLanes(merged.lanes ?? {}),
     presets: merged.presets,
   }
+
+  validateLaneReferences(finalized)
+  return finalized
 }
 
 function clonePreset(preset: ControlPlanePreset): ControlPlanePreset {
   return {
     ...preset,
-    profiles: Object.fromEntries(
-      Object.entries(preset.profiles).map(([key, profile]) => [key, { ...profile }]),
-    ),
+    profiles: cloneProfiles(preset.profiles),
+    usesLanes: preset.usesLanes ? [...preset.usesLanes] : undefined,
     routes: { ...preset.routes },
   }
 }
@@ -400,10 +478,14 @@ export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConf
       const resolvedParent = resolvePreset(preset.extends)
       nextPreset = {
         ...preset,
-        profiles: {
-          ...resolvedParent.profiles,
-          ...preset.profiles,
-        },
+        profiles:
+          resolvedParent.profiles || preset.profiles
+            ? {
+                ...(resolvedParent.profiles ?? {}),
+                ...(preset.profiles ?? {}),
+              }
+            : undefined,
+        usesLanes: preset.usesLanes ? [...preset.usesLanes] : undefined,
         routes: {
           ...resolvedParent.routes,
           ...preset.routes,
@@ -557,7 +639,7 @@ export async function loadRouterConfig(input: LoadRouterConfigInput): Promise<Lo
   }
 
   const config: LoadedRouterConfig["config"] = {
-    profiles: activePreset.profiles,
+    profiles: activePreset.profiles ?? loaded.config.profiles,
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
     superpowersCompatibility: loaded.config.settings.superpowersCompatibility,
