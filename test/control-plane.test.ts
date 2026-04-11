@@ -254,6 +254,99 @@ describe("resolveControlPlane", () => {
     expect(result.activePreset.preset.defaultRoute).toBe("review")
   })
 
+  it("resolves single-parent preset reuse before validation", async () => {
+    const result = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "child"
+        },
+        "presets": {
+          "base": {
+            "label": "Base",
+            "short": "base",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" },
+              "strategy": { "model": "anthropic/claude-sonnet-4-5" }
+            },
+            "routes": {
+              "brainstorming": "strategy",
+              "verification-before-completion": "build"
+            },
+            "defaultRoute": "build"
+          },
+          "child": {
+            "label": "Child",
+            "short": "child",
+            "extends": "base",
+            "profiles": {
+              "review": { "model": "google/gemini-2.5-pro" }
+            },
+            "routes": {
+              "brainstorming": "review"
+            },
+            "defaultRoute": "review"
+          }
+        }
+      }`,
+    })
+
+    expect(result.activePreset.key).toBe("child")
+    expect(result.activePreset.preset.defaultRoute).toBe("review")
+    expect(result.activePreset.preset.profiles).toEqual({
+      build: { model: "openai/gpt-5" },
+      strategy: { model: "anthropic/claude-sonnet-4-5" },
+      review: { model: "google/gemini-2.5-pro" },
+    })
+    expect(result.activePreset.preset.routes).toEqual({
+      brainstorming: "review",
+      "verification-before-completion": "build",
+    })
+  })
+
+  it("rejects cyclic preset reuse", async () => {
+    await expect(
+      resolveControlPlane({
+        command: "status",
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "settings": {
+            "activePreset": "a"
+          },
+          "presets": {
+            "a": {
+              "label": "A",
+              "short": "a",
+              "extends": "b",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            },
+            "b": {
+              "label": "B",
+              "short": "b",
+              "extends": "a",
+              "profiles": {
+                "review": { "model": "anthropic/claude-sonnet-4-5" }
+              },
+              "routes": {},
+              "defaultRoute": "review"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/cycle|cyclic|extends/i)
+  })
+
   it("selects --config as the write target", async () => {
     const files = {
       "/workspace/project/explicit.jsonc": `{

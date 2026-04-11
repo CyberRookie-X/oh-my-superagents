@@ -86,6 +86,7 @@ const ControlPlanePresetSchema = z
     label: z.string().min(1),
     short: z.string().min(1),
     description: z.string().min(1).optional(),
+    extends: z.string().min(1).optional(),
     profiles: z.record(z.string().min(1), ProfileSchema),
     routes: z.record(z.string().min(1), z.string().min(1)),
     defaultRoute: z.string().min(1),
