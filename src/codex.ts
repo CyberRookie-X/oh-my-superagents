@@ -32,7 +32,10 @@ const EFFORT_TO_CODEX = {
 function getCodexEffortConfig(selection: {
   effort?: "fast" | "balanced" | "deep" | "max"
   codexFast?: boolean
-}) {
+}): {
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh"
+  serviceTier?: "fast"
+} {
   const reasoningEffort = selection.effort
     ? EFFORT_TO_CODEX[selection.effort].reasoningEffort
     : undefined

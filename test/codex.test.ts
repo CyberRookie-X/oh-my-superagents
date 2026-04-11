@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { buildCodexArtifacts, renderCodexAgentFile } from "../src/codex.js"
+import { describe, expect, expectTypeOf, it } from "vitest"
+import { buildCodexArtifacts, explainCodexPhase, renderCodexAgentFile } from "../src/codex.js"
 
 describe("renderCodexAgentFile", () => {
   it("renders a codex custom agent with model and developer instructions", () => {
@@ -84,5 +84,18 @@ describe("buildCodexArtifacts", () => {
     const agent = artifacts.agents.find((item) => item.fileName === "oms-plan.toml")
     expect(agent?.content).toContain('model_reasoning_effort = "low"')
     expect(agent?.content).toContain('service_tier = "fast"')
+  })
+
+  it("keeps the explained Codex service tier typed as the native fast literal", () => {
+    const explained = explainCodexPhase(
+      {
+        profiles: { build: { model: "gpt-5.4", effort: "deep", codexFast: true } },
+        routes: {},
+        defaultRoute: "build",
+      },
+      "writing-plans",
+    )
+
+    expectTypeOf(explained.serviceTier).toEqualTypeOf<"fast" | undefined>()
   })
 })
