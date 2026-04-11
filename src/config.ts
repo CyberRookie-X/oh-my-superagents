@@ -386,6 +386,12 @@ export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConf
         throw new Error(`Preset ${presetKey} extends unknown preset: ${preset.extends}`)
       }
 
+      if (parentPreset.extends) {
+        throw new Error(
+          `Preset ${presetKey} extends ${preset.extends}, but single-level preset reuse does not allow chained extends`,
+        )
+      }
+
       const resolvedParent = resolvePreset(preset.extends)
       nextPreset = {
         ...preset,

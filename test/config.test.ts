@@ -416,6 +416,7 @@ describe("loadControlPlaneConfig", () => {
           presets?: {
             additionalProperties?: {
               properties?: {
+                extends?: { type?: string; minLength?: number }
                 short?: { pattern?: string }
               }
             }
@@ -434,6 +435,8 @@ describe("loadControlPlaneConfig", () => {
     expect(
       layeredShape?.properties?.settings?.properties?.commands?.properties?.status?.properties?.aliases?.items?.pattern,
     ).toBe("^[a-z0-9-]+$")
+    expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.extends?.type).toBe("string")
+    expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.extends?.minLength).toBe(1)
     expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.short?.pattern).toBe(
       "^[a-z0-9-]+$",
     )
@@ -491,5 +494,52 @@ describe("loadRouterConfig", () => {
       brainstorming: "review",
     })
     expect(result.config.defaultRoute).toBe("build")
+  })
+
+  it("rejects multi-level preset reuse chains", async () => {
+    await expect(
+      loadRouterConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "settings": {
+            "activePreset": "grandchild"
+          },
+          "presets": {
+            "base": {
+              "label": "Base",
+              "short": "base",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            },
+            "child": {
+              "label": "Child",
+              "short": "child",
+              "extends": "base",
+              "profiles": {
+                "review": { "model": "anthropic/claude-sonnet-4-5" }
+              },
+              "routes": {},
+              "defaultRoute": "review"
+            },
+            "grandchild": {
+              "label": "Grandchild",
+              "short": "grandchild",
+              "extends": "child",
+              "profiles": {
+                "verify": { "model": "google/gemini-2.5-pro" }
+              },
+              "routes": {},
+              "defaultRoute": "verify"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/single-level|single level|extends/i)
   })
 })
