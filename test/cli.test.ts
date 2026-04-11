@@ -419,6 +419,70 @@ describe("runCli", () => {
     expect(output.reuseRelationship).toBe("none")
   })
 
+  it("explains correctly when the active preset uses top-level profiles", async () => {
+    const routedConfig = {
+      ...controlPlaneConfig,
+      profiles: {
+        strategy: {
+          model: "anthropic/claude-sonnet-4-5-20250929",
+          variant: "high",
+        },
+        build: {
+          model: "openai/gpt-5",
+          effort: "balanced",
+        },
+      },
+      lanes: {},
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          description: "General daily development",
+          routes: {
+            brainstorming: "strategy",
+          },
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: routedConfig,
+        activePreset: {
+          key: "default",
+          preset: routedConfig.presets.default,
+        },
+        trace: {
+          activePresetDefinition: {
+            path: "/workspace/project/oh-my-superagents.config.jsonc",
+            preset: routedConfig.presets.default,
+          },
+        },
+      }),
+      explainPhaseForHost: (config: any, host: "opencode" | "codex") => ({
+        phase: "brainstorming",
+        profileId: "strategy",
+        model: config.profiles.strategy.model,
+        variant: config.profiles.strategy.variant,
+        commandName: host === "codex" ? undefined : "/sp-brainstorm",
+        agentName: host === "codex" ? "oms-brainstorm" : "spr-strategy",
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.model).toBe("anthropic/claude-sonnet-4-5-20250929")
+    expect(output.configSource).toBe("project")
+  })
+
   it("keeps configSource rooted in the real file source when inheritance is not proven per phase", async () => {
     const childConfig = {
       ...controlPlaneConfig,

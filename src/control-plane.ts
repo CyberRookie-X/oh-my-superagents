@@ -196,11 +196,13 @@ export function buildControlPlaneExplainTrace(input: {
     : parentDefinition?.preset.routes[input.phase]
       ? parentDefinition.path
       : activeDefinition?.path ?? fallbackPath
-  const selectedProfilePath = activeDefinition?.preset.profiles[selectedProfileId]
+  const selectedProfilePath = activeDefinition?.preset.profiles?.[selectedProfileId]
     ? activeDefinition.path
-    : parentDefinition?.preset.profiles[selectedProfileId]
+    : parentDefinition?.preset.profiles?.[selectedProfileId]
       ? parentDefinition.path
-      : fallbackPath
+      : input.resolved.config.profiles?.[selectedProfileId]
+        ? fallbackPath
+        : undefined
 
   return {
     routeSource: input.resolved.activePreset.preset.routes[input.phase] ? "explicit_route" : "default_route",
@@ -224,6 +226,7 @@ export function summarizeRoutingValidation(
   const explicitRouteSource = localPresetDefinition ?? preset
   const explicitRoutedPhases = BUILT_IN_PHASES.filter((phase) => phase in explicitRouteSource.routes)
   const defaultRoutedPhases = BUILT_IN_PHASES.filter((phase) => !(phase in explicitRouteSource.routes))
+  const effectiveProfiles = getEffectiveProfiles(config, preset)
   const usedProfiles = new Set<string>([preset.defaultRoute, ...Object.values(preset.routes)])
   const reuseRelationship: RoutingValidationSummary["reuseRelationship"] = preset.extends
     ? {
@@ -240,7 +243,7 @@ export function summarizeRoutingValidation(
   return {
     defaultRoutedPhases,
     explicitRoutedPhases,
-    unusedProfiles: Object.keys(preset.profiles).filter((profileKey) => !usedProfiles.has(profileKey)),
+    unusedProfiles: Object.keys(effectiveProfiles).filter((profileKey) => !usedProfiles.has(profileKey)),
     reuseRelationship,
   }
 }
@@ -251,6 +254,33 @@ function isPresetReuseResolvable(config: ControlPlaneConfig, presetKey: string) 
     return true
   } catch {
     return false
+  }
+}
+
+function cloneProfiles(profiles: ControlPlaneConfig["profiles"] | ControlPlanePreset["profiles"] | undefined) {
+  if (!profiles) {
+    return undefined
+  }
+
+  return Object.fromEntries(
+    Object.entries(profiles).map(([key, profile]) => [key, { ...profile }]),
+  )
+}
+
+function cloneLanes(lanes: ControlPlaneConfig["lanes"] | LayeredControlPlaneConfigInput["lanes"] | undefined) {
+  if (!lanes) {
+    return undefined
+  }
+
+  return Object.fromEntries(
+    Object.entries(lanes).map(([key, lane]) => [key, { ...lane, routes: { ...lane.routes } }]),
+  )
+}
+
+function getEffectiveProfiles(config: ControlPlaneConfig, preset: ControlPlanePreset) {
+  return {
+    ...config.profiles,
+    ...(preset.profiles ?? {}),
   }
 }
 
@@ -297,8 +327,10 @@ export function buildOpenCodeNextAction(input: {
   }
 }
 
-function validatePresetGraph(presetKey: string, preset: ControlPlanePreset) {
-  if (!preset.profiles[preset.defaultRoute]) {
+function validatePresetGraph(config: ControlPlaneConfig, presetKey: string, preset: ControlPlanePreset) {
+  const effectiveProfiles = getEffectiveProfiles(config, preset)
+
+  if (!effectiveProfiles[preset.defaultRoute]) {
     throw new Error(`Preset ${presetKey} has unknown defaultRoute profile: ${preset.defaultRoute}`)
   }
 
@@ -308,7 +340,7 @@ function validatePresetGraph(presetKey: string, preset: ControlPlanePreset) {
     }
 
     const target = preset.routes[phase]
-    if (!preset.profiles[target]) {
+    if (!effectiveProfiles[target]) {
       throw new Error(`Preset ${presetKey} has unknown profile: ${target}`)
     }
   }
@@ -375,7 +407,7 @@ function validateControlPlaneConfig(config: ControlPlaneConfig) {
   validateCommandNames(config)
 
   for (const [presetKey, preset] of Object.entries(config.presets)) {
-    validatePresetGraph(presetKey, preset)
+    validatePresetGraph(config, presetKey, preset)
   }
 
   return {
@@ -387,9 +419,8 @@ function validateControlPlaneConfig(config: ControlPlaneConfig) {
 function clonePreset(preset: ControlPlanePreset): ControlPlanePreset {
   return {
     ...preset,
-    profiles: Object.fromEntries(
-      Object.entries(preset.profiles).map(([key, profile]) => [key, { ...profile }]),
-    ),
+    profiles: cloneProfiles(preset.profiles),
+    usesLanes: preset.usesLanes ? [...preset.usesLanes] : undefined,
     routes: { ...preset.routes },
   }
 }
@@ -412,6 +443,8 @@ function cloneLayeredConfig(config: LayeredControlPlaneConfigInput): LayeredCont
             : undefined,
         }
       : undefined,
+    profiles: cloneProfiles(config.profiles),
+    lanes: cloneLanes(config.lanes),
     presets: Object.fromEntries(
       Object.entries(config.presets).map(([key, preset]) => [key, clonePreset(preset)]),
     ),
@@ -423,6 +456,8 @@ function toLayeredDocument(config: ControlPlaneConfig): LayeredControlPlaneConfi
     settings: {
       enabled: config.settings.enabled,
       activePreset: config.settings.activePreset,
+      defaultLane: config.settings.defaultLane,
+      laneSelection: { ...config.settings.laneSelection },
       commandPrefix: config.settings.commandPrefix,
       commands: Object.fromEntries(
         Object.entries(config.settings.commands).map(([key, command]) => [
@@ -432,6 +467,8 @@ function toLayeredDocument(config: ControlPlaneConfig): LayeredControlPlaneConfi
       ),
       superpowersCompatibility: { ...config.settings.superpowersCompatibility },
     },
+    profiles: cloneProfiles(config.profiles),
+    lanes: cloneLanes(config.lanes),
     presets: Object.fromEntries(
       Object.entries(config.presets).map(([key, preset]) => [key, clonePreset(preset)]),
     ),

@@ -638,6 +638,43 @@ describe("loadRouterConfig", () => {
     expect(result.config.defaultRoute).toBe("build")
   })
 
+  it("merges top-level profiles into router config when a preset only overrides some of them", async () => {
+    const result = await loadRouterConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" },
+          "strategy": { "model": "anthropic/claude-sonnet-4-5", "variant": "high" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "strategy": { "model": "openai/gpt-5", "variant": "medium" }
+            },
+            "routes": {
+              "brainstorming": "strategy"
+            },
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.config.profiles).toEqual({
+      build: { model: "openai/gpt-5" },
+      strategy: { model: "openai/gpt-5", variant: "medium" },
+    })
+    expect(result.config.defaultRoute).toBe("build")
+  })
+
   it("rejects multi-level preset reuse chains", async () => {
     await expect(
       loadRouterConfig({

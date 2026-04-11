@@ -350,7 +350,10 @@ function toRouterConfig(config: ResolvedControlPlane["config"]) {
   }
 
   return {
-    profiles: activePreset.profiles,
+    profiles: {
+      ...(config.profiles ?? {}),
+      ...(activePreset.profiles ?? {}),
+    },
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
     superpowersCompatibility: config.settings.superpowersCompatibility,

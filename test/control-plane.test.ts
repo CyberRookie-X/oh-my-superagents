@@ -312,6 +312,38 @@ describe("resolveControlPlane", () => {
     })
   })
 
+  it("resolves a preset that uses top-level profiles", async () => {
+    const result = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" },
+          "strategy": { "model": "anthropic/claude-sonnet-4-5" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "routes": {
+              "brainstorming": "strategy"
+            },
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.activePreset.key).toBe("default")
+    expect(result.config.profiles.strategy.model).toBe("anthropic/claude-sonnet-4-5")
+  })
+
   it("rejects cyclic preset reuse", async () => {
     await expect(
       resolveControlPlane({
@@ -909,6 +941,80 @@ describe("resolveControlPlane", () => {
       }),
     ).rejects.toThrow(/activePreset.*shared|existing preset/i)
   })
+
+  it("preserves top-level profiles and lanes when preparing a state write", async () => {
+    const files = {
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "default",
+          "defaultLane": "backend",
+          "laneSelection": { "mode": "suggest" }
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" },
+          "review": { "model": "anthropic/claude-sonnet-4-5" }
+        },
+        "lanes": {
+          "backend": {
+            "label": "Backend",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["backend"],
+            "defaultLane": "backend",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await prepareControlPlaneStateWrite({
+      command: "disable",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+      isWritable: createIsWritable(["/workspace/project/oh-my-superagents.config.jsonc"]),
+      nextState: {
+        activePreset: "default",
+        enabled: false,
+      },
+    })
+    const serialized = parse(result.content) as {
+      settings?: {
+        activePreset?: string
+        enabled?: boolean
+        defaultLane?: string
+        laneSelection?: { mode?: string }
+      }
+      profiles?: Record<string, { model: string }>
+      lanes?: Record<string, { label: string; routes: Record<string, string>; defaultRoute: string }>
+    }
+
+    expect(serialized.settings).toEqual({
+      activePreset: "default",
+      enabled: false,
+      defaultLane: "backend",
+      laneSelection: { mode: "suggest" },
+    })
+    expect(serialized.profiles).toEqual({
+      build: { model: "openai/gpt-5" },
+      review: { model: "anthropic/claude-sonnet-4-5" },
+    })
+    expect(serialized.lanes).toEqual({
+      backend: {
+        label: "Backend",
+        routes: {},
+        defaultRoute: "build",
+      },
+    })
+  })
 })
 
 describe("summarizeRoutingValidation", () => {
@@ -1000,5 +1106,42 @@ describe("summarizeRoutingValidation", () => {
       parentPresetKey: "base",
       resolvable: true,
     })
+  })
+
+  it("tracks unused top-level profiles when the preset has no local profiles", () => {
+    const summary = summarizeRoutingValidation({
+      settings: {
+        enabled: true,
+        activePreset: "default",
+        laneSelection: { mode: "suggest" },
+        commandPrefix: "oms",
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      profiles: {
+        build: { model: "openai/gpt-5" },
+        strategy: { model: "anthropic/claude-sonnet-4-5" },
+        unused: { model: "google/gemini-2.5-pro" },
+      },
+      lanes: {},
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          routes: {
+            brainstorming: "strategy",
+          },
+          defaultRoute: "build",
+        },
+      },
+    }, "default")
+
+    expect(summary.unusedProfiles).toEqual(["unused"])
   })
 })

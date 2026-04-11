@@ -639,7 +639,10 @@ export async function loadRouterConfig(input: LoadRouterConfigInput): Promise<Lo
   }
 
   const config: LoadedRouterConfig["config"] = {
-    profiles: activePreset.profiles ?? loaded.config.profiles,
+    profiles: {
+      ...loaded.config.profiles,
+      ...(activePreset.profiles ?? {}),
+    },
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
     superpowersCompatibility: loaded.config.settings.superpowersCompatibility,
