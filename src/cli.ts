@@ -3,11 +3,13 @@ import path from "node:path"
 import { cwd as getCwd } from "node:process"
 import { BUILT_IN_PHASES, discoverConfigPath, loadRouterConfig } from "./config.js"
 import {
+  buildControlPlaneExplainTrace,
   buildOpenCodeNextAction,
   buildOpenCodeStatusState,
   prepareControlPlaneStateWrite,
   resolveControlPlane,
   summarizeControlPlaneArtifacts,
+  type ExplainTrace,
   type ResolvedControlPlane,
 } from "./control-plane.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
@@ -202,6 +204,41 @@ function formatExplainOutput(payload: unknown, compatibility: SuperpowersCompati
     result: payload,
     compatibility,
   }
+}
+
+function withExplainTrace(payload: Record<string, unknown>, trace: ExplainTrace) {
+  return {
+    ...payload,
+    routeSource: typeof payload.routeSource === "string" ? payload.routeSource : trace.routeSource,
+    configSource: typeof payload.configSource === "string" ? payload.configSource : trace.configSource,
+  }
+}
+
+function attachExplainTrace(
+  payload: unknown,
+  input: { cwd: string; resolved: ResolvedControlPlane },
+) {
+  const buildTrace = (phase: BuiltInPhase) => buildControlPlaneExplainTrace({
+    cwd: input.cwd,
+    resolved: input.resolved,
+    phase,
+  })
+
+  if (Array.isArray(payload)) {
+    return payload.map((item) => {
+      if (!isRecord(item) || typeof item.phase !== "string" || !BUILT_IN_PHASES.includes(item.phase as BuiltInPhase)) {
+        return item
+      }
+
+      return withExplainTrace(item, buildTrace(item.phase as BuiltInPhase))
+    })
+  }
+
+  if (!isRecord(payload) || typeof payload.phase !== "string" || !BUILT_IN_PHASES.includes(payload.phase as BuiltInPhase)) {
+    return payload
+  }
+
+  return withExplainTrace(payload, buildTrace(payload.phase as BuiltInPhase))
 }
 
 function createFallbackCompatibility(
@@ -938,6 +975,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
     if (command === "explain") {
       const loaded = await deps.loadConfig({ cwd, explicitPath })
+      const resolved = host === "opencode"
+        ? await deps.resolveControlPlane({ command: "status", cwd, explicitPath })
+        : null
 
       if (flags.get("--all") === true) {
         const compatibility = await resolveCompatibilityForHost(
@@ -948,7 +988,12 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
         return {
           exitCode: 0,
-          stdout: JSON.stringify(formatExplainOutput(deps.explainAllForHost(loaded.config, host as "opencode" | "codex"), compatibility), null, 2),
+          stdout: JSON.stringify(formatExplainOutput(
+            resolved
+              ? attachExplainTrace(deps.explainAllForHost(toRouterConfig(resolved.config), host as "opencode" | "codex"), { cwd, resolved })
+              : deps.explainAllForHost(loaded.config, host as "opencode" | "codex"),
+            compatibility,
+          ), null, 2),
           stderr: "",
         }
       }
@@ -972,7 +1017,12 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         exitCode: 0,
         stdout: JSON.stringify(
           formatExplainOutput(
-            deps.explainPhaseForHost(loaded.config, host as "opencode" | "codex", phase as BuiltInPhase),
+            resolved
+              ? attachExplainTrace(
+                deps.explainPhaseForHost(toRouterConfig(resolved.config), host as "opencode" | "codex", phase as BuiltInPhase),
+                { cwd, resolved },
+              )
+              : deps.explainPhaseForHost(loaded.config, host as "opencode" | "codex", phase as BuiltInPhase),
             compatibility,
           ),
           null,
@@ -1014,12 +1064,43 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         warnings: string[]
         written: string[]
         removed: string[]
-      } = {
-        exitCode: result.exitCode,
-        warnings: result.warnings,
-        written: [prepared.path, ...result.written],
-        removed: result.removed,
-      }
+        changed: boolean
+        activePreset: {
+          key: string
+          label: string
+          short: string
+          description: string
+        }
+        nextAction?: {
+          command: string
+          reason: string
+        }
+      } = (() => {
+        const changed = nextPreset !== resolved.activePreset.key || !resolved.config.settings.enabled
+        const activePreset = prepared.config.presets[nextPreset]!
+
+        return {
+          exitCode: result.exitCode,
+          warnings: result.warnings,
+          written: [prepared.path, ...result.written],
+          removed: result.removed,
+          changed,
+          activePreset: {
+            key: nextPreset,
+            label: activePreset.label,
+            short: activePreset.short,
+            description: activePreset.description,
+          },
+          ...(cliHost === "opencode" && changed
+            ? {
+              nextAction: {
+                command: "oh-my-superagents sync --host opencode",
+                reason: "Refresh OpenCode artifacts for the newly active preset.",
+              },
+            }
+            : {}),
+        }
+      })()
 
       return {
         exitCode: payload.exitCode,

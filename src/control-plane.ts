@@ -16,6 +16,7 @@ import {
   type LoadControlPlaneConfigInput,
   readControlPlaneSourceDocument,
 } from "./config.js"
+import type { BuiltInPhase } from "./router.js"
 import type { SuperpowersCompatibilityResult, SupportedSuperpowersHost } from "./superpowers-compatibility.js"
 
 const READ_ONLY_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "doctor"])
@@ -69,6 +70,11 @@ export type ControlPlaneArtifactSummary = {
   present: string[]
   missing: string[]
   stale: string[]
+}
+
+export type ExplainTrace = {
+  routeSource: "explicit_route" | "default_route"
+  configSource: "project" | "global" | "default" | "inherited"
 }
 
 export function summarizeControlPlaneArtifacts(input: {
@@ -135,6 +141,23 @@ export function buildOpenCodeStatusState(input: {
     code: "healthy",
     category: "oms",
     reason: "OMS is enabled and expected OpenCode artifacts are present.",
+  }
+}
+
+export function buildControlPlaneExplainTrace(input: {
+  cwd: string
+  resolved: ResolvedControlPlane
+  phase: BuiltInPhase
+}): ExplainTrace {
+  return {
+    routeSource: input.resolved.activePreset.preset.routes[input.phase] ? "explicit_route" : "default_route",
+    configSource: input.resolved.source.kind === "default"
+      ? "default"
+      : input.resolved.activePreset.preset.extends
+        ? "inherited"
+        : input.resolved.source.path === getProjectConfigPath(input.cwd)
+          ? "project"
+          : "global",
   }
 }
 

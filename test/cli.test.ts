@@ -392,6 +392,16 @@ describe("runCli", () => {
     )
   })
 
+  it("adds source tracing to explain output for opencode", async () => {
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps())
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.routeSource).toBe("explicit_route")
+    expect(output.configSource).toBe("project")
+  })
+
   it("includes compatibility warning text and continues in warn-mode sync", async () => {
     const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
       evaluateSuperpowersCompatibility: () => incompatibleOpencodeWarn,
@@ -757,6 +767,17 @@ describe("runCli", () => {
       },
       presets: controlPlaneConfig.presets,
     })
+  })
+
+  it("reports that use changed the active preset and now recommends sync", async () => {
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps())
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.changed).toBe(true)
+    expect(output.activePreset.key).toBe("review")
+    expect(output.nextAction.command).toBe("oh-my-superagents sync --host opencode")
   })
 
   it("rejects an unknown preset in use", async () => {
