@@ -425,6 +425,16 @@ function resolveLaneState(config: ControlPlaneConfig, activePreset: { key: strin
   }
 }
 
+function sanitizeSettingsDefaultLane(settings: ControlPlaneConfig["settings"], preset: ControlPlanePreset | undefined) {
+  if (!settings.defaultLane || !preset) {
+    return settings
+  }
+
+  return (preset.usesLanes ?? []).includes(settings.defaultLane)
+    ? settings
+    : { ...settings, defaultLane: undefined }
+}
+
 function validateControlPlaneConfig(config: ControlPlaneConfig) {
   const activePreset = config.presets[config.settings.activePreset]
   if (!activePreset) {
@@ -598,13 +608,15 @@ export async function prepareControlPlaneStateWrite(
     resolvedConfig = createDefaultControlPlaneConfig()
   }
 
+  const nextSettings = sanitizeSettingsDefaultLane({
+    ...resolvedConfig.settings,
+    activePreset: input.nextState.activePreset,
+    enabled: input.nextState.enabled,
+  }, resolvedConfig.presets[input.nextState.activePreset])
+
   const nextConfig: ControlPlaneConfig = {
     ...resolvedConfig,
-    settings: {
-      ...resolvedConfig.settings,
-      activePreset: input.nextState.activePreset,
-      enabled: input.nextState.enabled,
-    },
+    settings: nextSettings,
   }
   validateControlPlaneConfig(nextConfig)
 
@@ -625,6 +637,12 @@ export async function prepareControlPlaneStateWrite(
   }
 
   nextDocument = applyNextState(nextDocument, input.nextState)
+  if (nextDocument.settings) {
+    nextDocument.settings = sanitizeSettingsDefaultLane(
+      nextDocument.settings as ControlPlaneConfig["settings"],
+      resolvedConfig.presets[input.nextState.activePreset],
+    )
+  }
 
   if (!target.hasLowerPrioritySource && (!target.exists || sourceFormat === "legacy")) {
     nextDocument = ensureStandaloneSettings(nextDocument)

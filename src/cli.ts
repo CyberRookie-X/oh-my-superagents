@@ -1274,6 +1274,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           },
           config: prepared.config,
           activePreset: fallback.activePreset,
+          laneState: fallback.laneState,
         }
       }
 

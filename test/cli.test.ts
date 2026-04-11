@@ -117,6 +117,13 @@ const controlPlaneConfig = {
   },
 }
 
+const defaultLaneState = {
+  allowedLanes: [] as string[],
+  defaultLane: undefined,
+  effectiveLane: undefined,
+  presetDefaultLane: undefined,
+}
+
 function renderOwnedMarkdownArtifact(name: string) {
   return `---\ndescription: '${name}'\n---\n\n<!-- ${MARKER_TEXT} -->\n`
 }
@@ -363,6 +370,7 @@ function createCliDeps(overrides: Record<string, unknown> = {}) {
         key: "default",
         preset: controlPlaneConfig.presets.default,
       },
+      laneState: defaultLaneState,
     }),
     ...defaultArtifactFs,
     ...overrides,
@@ -659,6 +667,7 @@ describe("runCli", () => {
           source: { kind: "default" as const, hasRealSource: false, sources: [] },
           config: controlPlaneConfig,
           activePreset: { key: "default", preset: controlPlaneConfig.presets.default },
+          laneState: defaultLaneState,
         }
       },
       prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
