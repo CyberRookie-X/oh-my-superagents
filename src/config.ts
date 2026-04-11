@@ -90,7 +90,7 @@ const LayeredSettingsSchema = z
   .object({
     enabled: z.boolean().optional(),
     activePreset: z.string().min(1).optional(),
-    defaultLane: z.string().min(1).optional(),
+    defaultLane: z.union([z.string().min(1), z.null()]).optional(),
     laneSelection: LaneSelectionSchema.optional(),
     commandPrefix: z.string().min(1).optional(),
     commands: CommandsOverrideSchema.optional(),
@@ -370,15 +370,21 @@ function mergeLayeredConfigs(
   lowerPriority: LayeredControlPlaneConfigInput,
   higherPriority: LayeredControlPlaneConfigInput,
 ): LayeredControlPlaneConfigInput {
-  return {
-    settings: {
-      ...lowerPriority.settings,
-      ...higherPriority.settings,
-      commands: {
-        ...lowerPriority.settings?.commands,
-        ...higherPriority.settings?.commands,
-      },
+  const mergedSettings = {
+    ...lowerPriority.settings,
+    ...higherPriority.settings,
+    commands: {
+      ...lowerPriority.settings?.commands,
+      ...higherPriority.settings?.commands,
     },
+  }
+
+  if (higherPriority.settings && hasOwnKey(higherPriority.settings, "defaultLane") && higherPriority.settings.defaultLane === null) {
+    mergedSettings.defaultLane = undefined
+  }
+
+  return {
+    settings: mergedSettings,
     profiles: {
       ...lowerPriority.profiles,
       ...higherPriority.profiles,
@@ -415,7 +421,7 @@ function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneCon
     settings: {
       enabled: merged.settings?.enabled ?? true,
       activePreset: merged.settings?.activePreset ?? "default",
-      defaultLane: merged.settings?.defaultLane,
+      defaultLane: merged.settings?.defaultLane ?? undefined,
       laneSelection: merged.settings?.laneSelection ?? { mode: "suggest" },
       commandPrefix: merged.settings?.commandPrefix ?? "oms",
       commands: synthesizeCommands(merged.settings?.commands),

@@ -425,14 +425,27 @@ function resolveLaneState(config: ControlPlaneConfig, activePreset: { key: strin
   }
 }
 
-function normalizeSettingsDefaultLane(settings: ControlPlaneConfig["settings"], preset: ControlPlanePreset | undefined) {
+function clearInvalidSettingsDefaultLane(settings: ControlPlaneConfig["settings"], preset: ControlPlanePreset | undefined) {
   if (!settings.defaultLane || !preset) {
     return settings
   }
 
   return (preset.usesLanes ?? []).includes(settings.defaultLane)
     ? settings
-    : { ...settings, defaultLane: preset.defaultLane }
+    : { ...settings, defaultLane: undefined }
+}
+
+function clearInvalidDocumentDefaultLane(
+  settings: LayeredControlPlaneConfigInput["settings"],
+  preset: ControlPlanePreset | undefined,
+) {
+  if (!settings?.defaultLane || !preset) {
+    return settings
+  }
+
+  return (preset.usesLanes ?? []).includes(settings.defaultLane)
+    ? settings
+    : { ...settings, defaultLane: null }
 }
 
 function validateControlPlaneConfig(config: ControlPlaneConfig) {
@@ -608,7 +621,7 @@ export async function prepareControlPlaneStateWrite(
     resolvedConfig = createDefaultControlPlaneConfig()
   }
 
-  const nextSettings = normalizeSettingsDefaultLane({
+  const nextSettings = clearInvalidSettingsDefaultLane({
     ...resolvedConfig.settings,
     activePreset: input.nextState.activePreset,
     enabled: input.nextState.enabled,
@@ -638,13 +651,14 @@ export async function prepareControlPlaneStateWrite(
 
   nextDocument = applyNextState(nextDocument, input.nextState)
   if (nextDocument.settings) {
-    nextDocument.settings = normalizeSettingsDefaultLane(
-      {
-        ...(nextDocument.settings as ControlPlaneConfig["settings"]),
-        defaultLane: nextConfig.settings.defaultLane,
-      },
+    nextDocument.settings = clearInvalidDocumentDefaultLane(
+      nextDocument.settings,
       resolvedConfig.presets[input.nextState.activePreset],
     )
+
+    if (target.hasLowerPrioritySource && resolvedConfig.settings.defaultLane && !nextConfig.settings.defaultLane) {
+      nextDocument.settings = { ...nextDocument.settings, defaultLane: null }
+    }
   }
 
   if (!target.hasLowerPrioritySource && (!target.exists || sourceFormat === "legacy")) {

@@ -416,6 +416,59 @@ describe("loadControlPlaneConfig", () => {
     })
   })
 
+  it("treats settings.defaultLane null as clearing an inherited lower-priority lane", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "default",
+          "defaultLane": "frontend"
+        },
+        "profiles": {
+          "frontend-build": { "model": "openai/gpt-5" },
+          "backend-build": { "model": "gpt-5.4" }
+        },
+        "lanes": {
+          "frontend": {
+            "label": "Frontend",
+            "routes": {},
+            "defaultRoute": "frontend-build"
+          },
+          "backend": {
+            "label": "Backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["frontend", "backend"],
+            "defaultLane": "backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "defaultLane": null
+        },
+        "presets": {}
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.config.settings.defaultLane).toBeUndefined()
+    expect(result.config.presets.default.defaultLane).toBe("backend")
+  })
+
   it("keeps schema parity for non-empty layered preset keys", async () => {
     await expect(
       loadControlPlaneConfig({
@@ -535,7 +588,7 @@ describe("loadControlPlaneConfig", () => {
     expect(
       layeredShape?.properties?.settings?.properties?.commands?.properties?.status?.properties?.aliases?.items?.pattern,
     ).toBe("^[a-z0-9-]+$")
-    expect(layeredShape?.properties?.settings?.properties?.defaultLane?.type).toBe("string")
+    expect(layeredShape?.properties?.settings?.properties?.defaultLane?.type).toEqual(["string", "null"])
     expect(layeredShape?.properties?.settings?.properties?.defaultLane?.minLength).toBe(1)
     expect(layeredShape?.properties?.settings?.properties?.laneSelection?.properties?.mode?.enum).toEqual([
       "manual",

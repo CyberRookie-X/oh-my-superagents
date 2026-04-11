@@ -1122,7 +1122,7 @@ describe("resolveControlPlane", () => {
     })
   })
 
-  it("replaces a persisted settings.defaultLane with the new preset defaultLane when switching presets", async () => {
+  it("clears a persisted settings.defaultLane when switching presets", async () => {
     const files = {
       "/workspace/project/oh-my-superagents.config.jsonc": `{
         "settings": {
@@ -1189,16 +1189,16 @@ describe("resolveControlPlane", () => {
     }
 
     expect(result.config.settings.activePreset).toBe("backend")
-    expect(result.config.settings.defaultLane).toBe("backend")
+    expect(result.config.settings.defaultLane).toBeUndefined()
     expect(serialized.settings).toEqual({
       activePreset: "backend",
       enabled: true,
-      defaultLane: "backend",
+      defaultLane: null,
       laneSelection: { mode: "suggest" },
     })
   })
 
-  it("writes an explicit replacement defaultLane when a stale lane is inherited from a lower-priority layer", async () => {
+  it("writes a null defaultLane sentinel when a stale lane is inherited from a lower-priority layer", async () => {
     const files = {
       "/home/tester/.config/oh-my-superagents/config.jsonc": `{
         "settings": {
@@ -1270,11 +1270,11 @@ describe("resolveControlPlane", () => {
     }
 
     expect(result.config.settings.activePreset).toBe("backend")
-    expect(result.config.settings.defaultLane).toBe("backend")
+    expect(result.config.settings.defaultLane).toBeUndefined()
     expect(serialized.settings).toEqual({
       activePreset: "backend",
       enabled: true,
-      defaultLane: "backend",
+      defaultLane: null,
     })
   })
 })

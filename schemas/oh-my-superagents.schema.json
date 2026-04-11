@@ -9,7 +9,7 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "activePreset": { "type": "string", "minLength": 1 },
-        "defaultLane": { "type": "string", "minLength": 1 },
+        "defaultLane": { "type": ["string", "null"], "minLength": 1 },
         "laneSelection": {
           "type": "object",
           "additionalProperties": false,
@@ -129,7 +129,7 @@
           "properties": {
             "enabled": { "type": "boolean" },
             "activePreset": { "type": "string", "minLength": 1 },
-            "defaultLane": { "type": "string", "minLength": 1 },
+            "defaultLane": { "type": ["string", "null"], "minLength": 1 },
             "laneSelection": {
               "type": "object",
               "additionalProperties": false,
