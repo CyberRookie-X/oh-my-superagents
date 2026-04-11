@@ -48,19 +48,9 @@ type LaneContext = {
   effectiveLane?: string
 }
 
-type LaneAwareRouterConfig = RouterConfig & {
-  lanes?: Record<
-    string,
-    {
-      routes: Record<string, string>
-      defaultRoute: string
-    }
-  >
-}
-
 export function resolvePhase(config: RouterConfig, phase: BuiltInPhase, laneContext: LaneContext = {}): ResolvedRoute {
-  const effectiveLane = laneContext.effectiveLane
-  const lane = effectiveLane ? (config as LaneAwareRouterConfig).lanes?.[effectiveLane] : undefined
+  const effectiveLane = laneContext.effectiveLane ?? config.effectiveLane
+  const lane = effectiveLane ? config.lanes?.[effectiveLane] : undefined
 
   const presetRoute = config.routes[phase]
   const laneRoute = lane?.routes[phase]

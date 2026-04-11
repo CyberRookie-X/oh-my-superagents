@@ -354,8 +354,10 @@ function toRouterConfig(config: ResolvedControlPlane["config"]) {
       ...(config.profiles ?? {}),
       ...(activePreset.profiles ?? {}),
     },
+    lanes: config.lanes,
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
+    effectiveLane: config.settings.defaultLane ?? activePreset.defaultLane,
     superpowersCompatibility: config.settings.superpowersCompatibility,
   }
 }

@@ -128,8 +128,10 @@ export type SuperpowersCompatibilityConfig = {
 
 export type RouterConfig = {
   profiles: Record<string, ControlPlaneProfile>
+  lanes?: Record<string, ControlPlaneLane>
   routes: Record<string, string>
   defaultRoute: string
+  effectiveLane?: string
   superpowersCompatibility?: SuperpowersCompatibilityConfig
 }
 
@@ -649,8 +651,10 @@ export async function loadRouterConfig(input: LoadRouterConfigInput): Promise<Lo
       ...loaded.config.profiles,
       ...(activePreset.profiles ?? {}),
     },
+    lanes: loaded.config.lanes,
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
+    effectiveLane: loaded.config.settings.defaultLane ?? activePreset.defaultLane,
     superpowersCompatibility: loaded.config.settings.superpowersCompatibility,
   }
 

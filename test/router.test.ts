@@ -47,7 +47,7 @@ describe("resolvePhase", () => {
     expect(resolvePhase(config, "webapp-testing").profileId).toBe("build")
   })
 
-  it("falls back to preset defaultRoute when there is no effective lane", () => {
+  it("falls back to preset defaultRoute with preset-default metadata when there is no effective lane", () => {
     const laneAwareConfig = {
       profiles: { build: { model: "openai/gpt-5" } },
       lanes: {},
@@ -55,7 +55,11 @@ describe("resolvePhase", () => {
       defaultRoute: "build",
     }
 
-    expect(resolvePhase(laneAwareConfig as never, "writing-plans").profileId).toBe("build")
+    expect(resolvePhase(laneAwareConfig as never, "writing-plans")).toMatchObject({
+      profileId: "build",
+      routeSource: "preset-default",
+      effectiveLane: undefined,
+    })
   })
 
   it("keeps effort and codexFast as independent resolved route properties", () => {

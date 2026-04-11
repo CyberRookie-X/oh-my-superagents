@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { runCli } from "../src/cli.js"
 import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-plane.js"
 import { MARKER_TEXT } from "../src/opencode.js"
+import { explainPhase } from "../src/router.js"
 
 const baseConfig = {
   profiles: { build: { model: "openai/gpt-5" } },
@@ -425,6 +426,74 @@ describe("runCli", () => {
     expect(output.routeSource).toBe("explicit_route")
     expect(output.configSource).toBe("project")
     expect(output.reuseRelationship).toBe("none")
+  })
+
+  it("routes explain through the control-plane effective lane", async () => {
+    const laneAwareControlPlaneConfig = {
+      ...controlPlaneConfig,
+      settings: {
+        ...controlPlaneConfig.settings,
+        defaultLane: "frontend",
+      },
+      profiles: {
+        "frontend-strategy": {
+          model: "google/gemini-2.5-pro",
+          variant: "high",
+        },
+        build: { model: "openai/gpt-5" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { brainstorming: "frontend-strategy" },
+          defaultRoute: "build",
+        },
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          profiles: undefined,
+          usesLanes: ["frontend"],
+          defaultLane: "frontend",
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      explainPhaseForHost: (config: any, host: "opencode" | "codex", phase: any) => (
+        host === "opencode" ? explainPhase(config, phase) : { phase, profileId: "unused" }
+      ),
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: laneAwareControlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: laneAwareControlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend"],
+          defaultLane: "frontend",
+          presetDefaultLane: "frontend",
+          effectiveLane: "frontend",
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.profileId).toBe("frontend-strategy")
+    expect(output.model).toBe("google/gemini-2.5-pro")
+    expect(output.effectiveLane).toBe("frontend")
+    expect(output.routeSource).toBe("lane-route")
   })
 
   it("explains correctly when the active preset uses top-level profiles", async () => {

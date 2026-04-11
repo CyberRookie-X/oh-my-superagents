@@ -117,6 +117,29 @@ describe("buildArtifacts", () => {
     ).toThrow(/spr-visual/)
   })
 
+  it("uses the effective lane when generating shared agents", () => {
+    const artifacts = buildArtifacts({
+      profiles: {
+        backend: { model: "openai/gpt-5" },
+        frontend: { model: "google/gemini-2.5-pro", variant: "high" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { brainstorming: "frontend" },
+          defaultRoute: "frontend",
+        },
+      },
+      routes: {},
+      defaultRoute: "backend",
+      effectiveLane: "frontend",
+    } as RouterConfig)
+
+    const strategyAgent = artifacts.agents.find((item) => item.fileName === "spr-strategy.md")
+
+    expect(strategyAgent?.content).toContain("google/gemini-2.5-pro")
+  })
+
   it("renders one .opencode/commands file per primary OMS command", () => {
     const settings = createDefaultControlPlaneConfig().settings
     const artifacts = buildArtifactsWithControlPlane(createRouterConfig(), settings)
