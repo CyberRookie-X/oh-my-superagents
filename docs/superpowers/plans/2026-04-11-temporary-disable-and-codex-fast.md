@@ -431,10 +431,18 @@ Add a short note below the matrix:
 Add a config example note near the profile example:
 
 ```jsonc
-"build": {
-  "model": "gpt-5.3-codex-spark",
-  "effort": "balanced",
-  "codexFast": true
+"presets": {
+  "default": {
+    "profiles": {
+      "build": {
+        "model": "gpt-5.3-codex-spark",
+        "effort": "balanced",
+        "codexFast": true
+      }
+    },
+    "routes": {},
+    "defaultRoute": "build"
+  }
 }
 ```
 

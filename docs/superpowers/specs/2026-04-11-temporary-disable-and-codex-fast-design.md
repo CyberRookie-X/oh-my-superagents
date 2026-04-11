@@ -176,10 +176,16 @@ It should be exposed publicly as:
 
 ```jsonc
 {
-  "profiles": {
-    "build": {
-      "model": "openai/gpt-5",
-      "codexFast": true
+  "presets": {
+    "default": {
+      "profiles": {
+        "build": {
+          "model": "openai/gpt-5",
+          "codexFast": true
+        }
+      },
+      "routes": {},
+      "defaultRoute": "build"
     }
   }
 }
