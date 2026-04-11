@@ -90,6 +90,21 @@ function classifyConfigSource(filePath: string | undefined, cwd: string): Explai
   return filePath === getProjectConfigPath(cwd) ? "project" : "global"
 }
 
+function chooseMostLocalConfigSource(
+  filePaths: Array<string | undefined>,
+  cwd: string,
+): ExplainTrace["configSource"] {
+  if (filePaths.some((filePath) => filePath === getProjectConfigPath(cwd))) {
+    return "project"
+  }
+
+  if (filePaths.some((filePath) => Boolean(filePath))) {
+    return "global"
+  }
+
+  return "default"
+}
+
 export function summarizeControlPlaneArtifacts(input: {
   present: string[]
   missing: string[]
@@ -165,17 +180,23 @@ export function buildControlPlaneExplainTrace(input: {
   const activeDefinition = input.resolved.trace?.activePresetDefinition
   const parentDefinition = input.resolved.trace?.parentPresetDefinition
   const fallbackPath = input.resolved.source.kind === "file" ? input.resolved.source.path : undefined
+  const selectedProfileId = input.resolved.activePreset.preset.routes[input.phase] ?? input.resolved.activePreset.preset.defaultRoute
   const decisivePath = activeDefinition?.preset.routes[input.phase]
     ? activeDefinition.path
     : parentDefinition?.preset.routes[input.phase]
       ? parentDefinition.path
       : activeDefinition?.path ?? fallbackPath
+  const selectedProfilePath = activeDefinition?.preset.profiles[selectedProfileId]
+    ? activeDefinition.path
+    : parentDefinition?.preset.profiles[selectedProfileId]
+      ? parentDefinition.path
+      : fallbackPath
 
   return {
     routeSource: input.resolved.activePreset.preset.routes[input.phase] ? "explicit_route" : "default_route",
     configSource: input.resolved.source.kind === "default"
       ? "default"
-      : classifyConfigSource(decisivePath, input.cwd),
+      : chooseMostLocalConfigSource([decisivePath, selectedProfilePath], input.cwd),
     reuseRelationship: input.resolved.activePreset.preset.extends ? "extends" : "none",
   }
 }

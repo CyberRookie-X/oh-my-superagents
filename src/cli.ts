@@ -239,11 +239,18 @@ function buildUseRouteImpact(previous: ResolvedControlPlane["config"], next: Res
     changedPhases: BUILT_IN_PHASES.filter((phase) => {
       const previousResolved = resolvePhase(previousRouter, phase)
       const nextResolved = resolvePhase(nextRouter, phase)
+      const previousVisibleSelection = {
+        model: previousResolved.selection.model,
+        variant: previousResolved.selection.variant,
+        temperature: previousResolved.selection.temperature,
+      }
+      const nextVisibleSelection = {
+        model: nextResolved.selection.model,
+        variant: nextResolved.selection.variant,
+        temperature: nextResolved.selection.temperature,
+      }
 
-      return (
-        previousResolved.profileId !== nextResolved.profileId
-        || JSON.stringify(previousResolved.selection) !== JSON.stringify(nextResolved.selection)
-      )
+      return JSON.stringify(previousVisibleSelection) !== JSON.stringify(nextVisibleSelection)
     }),
   }
 }

@@ -506,6 +506,63 @@ describe("runCli", () => {
     expect(output.reuseRelationship).toBe("none")
   })
 
+  it("prefers the project layer when a reused parent route selects a profile overridden locally", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "strategy": { "model": "anthropic/claude-sonnet-4-5-20250929", "variant": "high" },
+              "build": { "model": "openai/gpt-5", "effort": "balanced" }
+            },
+            "routes": {
+              "brainstorming": "strategy"
+            },
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "child"
+        },
+        "presets": {
+          "child": {
+            "label": "Child",
+            "short": "child",
+            "extends": "default",
+            "profiles": {
+              "strategy": { "model": "openai/gpt-5", "variant": "medium" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      resolveControlPlane: async () => resolveOmsControlPlane({
+        command: "status",
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        exists: createExists(files),
+        readFile: createReadFile(files),
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.configSource).toBe("project")
+    expect(output.reuseRelationship).toBe("extends")
+  })
+
   it("includes compatibility warning text and continues in warn-mode sync", async () => {
     const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
       evaluateSuperpowersCompatibility: () => incompatibleOpencodeWarn,
@@ -1003,6 +1060,59 @@ describe("runCli", () => {
 
     expect(result.exitCode).toBe(0)
     expect(output.routeImpact.changedPhases).toContain("writing-plans")
+  })
+
+  it("does not mark a phase as changed when only effort vs explicit variant differ but OpenCode rendering stays the same", async () => {
+    const equivalentVariantConfig = {
+      ...controlPlaneConfig,
+      presets: {
+        ...controlPlaneConfig.presets,
+        review: {
+          ...controlPlaneConfig.presets.review,
+          profiles: {
+            build: {
+              model: "openai/gpt-5",
+              variant: "medium",
+            },
+          },
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: equivalentVariantConfig,
+        activePreset: {
+          key: "default",
+          preset: equivalentVariantConfig.presets.default,
+        },
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({ settings: nextState }, null, 2),
+        config: {
+          ...equivalentVariantConfig,
+          settings: {
+            ...equivalentVariantConfig.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.routeImpact.changedPhases).not.toContain("writing-plans")
   })
 
   it("omits activePreset.description in use output when the selected preset has no description", async () => {
