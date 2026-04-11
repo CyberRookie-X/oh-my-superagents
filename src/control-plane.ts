@@ -15,6 +15,7 @@ import {
   loadControlPlaneConfig,
   type LoadControlPlaneConfigInput,
   readControlPlaneSourceDocument,
+  resolvePresetReuse,
 } from "./config.js"
 import type { BuiltInPhase } from "./router.js"
 import type { SuperpowersCompatibilityResult, SupportedSuperpowersHost } from "./superpowers-compatibility.js"
@@ -88,7 +89,7 @@ export type RoutingValidationSummary = {
   unusedProfiles: string[]
   reuseRelationship:
     | { kind: "none"; parentPresetKey: null; resolvable: true }
-    | { kind: "extends"; parentPresetKey: string; resolvable: true }
+    | { kind: "extends"; parentPresetKey: string; resolvable: boolean }
 }
 
 function classifyConfigSource(filePath: string | undefined, cwd: string): ExplainTrace["configSource"] {
@@ -222,22 +223,32 @@ export function summarizeRoutingValidation(
   const explicitRoutedPhases = BUILT_IN_PHASES.filter((phase) => phase in preset.routes)
   const defaultRoutedPhases = BUILT_IN_PHASES.filter((phase) => !(phase in preset.routes))
   const usedProfiles = new Set<string>([preset.defaultRoute, ...Object.values(preset.routes)])
+  const reuseRelationship: RoutingValidationSummary["reuseRelationship"] = preset.extends
+    ? {
+        kind: "extends" as const,
+        parentPresetKey: preset.extends,
+        resolvable: isPresetReuseResolvable(config, presetKey),
+      }
+    : {
+        kind: "none" as const,
+        parentPresetKey: null,
+        resolvable: true,
+      }
 
   return {
     defaultRoutedPhases,
     explicitRoutedPhases,
     unusedProfiles: Object.keys(preset.profiles).filter((profileKey) => !usedProfiles.has(profileKey)),
-    reuseRelationship: preset.extends
-      ? {
-          kind: "extends",
-          parentPresetKey: preset.extends,
-          resolvable: true,
-        }
-      : {
-          kind: "none",
-          parentPresetKey: null,
-          resolvable: true,
-        },
+    reuseRelationship,
+  }
+}
+
+function isPresetReuseResolvable(config: ControlPlaneConfig, presetKey: string) {
+  try {
+    resolvePresetReuse(config)
+    return true
+  } catch {
+    return false
   }
 }
 

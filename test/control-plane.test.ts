@@ -912,7 +912,7 @@ describe("resolveControlPlane", () => {
 })
 
 describe("summarizeRoutingValidation", () => {
-  it("reports explicit routes, default-routed phases, unused profiles, and resolvable reuse", () => {
+  it("reports explicit routes, default-routed phases, unused profiles, and invalid missing-parent reuse", () => {
     const summary = summarizeRoutingValidation({
       settings: {
         enabled: true,
@@ -948,6 +948,53 @@ describe("summarizeRoutingValidation", () => {
     expect(summary.explicitRoutedPhases).toEqual(["brainstorming"])
     expect(summary.defaultRoutedPhases).toContain("requesting-code-review")
     expect(summary.unusedProfiles).toEqual(["unused"])
+    expect(summary.reuseRelationship).toEqual({
+      kind: "extends",
+      parentPresetKey: "base",
+      resolvable: false,
+    })
+  })
+
+  it("reports resolvable reuse when the parent preset exists", () => {
+    const summary = summarizeRoutingValidation({
+      settings: {
+        enabled: true,
+        activePreset: "child",
+        commandPrefix: "oms",
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      presets: {
+        base: {
+          label: "Base",
+          short: "base",
+          profiles: {
+            build: { model: "openai/gpt-5" },
+          },
+          routes: {},
+          defaultRoute: "build",
+        },
+        child: {
+          label: "Child",
+          short: "child",
+          extends: "base",
+          profiles: {
+            review: { model: "anthropic/claude-sonnet-4-5" },
+          },
+          routes: {
+            brainstorming: "review",
+          },
+          defaultRoute: "build",
+        },
+      },
+    }, "child")
+
     expect(summary.reuseRelationship).toEqual({
       kind: "extends",
       parentPresetKey: "base",
