@@ -1067,6 +1067,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     if (command === "sync") {
       let resolved: ResolvedControlPlane
       let bootstrappedConfigPath: string | undefined
+      let compatibility
 
       try {
         resolved = await deps.resolveControlPlane({ command: "sync", cwd, explicitPath })
@@ -1076,6 +1077,24 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         }
 
         const fallback = await deps.resolveControlPlane({ command: "status", cwd, explicitPath })
+        compatibility = await resolveCompatibilityForCliHost(
+          cliHost,
+          fallback.config.settings.superpowersCompatibility.mode,
+          deps,
+        )
+
+        if (compatibility?.shouldBlock) {
+          return {
+            exitCode: 1,
+            stdout: JSON.stringify(
+              withCompatibility({ exitCode: 1 as const, warnings: [], written: [], removed: [] }, compatibility),
+              null,
+              2,
+            ),
+            stderr: formatCompatibilityBlock(compatibility),
+          }
+        }
+
         const prepared = await deps.prepareControlPlaneStateWrite({
           command: "sync",
           cwd,
@@ -1100,7 +1119,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         }
       }
 
-      const compatibility = await resolveCompatibilityForCliHost(
+      compatibility ??= await resolveCompatibilityForCliHost(
         cliHost,
         resolved.config.settings.superpowersCompatibility.mode,
         deps,
