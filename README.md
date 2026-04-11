@@ -15,6 +15,8 @@ Thin routing and host-local OMS control-plane support for `superpowers` on OpenC
 | Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | Not planned |
 | Compatibility monitor | Full | Full | None yet | Not planned |
 | Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | None |
+| Temporary disable helper | Full | Full | None yet | Not planned |
+| `codexFast` | Partial | Full | None yet | Not planned |
 
 Support level notes:
 
@@ -22,6 +24,11 @@ Support level notes:
 - `Partial`: implemented with explicit stage limits documented below
 - `None yet`: not implemented in the current release
 - `Not planned`: intentionally out of scope for now
+
+Feature notes:
+
+- The temporary disable helper is host-local, conversation-scoped, and does not change persistent OMS state.
+- `codexFast` is full on Codex and staged on OpenCode. Qwen does not support it yet.
 
 ## Implementation Footprint
 
@@ -132,6 +139,20 @@ Create `oh-my-superagents.config.jsonc` in your project root:
       },
       "routes": {},
       "defaultRoute": "review"
+    }
+  }
+}
+```
+
+For a Codex-compatible profile, enable `codexFast` explicitly:
+
+```jsonc
+{
+  "profiles": {
+    "build": {
+      "model": "gpt-5.4",
+      "effort": "balanced",
+      "codexFast": true
     }
   }
 }

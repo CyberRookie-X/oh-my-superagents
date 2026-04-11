@@ -15,6 +15,8 @@
 | 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂不计划 |
 | 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂不计划 |
 | 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | 无 |
+| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂不计划 |
+| `codexFast` | 部分支持 | 完整支持 | 暂未实现 | 暂不计划 |
 
 支持等级说明：
 
@@ -22,6 +24,11 @@
 - `部分支持`：已实现，但有明确的阶段性边界
 - `暂未实现`：当前版本还没有做
 - `暂不计划`：现阶段明确不做
+
+补充说明：
+
+- 临时停用 helper 是宿主本地、会话级的提示便捷功能，不会改变持久化的 OMS 状态。
+- `codexFast` 在 Codex 上是完整支持，在 OpenCode 上仍属于分阶段/部分支持；Qwen 目前还不支持。
 
 ## 实现厚度
 
@@ -134,6 +141,20 @@ npx oh-my-superagents sync --host opencode
         "brainstorming": "strategy"
       },
       "defaultRoute": "build"
+    }
+  }
+}
+```
+
+如果是给 Codex 兼容 profile 显式开启快速层，可以这样写：
+
+```jsonc
+{
+  "profiles": {
+    "build": {
+      "model": "gpt-5.4",
+      "effort": "balanced",
+      "codexFast": true
     }
   }
 }
