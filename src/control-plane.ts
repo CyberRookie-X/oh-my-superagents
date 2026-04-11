@@ -75,6 +75,7 @@ export type ControlPlaneArtifactSummary = {
 export type ExplainTrace = {
   routeSource: "explicit_route" | "default_route"
   configSource: "project" | "global" | "default"
+  presetSource: "preset_local" | "reuse_relationship"
 }
 
 export function summarizeControlPlaneArtifacts(input: {
@@ -156,6 +157,7 @@ export function buildControlPlaneExplainTrace(input: {
       : input.resolved.source.path === getProjectConfigPath(input.cwd)
         ? "project"
         : "global",
+    presetSource: input.resolved.activePreset.preset.extends ? "reuse_relationship" : "preset_local",
   }
 }
 

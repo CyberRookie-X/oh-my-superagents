@@ -211,7 +211,77 @@ function withExplainTrace(payload: Record<string, unknown>, trace: ExplainTrace)
     ...payload,
     routeSource: typeof payload.routeSource === "string" ? payload.routeSource : trace.routeSource,
     configSource: typeof payload.configSource === "string" ? payload.configSource : trace.configSource,
+    presetSource: typeof payload.presetSource === "string" ? payload.presetSource : trace.presetSource,
   }
+}
+
+function formatPostWriteControlPlaneSource(
+  resolved: ResolvedControlPlane,
+  prepared: Awaited<ReturnType<typeof prepareControlPlaneStateWrite>>,
+) {
+  if (resolved.source.kind === "default") {
+    return {
+      kind: "file" as const,
+      hasRealSource: true,
+      path: prepared.path,
+      sources: [prepared.path],
+    }
+  }
+
+  return formatControlPlaneSource(resolved)
+}
+
+function buildUseRouteImpact(previous: ResolvedControlPlane["config"], next: ResolvedControlPlane["config"]) {
+  const previousRouter = toRouterConfig(previous)
+  const nextRouter = toRouterConfig(next)
+
+  return {
+    changedPhases: BUILT_IN_PHASES.filter((phase) => {
+      const previousExplain = explainPhase(previousRouter, phase)
+      const nextExplain = explainPhase(nextRouter, phase)
+
+      return (
+        previousExplain.profileId !== nextExplain.profileId
+        || previousExplain.model !== nextExplain.model
+        || previousExplain.variant !== nextExplain.variant
+      )
+    }),
+  }
+}
+
+function serializeArtifacts(artifacts: Awaited<ReturnType<typeof getArtifactsForHost>>) {
+  return artifacts
+    .map((artifact) => `${artifact.directory}/${artifact.fileName}\n${artifact.content}`)
+    .sort()
+}
+
+async function computeArtifactsDiffer(
+  cwd: string,
+  host: CliHost,
+  resolved: ResolvedControlPlane,
+  prepared: Awaited<ReturnType<typeof prepareControlPlaneStateWrite>>,
+  deps: CliDeps,
+) {
+  const previousArtifacts = await getArtifactsForHost(
+    cwd,
+    toRouterConfig(resolved.config),
+    host,
+    deps,
+    resolved.config.settings,
+  )
+  const nextArtifacts = await getArtifactsForHost(
+    cwd,
+    toRouterConfig(prepared.config),
+    host,
+    deps,
+    prepared.config.settings,
+  )
+
+  const previousSerialized = serializeArtifacts(previousArtifacts)
+  const nextSerialized = serializeArtifacts(nextArtifacts)
+
+  return previousSerialized.length !== nextSerialized.length
+    || previousSerialized.some((artifact, index) => artifact !== nextSerialized[index])
 }
 
 function attachExplainTrace(
@@ -1059,6 +1129,8 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           artifacts: await getArtifactsForHost(cwd, toRouterConfig(prepared.config), cliHost, deps, prepared.config.settings),
           fs: nodeFs,
         })
+      const routeImpact = buildUseRouteImpact(resolved.config, prepared.config)
+      const artifactsDiffer = await computeArtifactsDiffer(cwd, cliHost, resolved, prepared, deps)
       const payload: {
         exitCode: 0 | 1 | 2
         warnings: string[]
@@ -1066,6 +1138,10 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         removed: string[]
         changed: boolean
         source: ReturnType<typeof formatControlPlaneSource>
+        artifactsDiffer: boolean
+        routeImpact: {
+          changedPhases: BuiltInPhase[]
+        }
         activePreset: {
           key: string
           label: string
@@ -1086,7 +1162,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           written: [prepared.path, ...result.written],
           removed: result.removed,
           changed,
-          source: formatControlPlaneSource(resolved),
+          source: formatPostWriteControlPlaneSource(resolved, prepared),
+          artifactsDiffer,
+          routeImpact,
           activePreset: {
             key: nextPreset,
             label: activePreset.label,

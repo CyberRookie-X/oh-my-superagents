@@ -400,6 +400,7 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(output.routeSource).toBe("explicit_route")
     expect(output.configSource).toBe("project")
+    expect(output.presetSource).toBe("preset_local")
   })
 
   it("keeps configSource rooted in the real file source when inheritance is not proven per phase", async () => {
@@ -440,6 +441,7 @@ describe("runCli", () => {
 
     expect(result.exitCode).toBe(0)
     expect(output.configSource).toBe("project")
+    expect(output.presetSource).toBe("reuse_relationship")
   })
 
   it("includes compatibility warning text and continues in warn-mode sync", async () => {
@@ -809,8 +811,67 @@ describe("runCli", () => {
     })
   })
 
+  it("reports the post-write real config source after first-write use bootstraps a config file", async () => {
+    let persistedPath = ""
+    const createdDirectories: string[] = []
+
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: { kind: "default" as const, hasRealSource: false, sources: [] },
+        config: controlPlaneConfig,
+        activePreset: { key: "default", preset: controlPlaneConfig.presets.default },
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/home/tester/.config/oh-my-superagents/config.jsonc",
+        content: JSON.stringify({ settings: nextState, presets: controlPlaneConfig.presets }, null, 2),
+        config: {
+          ...controlPlaneConfig,
+          settings: {
+            ...controlPlaneConfig.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+      mkdir: async (directory: string) => {
+        createdDirectories.push(directory)
+      },
+      writeFile: async (filePath: string) => {
+        if (!createdDirectories.includes(path.dirname(filePath))) {
+          throw new Error(`ENOENT: missing parent directory for ${filePath}`)
+        }
+
+        persistedPath = filePath
+      },
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(persistedPath).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(output.source).toEqual({
+      kind: "file",
+      hasRealSource: true,
+      path: "/home/tester/.config/oh-my-superagents/config.jsonc",
+      sources: ["/home/tester/.config/oh-my-superagents/config.jsonc"],
+    })
+  })
+
   it("reports that use changed the active preset without a redundant sync recommendation after success", async () => {
-    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps())
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      buildArtifacts: (config: any) => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".opencode/agents",
+            fileName: `spr-${config.defaultRoute}.md`,
+            ownerPrefix: "spr-",
+            content: config.defaultRoute,
+          },
+        ],
+        commands: [],
+      }),
+    }))
 
     const output = JSON.parse(result.stdout)
 
@@ -822,6 +883,8 @@ describe("runCli", () => {
       path: "/workspace/project/oh-my-superagents.config.jsonc",
       sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
     })
+    expect(output.artifactsDiffer).toBe(true)
+    expect(output.routeImpact.changedPhases).toContain("writing-plans")
     expect(output.activePreset.key).toBe("review")
     expect(output.nextAction).toBeUndefined()
   })
@@ -878,6 +941,18 @@ describe("runCli", () => {
 
   it("recommends sync after use when OpenCode artifact refresh needs another pass", async () => {
     const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      buildArtifacts: (config: any) => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".opencode/agents",
+            fileName: `spr-${config.defaultRoute}.md`,
+            ownerPrefix: "spr-",
+            content: config.defaultRoute,
+          },
+        ],
+        commands: [],
+      }),
       materializeArtifacts: async () => ({
         exitCode: 2 as const,
         warnings: ["cleanup failed"],
@@ -889,6 +964,8 @@ describe("runCli", () => {
     const output = JSON.parse(result.stdout)
 
     expect(result.exitCode).toBe(2)
+    expect(output.artifactsDiffer).toBe(true)
+    expect(output.routeImpact.changedPhases).toContain("writing-plans")
     expect(output.nextAction.command).toBe("oh-my-superagents sync --host opencode")
   })
 
