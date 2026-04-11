@@ -123,6 +123,12 @@ async function waitForLogMessage(logs: unknown[], text: string) {
   })
 }
 
+async function waitForBackgroundWork() {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 0)
+  })
+}
+
 describe("OhMySuperpowersPlugin", () => {
   beforeEach(() => {
     mocks.loadRouterConfig.mockReset()
@@ -140,11 +146,21 @@ describe("OhMySuperpowersPlugin", () => {
     mocks.loadRouterConfig.mockRejectedValueOnce(
       new Error("Could not find oh-my-superagents.config.jsonc"),
     )
+    mocks.evaluateSuperpowersCompatibility.mockReturnValueOnce(
+      createCompatibilityResult({
+        status: "not_detected",
+        reason: "Could not detect a parseable superpowers version.",
+      }),
+    )
 
     await OhMySuperpowersPlugin(createPluginInput(logs))
+    await waitForBackgroundWork()
 
     expect(JSON.stringify(logs)).toContain("Current state: missing_config")
     expect(JSON.stringify(logs)).toContain("Next step: oh-my-superagents sync --host opencode")
+    expect(JSON.stringify(logs)).not.toContain("Current state: upstream_not_detected")
+    expect(JSON.stringify(logs)).not.toContain("Next step: oh-my-superagents doctor --host opencode")
+    expect(logs).toHaveLength(1)
   })
 
   it.each([

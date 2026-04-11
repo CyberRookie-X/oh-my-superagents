@@ -25,6 +25,7 @@ type StartupGuidanceState =
 export const OhMySuperpowersPlugin: Plugin = async ({ client, directory }) => {
   const log = createPluginLogger(client as PluginClient)
   let compatibilityMode: SuperpowersCompatibilityMode = "warn"
+  let shouldReportCompatibility = true
 
   try {
     const { config } = await loadRouterConfig({ cwd: directory })
@@ -33,7 +34,12 @@ export const OhMySuperpowersPlugin: Plugin = async ({ client, directory }) => {
     void log("info", "router config loaded")
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    const level = message.includes("Could not find oh-my-superagents.config.jsonc") ? "warn" : "error"
+    const isMissingConfig = message.includes("Could not find oh-my-superagents.config.jsonc")
+    const level = isMissingConfig ? "warn" : "error"
+
+    if (isMissingConfig) {
+      shouldReportCompatibility = false
+    }
 
     void log(
       level,
@@ -50,11 +56,13 @@ export const OhMySuperpowersPlugin: Plugin = async ({ client, directory }) => {
     )
   }
 
-  void reportCompatibilityDiagnostics({
-    cwd: directory,
-    policyMode: compatibilityMode,
-    log,
-  })
+  if (shouldReportCompatibility) {
+    void reportCompatibilityDiagnostics({
+      cwd: directory,
+      policyMode: compatibilityMode,
+      log,
+    })
+  }
 
   return {}
 }
