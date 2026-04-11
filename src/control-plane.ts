@@ -82,6 +82,15 @@ export type ExplainTrace = {
   reuseRelationship: "none" | "extends"
 }
 
+export type RoutingValidationSummary = {
+  defaultRoutedPhases: BuiltInPhase[]
+  explicitRoutedPhases: BuiltInPhase[]
+  unusedProfiles: string[]
+  reuseRelationship:
+    | { kind: "none"; parentPresetKey: null; resolvable: true }
+    | { kind: "extends"; parentPresetKey: string; resolvable: true }
+}
+
 function classifyConfigSource(filePath: string | undefined, cwd: string): ExplainTrace["configSource"] {
   if (!filePath) {
     return "default"
@@ -198,6 +207,37 @@ export function buildControlPlaneExplainTrace(input: {
       ? "default"
       : chooseMostLocalConfigSource([decisivePath, selectedProfilePath], input.cwd),
     reuseRelationship: input.resolved.activePreset.preset.extends ? "extends" : "none",
+  }
+}
+
+export function summarizeRoutingValidation(
+  config: ControlPlaneConfig,
+  presetKey: string,
+): RoutingValidationSummary {
+  const preset = config.presets[presetKey]
+  if (!preset) {
+    throw new Error(`Unknown preset: ${presetKey}`)
+  }
+
+  const explicitRoutedPhases = BUILT_IN_PHASES.filter((phase) => phase in preset.routes)
+  const defaultRoutedPhases = BUILT_IN_PHASES.filter((phase) => !(phase in preset.routes))
+  const usedProfiles = new Set<string>([preset.defaultRoute, ...Object.values(preset.routes)])
+
+  return {
+    defaultRoutedPhases,
+    explicitRoutedPhases,
+    unusedProfiles: Object.keys(preset.profiles).filter((profileKey) => !usedProfiles.has(profileKey)),
+    reuseRelationship: preset.extends
+      ? {
+          kind: "extends",
+          parentPresetKey: preset.extends,
+          resolvable: true,
+        }
+      : {
+          kind: "none",
+          parentPresetKey: null,
+          resolvable: true,
+        },
   }
 }
 

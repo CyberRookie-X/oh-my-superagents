@@ -1784,6 +1784,23 @@ describe("runCli", () => {
         missing: [],
         stale: [],
       },
+      routing: {
+        defaultRoutedPhases: [
+          "writing-plans",
+          "subagent-driven-development",
+          "requesting-code-review",
+          "verification-before-completion",
+          "frontend-design",
+          "webapp-testing",
+        ],
+        explicitRoutedPhases: ["brainstorming"],
+        unusedProfiles: [],
+        reuseRelationship: {
+          kind: "none",
+          parentPresetKey: null,
+          resolvable: true,
+        },
+      },
     })
   })
 
@@ -1829,6 +1846,59 @@ describe("runCli", () => {
     expect(output.artifactSummary.stale).toContain(
       "/workspace/project/.opencode/commands/oms-legacy.md",
     )
+  })
+
+  it("reports lightweight routing validation details in OpenCode doctor output", async () => {
+    const routedConfig = {
+      ...controlPlaneConfig,
+      settings: {
+        ...controlPlaneConfig.settings,
+        activePreset: "child",
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        child: {
+          ...controlPlaneConfig.presets.default,
+          label: "Child",
+          short: "child",
+          extends: "default",
+          profiles: {
+            ...controlPlaneConfig.presets.default.profiles,
+            unused: {
+              model: "google/gemini-2.5-pro",
+            },
+          },
+        },
+      },
+    }
+
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: routedConfig,
+        activePreset: {
+          key: "child",
+          preset: routedConfig.presets.child,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.routing.defaultRoutedPhases).toContain("requesting-code-review")
+    expect(output.routing.explicitRoutedPhases).toEqual(["brainstorming"])
+    expect(output.routing.unusedProfiles).toEqual(["unused"])
+    expect(output.routing.reuseRelationship).toEqual({
+      kind: "extends",
+      parentPresetKey: "default",
+      resolvable: true,
+    })
   })
 
   it("includes a discovery warning in status output when an owned-path scan fails", async () => {

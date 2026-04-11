@@ -3,7 +3,11 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { parse } from "jsonc-parser"
 import { describe, expect, it } from "vitest"
-import { prepareControlPlaneStateWrite, resolveControlPlane } from "../src/control-plane.js"
+import {
+  prepareControlPlaneStateWrite,
+  resolveControlPlane,
+  summarizeRoutingValidation,
+} from "../src/control-plane.js"
 
 function createExists(files: Record<string, string>) {
   return async (filePath: string) => filePath in files
@@ -904,5 +908,50 @@ describe("resolveControlPlane", () => {
         },
       }),
     ).rejects.toThrow(/activePreset.*shared|existing preset/i)
+  })
+})
+
+describe("summarizeRoutingValidation", () => {
+  it("reports explicit routes, default-routed phases, unused profiles, and resolvable reuse", () => {
+    const summary = summarizeRoutingValidation({
+      settings: {
+        enabled: true,
+        activePreset: "child",
+        commandPrefix: "oms",
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      presets: {
+        child: {
+          label: "Child",
+          short: "child",
+          extends: "base",
+          profiles: {
+            build: { model: "openai/gpt-5" },
+            strategy: { model: "anthropic/claude-sonnet-4-5" },
+            unused: { model: "google/gemini-2.5-pro" },
+          },
+          routes: {
+            brainstorming: "strategy",
+          },
+          defaultRoute: "build",
+        },
+      },
+    }, "child")
+
+    expect(summary.explicitRoutedPhases).toEqual(["brainstorming"])
+    expect(summary.defaultRoutedPhases).toContain("requesting-code-review")
+    expect(summary.unusedProfiles).toEqual(["unused"])
+    expect(summary.reuseRelationship).toEqual({
+      kind: "extends",
+      parentPresetKey: "base",
+      resolvable: true,
+    })
   })
 })

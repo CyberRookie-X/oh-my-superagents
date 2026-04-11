@@ -8,6 +8,7 @@ import {
   buildOpenCodeStatusState,
   prepareControlPlaneStateWrite,
   resolveControlPlane,
+  summarizeRoutingValidation,
   summarizeControlPlaneArtifacts,
   type ExplainTrace,
   type ResolvedControlPlane,
@@ -934,6 +935,11 @@ async function buildControlPlaneDoctor(
     compatibility,
     artifacts: formattedArtifacts,
     ...(artifactSummary ? { artifactSummary } : {}),
+    ...(host === "opencode"
+      ? {
+          routing: summarizeRoutingValidation(resolved.config, resolved.activePreset.key),
+        }
+      : {}),
   }
 }
 
