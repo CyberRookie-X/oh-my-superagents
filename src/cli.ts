@@ -650,6 +650,14 @@ function formatArtifactInspection(artifacts: Awaited<ReturnType<typeof inspectAr
   }
 }
 
+async function writePreparedConfig(
+  prepared: Awaited<ReturnType<typeof prepareControlPlaneStateWrite>>,
+  deps: CliDeps,
+) {
+  await deps.mkdir(path.dirname(prepared.path), { recursive: true })
+  await deps.writeFile(prepared.path, prepared.content)
+}
+
 function resolvePresetKey(resolved: ResolvedControlPlane, selector: string) {
   if (resolved.config.presets[selector]) {
     return selector
@@ -980,7 +988,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         },
       })
 
-      await deps.writeFile(prepared.path, prepared.content)
+      await writePreparedConfig(prepared, deps)
 
       const result = cliHost === "codex"
         ? await materializeCodexLifecycle(cwd, prepared.path, toRouterConfig(prepared.config), prepared.config.settings, deps)
@@ -1020,7 +1028,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         },
       })
 
-      await deps.writeFile(prepared.path, prepared.content)
+      await writePreparedConfig(prepared, deps)
 
       const cleanup = cliHost === "codex"
         ? await cleanupCodexLifecycle(cwd, deps)
@@ -1078,7 +1086,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           },
         })
 
-        await deps.writeFile(prepared.path, prepared.content)
+        await writePreparedConfig(prepared, deps)
         bootstrappedConfigPath = prepared.path
         resolved = {
           source: {

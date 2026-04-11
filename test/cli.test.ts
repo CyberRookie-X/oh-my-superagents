@@ -404,6 +404,7 @@ describe("runCli", () => {
     let persistedPath = ""
     let persistedContent = ""
     let materializeCalled = false
+    const createdDirectories: string[] = []
 
     const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
       resolveControlPlane: async ({ command }: { command: string }) => {
@@ -418,7 +419,7 @@ describe("runCli", () => {
         }
       },
       prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
-        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        path: "/home/tester/.config/oh-my-superagents/config.jsonc",
         content: JSON.stringify({
           settings: {
             activePreset: nextState.activePreset,
@@ -428,7 +429,13 @@ describe("runCli", () => {
         }, null, 2),
         config: controlPlaneConfig,
       }),
+      mkdir: async (directory: string) => {
+        createdDirectories.push(directory)
+      },
       writeFile: async (filePath: string, content: string) => {
+        if (!createdDirectories.includes(path.dirname(filePath))) {
+          throw new Error(`ENOENT: missing parent directory for ${filePath}`)
+        }
         persistedPath = filePath
         persistedContent = content
       },
@@ -446,7 +453,8 @@ describe("runCli", () => {
     const parsed = JSON.parse(result.stdout)
 
     expect(result.exitCode).toBe(0)
-    expect(persistedPath).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(createdDirectories).toContain("/home/tester/.config/oh-my-superagents")
+    expect(persistedPath).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
     expect(JSON.parse(persistedContent)).toEqual({
       settings: {
         activePreset: "default",
@@ -455,7 +463,7 @@ describe("runCli", () => {
       presets: controlPlaneConfig.presets,
     })
     expect(materializeCalled).toBe(true)
-    expect(parsed.written).toContain("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(parsed.written).toContain("/home/tester/.config/oh-my-superagents/config.jsonc")
     expect(parsed.written).toContain("/workspace/project/.opencode/agents/spr-build.md")
   })
 
@@ -712,14 +720,27 @@ describe("runCli", () => {
 
   it("matches a unique preset short in use and writes activePreset plus enabled true", async () => {
     let persistedContent = ""
+    const createdDirectories: string[] = []
 
     const result = await runCli(["use", "def", "--host", "opencode"], createCliDeps({
-      writeFile: async (_filePath: string, content: string) => {
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/home/tester/.config/oh-my-superagents/config.jsonc",
+        content: JSON.stringify({ settings: nextState, presets: controlPlaneConfig.presets }, null, 2),
+        config: controlPlaneConfig,
+      }),
+      mkdir: async (directory: string) => {
+        createdDirectories.push(directory)
+      },
+      writeFile: async (filePath: string, content: string) => {
+        if (!createdDirectories.includes(path.dirname(filePath))) {
+          throw new Error(`ENOENT: missing parent directory for ${filePath}`)
+        }
         persistedContent = content
       },
     }))
 
     expect(result.exitCode).toBe(0)
+    expect(createdDirectories).toContain("/home/tester/.config/oh-my-superagents")
     expect(JSON.parse(persistedContent)).toEqual({
       settings: {
         activePreset: "default",
