@@ -1306,11 +1306,13 @@ describe("runCli", () => {
       host: "opencode",
       commands: {
         prefix: "oms",
-        status: { name: "status", aliases: ["st"] },
-        use: { name: "use", aliases: ["u"] },
-        disable: { name: "off", aliases: ["o"] },
-        sync: { name: "sync", aliases: ["sy"] },
-        doctor: { name: "doctor", aliases: ["dr"] },
+        rendered: {
+          status: ["oms-status", "oms-st"],
+          use: ["oms-use", "oms-u"],
+          disable: ["oms-off", "oms-o"],
+          sync: ["oms-sync", "oms-sy"],
+          doctor: ["oms-doctor", "oms-dr"],
+        },
       },
       compatibility: compatibleOpencode,
       artifacts: {
@@ -1320,7 +1322,60 @@ describe("runCli", () => {
         ],
         missing: [],
       },
+      artifactSummary: {
+        expected: 2,
+        present: [
+          "/workspace/project/.opencode/agents/spr-build.md",
+          "/workspace/project/.opencode/agents/spr-strategy.md",
+        ],
+        missing: [],
+        stale: [],
+      },
     })
+  })
+
+  it("summarizes expected, present, missing, and stale OpenCode artifacts in doctor output", async () => {
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      ...createArtifactFs({
+        "/workspace/project/.opencode/agents/spr-build.md": renderOwnedMarkdownArtifact("spr-build"),
+        "/workspace/project/.opencode/commands/oms-legacy.md": renderOwnedMarkdownArtifact("oms-legacy"),
+      }),
+      buildArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".opencode/agents",
+            fileName: "spr-build.md",
+            ownerPrefix: "spr-",
+            content: "",
+          },
+        ],
+        commands: [
+          {
+            kind: "command" as const,
+            directory: ".opencode/commands",
+            fileName: "oms-sync.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+      }),
+      artifactExists: async (filePath: string) => !filePath.endsWith("oms-sync.md"),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.artifactSummary.expected).toBeGreaterThan(0)
+    expect(output.artifactSummary.present).toContain(
+      "/workspace/project/.opencode/agents/spr-build.md",
+    )
+    expect(output.artifactSummary.missing).toContain(
+      "/workspace/project/.opencode/commands/oms-sync.md",
+    )
+    expect(output.artifactSummary.stale).toContain(
+      "/workspace/project/.opencode/commands/oms-legacy.md",
+    )
   })
 
   it("includes a discovery warning in status output when an owned-path scan fails", async () => {

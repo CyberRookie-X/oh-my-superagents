@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { createDefaultControlPlaneConfig, type ControlPlaneConfig, type RouterConfig } from "../src/config.js"
-import { buildArtifacts, renderAgentFile, renderCommandFile, renderControlPlaneCommandFile } from "../src/opencode.js"
+import * as opencode from "../src/opencode.js"
+
+const { buildArtifacts, renderAgentFile, renderCommandFile, renderControlPlaneCommandFile } = opencode
 
 function buildArtifactsWithControlPlane(
   routerConfig: RouterConfig,
@@ -243,5 +245,35 @@ describe("buildArtifacts", () => {
         },
       }),
     ).toThrow(/duplicate|unique|status/i)
+  })
+})
+
+describe("listRenderedOpenCodeControlPlaneCommands", () => {
+  it("computes rendered OMS command names from the configured prefix and aliases", () => {
+    const helper = (opencode as Record<string, unknown>).listRenderedOpenCodeControlPlaneCommands as
+      | ((settings: ControlPlaneConfig["settings"]) => Record<string, string[]>)
+      | undefined
+
+    expect(helper).toBeTypeOf("function")
+
+    const rendered = helper?.({
+      ...createDefaultControlPlaneConfig().settings,
+      commandPrefix: "team",
+      commands: {
+        status: { name: "state", aliases: ["stat"] },
+        use: { name: "switch", aliases: ["sw"] },
+        disable: { name: "off", aliases: ["o"] },
+        sync: { name: "sync", aliases: ["sy"] },
+        doctor: { name: "doctor", aliases: ["dr"] },
+      },
+    })
+
+    expect(rendered).toEqual({
+      status: ["team-state", "team-stat"],
+      use: ["team-switch", "team-sw"],
+      disable: ["team-off", "team-o"],
+      sync: ["team-sync", "team-sy"],
+      doctor: ["team-doctor", "team-dr"],
+    })
   })
 })

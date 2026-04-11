@@ -13,7 +13,7 @@ import {
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
 import { hasArtifactOwnershipMarker, materializeArtifacts } from "./materialize.js"
-import { buildArtifacts } from "./opencode.js"
+import { buildArtifacts, listRenderedOpenCodeControlPlaneCommands } from "./opencode.js"
 import { buildQwenArtifacts } from "./qwen.js"
 import { explainAll, explainPhase, type BuiltInPhase } from "./router.js"
 import {
@@ -829,6 +829,13 @@ async function buildControlPlaneDoctor(
   const compatibility = await resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps)
   const artifacts = await inspectArtifacts(cwd, await getExpectedArtifacts(cwd, resolved.config, host, deps), host, deps)
   const formattedArtifacts = formatArtifactInspection(artifacts)
+  const artifactSummary = host === "opencode"
+    ? summarizeControlPlaneArtifacts({
+      present: artifacts.expectedPresent,
+      missing: artifacts.missing,
+      stale: artifacts.stale,
+    })
+    : undefined
 
   return {
     activePreset: {
@@ -840,10 +847,15 @@ async function buildControlPlaneDoctor(
     host,
     commands: {
       prefix: resolved.config.settings.commandPrefix,
-      ...resolved.config.settings.commands,
+      ...(host === "opencode"
+        ? {
+          rendered: listRenderedOpenCodeControlPlaneCommands(resolved.config.settings),
+        }
+        : resolved.config.settings.commands),
     },
     compatibility,
     artifacts: formattedArtifacts,
+    ...(artifactSummary ? { artifactSummary } : {}),
   }
 }
 

@@ -131,16 +131,28 @@ export function renderControlPlaneCommandFile(input: {
   ].join("\n")
 }
 
+export function listRenderedOpenCodeControlPlaneCommands(settings: OpenCodeControlPlaneSettings) {
+  return Object.fromEntries(
+    CONTROL_PLANE_COMMAND_KEYS.map((key) => {
+      const command = settings.commands[key]
+
+      return [
+        key,
+        [command.name, ...command.aliases].map((name) => `${settings.commandPrefix}-${name}`),
+      ]
+    }),
+  ) as Record<ControlPlaneCommandKey, string[]>
+}
+
 function buildControlPlaneCommandArtifacts(settings: OpenCodeControlPlaneSettings): GeneratedArtifact[] {
   const ownerPrefix = `${settings.commandPrefix}-`
   const seenFileNames = new Map<string, string>()
 
   return CONTROL_PLANE_COMMAND_KEYS.flatMap((commandKey) => {
-    const command = settings.commands[commandKey]
-    const renderedNames = [command.name, ...command.aliases]
+    const renderedNames = listRenderedOpenCodeControlPlaneCommands(settings)[commandKey]
 
     return renderedNames.map((renderedName) => {
-      const fileName = `${settings.commandPrefix}-${renderedName}.md`
+      const fileName = `${renderedName}.md`
 
       if (RESERVED_PHASE_COMMAND_FILES.has(fileName)) {
         throw new Error(`OMS command file collides with reserved OpenCode phase command: ${fileName}`)
