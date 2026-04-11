@@ -425,14 +425,14 @@ function resolveLaneState(config: ControlPlaneConfig, activePreset: { key: strin
   }
 }
 
-function sanitizeSettingsDefaultLane(settings: ControlPlaneConfig["settings"], preset: ControlPlanePreset | undefined) {
+function normalizeSettingsDefaultLane(settings: ControlPlaneConfig["settings"], preset: ControlPlanePreset | undefined) {
   if (!settings.defaultLane || !preset) {
     return settings
   }
 
   return (preset.usesLanes ?? []).includes(settings.defaultLane)
     ? settings
-    : { ...settings, defaultLane: undefined }
+    : { ...settings, defaultLane: preset.defaultLane }
 }
 
 function validateControlPlaneConfig(config: ControlPlaneConfig) {
@@ -608,7 +608,7 @@ export async function prepareControlPlaneStateWrite(
     resolvedConfig = createDefaultControlPlaneConfig()
   }
 
-  const nextSettings = sanitizeSettingsDefaultLane({
+  const nextSettings = normalizeSettingsDefaultLane({
     ...resolvedConfig.settings,
     activePreset: input.nextState.activePreset,
     enabled: input.nextState.enabled,
@@ -638,8 +638,11 @@ export async function prepareControlPlaneStateWrite(
 
   nextDocument = applyNextState(nextDocument, input.nextState)
   if (nextDocument.settings) {
-    nextDocument.settings = sanitizeSettingsDefaultLane(
-      nextDocument.settings as ControlPlaneConfig["settings"],
+    nextDocument.settings = normalizeSettingsDefaultLane(
+      {
+        ...(nextDocument.settings as ControlPlaneConfig["settings"]),
+        defaultLane: nextConfig.settings.defaultLane,
+      },
       resolvedConfig.presets[input.nextState.activePreset],
     )
   }

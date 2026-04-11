@@ -1122,7 +1122,7 @@ describe("resolveControlPlane", () => {
     })
   })
 
-  it("clears a persisted settings.defaultLane when switching to a preset that does not allow it", async () => {
+  it("replaces a persisted settings.defaultLane with the new preset defaultLane when switching presets", async () => {
     const files = {
       "/workspace/project/oh-my-superagents.config.jsonc": `{
         "settings": {
@@ -1189,11 +1189,92 @@ describe("resolveControlPlane", () => {
     }
 
     expect(result.config.settings.activePreset).toBe("backend")
-    expect(result.config.settings.defaultLane).toBeUndefined()
+    expect(result.config.settings.defaultLane).toBe("backend")
     expect(serialized.settings).toEqual({
       activePreset: "backend",
       enabled: true,
+      defaultLane: "backend",
       laneSelection: { mode: "suggest" },
+    })
+  })
+
+  it("writes an explicit replacement defaultLane when a stale lane is inherited from a lower-priority layer", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "frontend",
+          "defaultLane": "frontend",
+          "laneSelection": { "mode": "suggest" }
+        },
+        "profiles": {
+          "frontend-build": { "model": "openai/gpt-5" },
+          "backend-build": { "model": "gpt-5.4" }
+        },
+        "lanes": {
+          "frontend": {
+            "label": "Frontend",
+            "routes": {},
+            "defaultRoute": "frontend-build"
+          },
+          "backend": {
+            "label": "Backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        },
+        "presets": {
+          "frontend": {
+            "label": "Frontend",
+            "short": "fe",
+            "usesLanes": ["frontend"],
+            "defaultLane": "frontend",
+            "routes": {},
+            "defaultRoute": "frontend-build"
+          },
+          "backend": {
+            "label": "Backend",
+            "short": "be",
+            "usesLanes": ["backend"],
+            "defaultLane": "backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "frontend"
+        },
+        "presets": {}
+      }`,
+    }
+
+    const result = await prepareControlPlaneStateWrite({
+      command: "use",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+      isWritable: createIsWritable(["/workspace/project/oh-my-superagents.config.jsonc"]),
+      nextState: {
+        activePreset: "backend",
+        enabled: true,
+      },
+    })
+    const serialized = parse(result.content) as {
+      settings?: {
+        activePreset?: string
+        enabled?: boolean
+        defaultLane?: string
+      }
+    }
+
+    expect(result.config.settings.activePreset).toBe("backend")
+    expect(result.config.settings.defaultLane).toBe("backend")
+    expect(serialized.settings).toEqual({
+      activePreset: "backend",
+      enabled: true,
+      defaultLane: "backend",
     })
   })
 })
