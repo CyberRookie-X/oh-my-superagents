@@ -34,6 +34,14 @@ const incompatibleOpencodeStrict = {
   shouldBlock: true,
 }
 
+const notDetectedOpencode = {
+  ...compatibleOpencode,
+  detectedVersion: null,
+  source: "test-detector",
+  status: "not_detected" as const,
+  reason: "No compatible superpowers installation was detected.",
+}
+
 const compatibleCodex = {
   host: "codex" as const,
   source: "test-detector",
@@ -1149,6 +1157,30 @@ describe("runCli", () => {
     expect(output.artifactSummary.missing.length).toBeGreaterThan(0)
   })
 
+  it("adds doctor guidance when OpenCode superpowers is not detected", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      evaluateSuperpowersCompatibility: () => notDetectedOpencode,
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.state.code).toBe("upstream_not_detected")
+    expect(output.nextAction.command).toBe("oh-my-superagents doctor --host opencode")
+  })
+
+  it("adds doctor guidance when OpenCode superpowers is incompatible", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      evaluateSuperpowersCompatibility: () => incompatibleOpencodeWarn,
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.state.code).toBe("upstream_incompatible")
+    expect(output.nextAction.command).toBe("oh-my-superagents doctor --host opencode")
+  })
+
   it("treats an expected OpenCode artifact replaced with user content as out of sync", async () => {
     const result = await runCli(["status", "--host", "opencode"], createCliDeps({
       ...createArtifactFs({
@@ -1181,6 +1213,7 @@ describe("runCli", () => {
     const output = JSON.parse(result.stdout)
 
     expect(result.exitCode).toBe(0)
+    expect(output.state.code).toBe("artifacts_out_of_sync")
     expect(output.artifactSummary.expected).toBe(2)
     expect(output.artifactSummary.present).toEqual([
       "/workspace/project/.opencode/agents/spr-build.md",

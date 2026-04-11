@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { parse } from "jsonc-parser"
@@ -555,6 +555,34 @@ describe("resolveControlPlane", () => {
         }),
       }))
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("rejects first-write global config preparation when an existing intermediate directory is not writable", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "oms-control-plane-blocked-home-"))
+
+    try {
+      const projectDir = path.join(root, "workspace", "project")
+      const homeDir = path.join(root, "home")
+      const blockedConfigDir = path.join(homeDir, ".config")
+      await mkdir(projectDir, { recursive: true })
+      await mkdir(blockedConfigDir, { recursive: true })
+      await chmod(blockedConfigDir, 0o555)
+
+      await expect(
+        prepareControlPlaneStateWrite({
+          command: "use",
+          cwd: projectDir,
+          homeDir,
+          nextState: {
+            activePreset: "default",
+            enabled: true,
+          },
+        }),
+      ).rejects.toThrow(/writ/i)
+    } finally {
+      await chmod(path.join(root, "home", ".config"), 0o755).catch(() => undefined)
       await rm(root, { recursive: true, force: true })
     }
   })

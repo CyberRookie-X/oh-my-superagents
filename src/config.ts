@@ -383,8 +383,13 @@ export async function defaultIsWritable(filePath: string) {
 
     while (true) {
       try {
-        await access(candidate, constants.W_OK)
-        return true
+        await access(candidate, constants.F_OK)
+        try {
+          await access(candidate, constants.W_OK)
+          return true
+        } catch {
+          return false
+        }
       } catch {
         const parent = path.dirname(candidate)
         if (parent === candidate) {

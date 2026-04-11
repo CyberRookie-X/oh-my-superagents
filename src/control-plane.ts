@@ -123,7 +123,7 @@ export function buildOpenCodeStatusState(input: {
     }
   }
 
-  if (input.host === "opencode" && input.artifactSummary.missing.length > 0) {
+  if (input.host === "opencode" && (input.artifactSummary.missing.length > 0 || input.artifactSummary.stale.length > 0)) {
     return {
       code: "artifacts_out_of_sync",
       category: "host",
@@ -149,6 +149,12 @@ export function buildOpenCodeNextAction(input: {
       return {
         command: `oh-my-superagents sync --host ${input.host}`,
         reason: "Materialize the expected OMS-managed host artifacts.",
+      }
+    case "upstream_not_detected":
+    case "upstream_incompatible":
+      return {
+        command: `oh-my-superagents doctor --host ${input.host}`,
+        reason: "Inspect superpowers detection and compatibility details for this workspace.",
       }
     case "disabled":
       return {
