@@ -400,6 +400,65 @@ describe("runCli", () => {
     expect(result.stderr).toContain("cleanup failed")
   })
 
+  it("bootstraps a default layered config during first-run opencode sync", async () => {
+    let persistedPath = ""
+    let persistedContent = ""
+    let materializeCalled = false
+
+    const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async ({ command }: { command: string }) => {
+        if (command === "sync") {
+          throw new Error("Command sync requires a real config source")
+        }
+
+        return {
+          source: { kind: "default" as const, hasRealSource: false, sources: [] },
+          config: controlPlaneConfig,
+          activePreset: { key: "default", preset: controlPlaneConfig.presets.default },
+        }
+      },
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({
+          settings: {
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+          presets: controlPlaneConfig.presets,
+        }, null, 2),
+        config: controlPlaneConfig,
+      }),
+      writeFile: async (filePath: string, content: string) => {
+        persistedPath = filePath
+        persistedContent = content
+      },
+      materializeArtifacts: async () => {
+        materializeCalled = true
+        return {
+          exitCode: 0 as const,
+          warnings: [],
+          written: ["/workspace/project/.opencode/agents/spr-build.md"],
+          removed: [],
+        }
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(persistedPath).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(JSON.parse(persistedContent)).toEqual({
+      settings: {
+        activePreset: "default",
+        enabled: true,
+      },
+      presets: controlPlaneConfig.presets,
+    })
+    expect(materializeCalled).toBe(true)
+    expect(parsed.written).toContain("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(parsed.written).toContain("/workspace/project/.opencode/agents/spr-build.md")
+  })
+
   it("blocks sync in strict mode before materialization when incompatible", async () => {
     let materializeCalled = false
 

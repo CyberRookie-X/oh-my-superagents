@@ -1057,11 +1057,44 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     }
 
     if (command === "sync") {
-      const resolved = await deps.resolveControlPlane({ command: "sync", cwd, explicitPath })
-      const loaded = await deps.loadConfig({ cwd, explicitPath })
+      let resolved: ResolvedControlPlane
+      let bootstrappedConfigPath: string | undefined
+
+      try {
+        resolved = await deps.resolveControlPlane({ command: "sync", cwd, explicitPath })
+      } catch (error) {
+        if (cliHost !== "opencode" || !(error instanceof Error) || error.message !== "Command sync requires a real config source") {
+          throw error
+        }
+
+        const fallback = await deps.resolveControlPlane({ command: "status", cwd, explicitPath })
+        const prepared = await deps.prepareControlPlaneStateWrite({
+          command: "sync",
+          cwd,
+          explicitPath,
+          nextState: {
+            activePreset: fallback.config.settings.activePreset,
+            enabled: fallback.config.settings.enabled,
+          },
+        })
+
+        await deps.writeFile(prepared.path, prepared.content)
+        bootstrappedConfigPath = prepared.path
+        resolved = {
+          source: {
+            kind: "file",
+            hasRealSource: true,
+            path: prepared.path,
+            sources: [prepared.path],
+          },
+          config: prepared.config,
+          activePreset: fallback.activePreset,
+        }
+      }
+
       const compatibility = await resolveCompatibilityForCliHost(
         cliHost,
-        loaded.config.superpowersCompatibility.mode,
+        resolved.config.settings.superpowersCompatibility.mode,
         deps,
       )
 
@@ -1122,7 +1155,10 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
       return {
         exitCode: result.exitCode,
-        stdout: JSON.stringify(withCompatibility(result, compatibility), null, 2),
+        stdout: JSON.stringify(withCompatibility({
+          ...result,
+          ...(bootstrappedConfigPath ? { written: [bootstrappedConfigPath, ...result.written] } : {}),
+        }, compatibility), null, 2),
         stderr: joinStderr([
           formatCompatibilityWarning(compatibility),
           ...result.warnings,
