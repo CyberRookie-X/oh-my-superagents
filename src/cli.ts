@@ -1069,7 +1069,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           key: string
           label: string
           short: string
-          description: string
+          description?: string
         }
         nextAction?: {
           command: string
@@ -1089,13 +1089,13 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
             key: nextPreset,
             label: activePreset.label,
             short: activePreset.short,
-            description: activePreset.description,
+            ...(activePreset.description ? { description: activePreset.description } : {}),
           },
-          ...(cliHost === "opencode" && changed
+          ...(cliHost === "opencode" && changed && result.exitCode !== 0
             ? {
               nextAction: {
                 command: "oh-my-superagents sync --host opencode",
-                reason: "Refresh OpenCode artifacts for the newly active preset.",
+                reason: "Retry the OpenCode artifact refresh for the newly active preset.",
               },
             }
             : {}),

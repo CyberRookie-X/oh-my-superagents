@@ -402,6 +402,46 @@ describe("runCli", () => {
     expect(output.configSource).toBe("project")
   })
 
+  it("keeps configSource rooted in the real file source when inheritance is not proven per phase", async () => {
+    const childConfig = {
+      ...controlPlaneConfig,
+      settings: {
+        ...controlPlaneConfig.settings,
+        activePreset: "child",
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        child: {
+          ...controlPlaneConfig.presets.default,
+          label: "Child",
+          short: "child",
+          extends: "default",
+        },
+      },
+    }
+
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: childConfig,
+        activePreset: {
+          key: "child",
+          preset: childConfig.presets.child,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.configSource).toBe("project")
+  })
+
   it("includes compatibility warning text and continues in warn-mode sync", async () => {
     const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
       evaluateSuperpowersCompatibility: () => incompatibleOpencodeWarn,
@@ -769,7 +809,7 @@ describe("runCli", () => {
     })
   })
 
-  it("reports that use changed the active preset and now recommends sync", async () => {
+  it("reports that use changed the active preset without a redundant sync recommendation after success", async () => {
     const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps())
 
     const output = JSON.parse(result.stdout)
@@ -777,6 +817,72 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(output.changed).toBe(true)
     expect(output.activePreset.key).toBe("review")
+    expect(output.nextAction).toBeUndefined()
+  })
+
+  it("omits activePreset.description in use output when the selected preset has no description", async () => {
+    const configWithoutReviewDescription = {
+      ...controlPlaneConfig,
+      presets: {
+        ...controlPlaneConfig.presets,
+        review: {
+          ...controlPlaneConfig.presets.review,
+          description: undefined,
+        },
+      },
+    }
+
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: configWithoutReviewDescription,
+        activePreset: {
+          key: "default",
+          preset: configWithoutReviewDescription.presets.default,
+        },
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({ settings: nextState }, null, 2),
+        config: {
+          ...configWithoutReviewDescription,
+          settings: {
+            ...configWithoutReviewDescription.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.activePreset).toEqual({
+      key: "review",
+      label: "Review",
+      short: "rev",
+    })
+  })
+
+  it("recommends sync after use when OpenCode artifact refresh needs another pass", async () => {
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      materializeArtifacts: async () => ({
+        exitCode: 2 as const,
+        warnings: ["cleanup failed"],
+        written: [],
+        removed: [],
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(2)
     expect(output.nextAction.command).toBe("oh-my-superagents sync --host opencode")
   })
 

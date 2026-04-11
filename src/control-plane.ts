@@ -74,7 +74,7 @@ export type ControlPlaneArtifactSummary = {
 
 export type ExplainTrace = {
   routeSource: "explicit_route" | "default_route"
-  configSource: "project" | "global" | "default" | "inherited"
+  configSource: "project" | "global" | "default"
 }
 
 export function summarizeControlPlaneArtifacts(input: {
@@ -153,11 +153,9 @@ export function buildControlPlaneExplainTrace(input: {
     routeSource: input.resolved.activePreset.preset.routes[input.phase] ? "explicit_route" : "default_route",
     configSource: input.resolved.source.kind === "default"
       ? "default"
-      : input.resolved.activePreset.preset.extends
-        ? "inherited"
-        : input.resolved.source.path === getProjectConfigPath(input.cwd)
-          ? "project"
-          : "global",
+      : input.resolved.source.path === getProjectConfigPath(input.cwd)
+        ? "project"
+        : "global",
   }
 }
 
