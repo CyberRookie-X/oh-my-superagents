@@ -172,6 +172,68 @@ Notes:
 - For `--host codex`, use Codex-compatible model ids in profiles, such as `gpt-5.4` or `gpt-5.3-codex-spark`. The Codex adapter does not translate arbitrary OpenCode provider/model ids.
 - For `--host qwen`, use Qwen-compatible model ids in profiles such as `qwen/qwen3-coder-30b` or `qwen/qwen3-coder-480b`.
 
+## Lane Routing
+
+Lane-aware routing keeps `phase` fixed to the upstream `superpowers` workflow key and adds one routing layer below it:
+
+- `phase` remains the stable `superpowers` workflow key.
+- `lane` is a tech-stack route bundle such as `frontend`, `backend`, or `infra`.
+- `profile` is the leaf model/config object that carries executable settings.
+- `preset` still chooses the work mode, and `usesLanes` limits which global lanes that preset can use.
+- `settings.defaultLane` is the persisted baseline lane for the active preset.
+- `laneSelection.mode` supports `manual`, `suggest`, and `auto`.
+
+`manual` uses only the persisted/default lane path, `suggest` asks for confirmation before switching the current task to a recommended lane, and `auto` may apply a session-scoped `effectiveLane` without persisting it back into config.
+
+Compact example:
+
+```jsonc
+{
+  "settings": {
+    "activePreset": "default",
+    "defaultLane": "backend",
+    "laneSelection": { "mode": "suggest" }
+  },
+  "profiles": {
+    "frontend-build": {
+      "model": "openai/gpt-5",
+      "effort": "balanced"
+    },
+    "backend-build": {
+      "model": "gpt-5.4",
+      "effort": "balanced",
+      "codexFast": true
+    }
+  },
+  "lanes": {
+    "frontend": {
+      "label": "Frontend",
+      "routes": {
+        "frontend-design": "frontend-build"
+      },
+      "defaultRoute": "frontend-build"
+    },
+    "backend": {
+      "label": "Backend",
+      "routes": {
+        "writing-plans": "backend-build"
+      },
+      "defaultRoute": "backend-build"
+    }
+  },
+  "presets": {
+    "default": {
+      "label": "Default",
+      "short": "def",
+      "usesLanes": ["frontend", "backend"],
+      "defaultLane": "backend",
+      "routes": {},
+      "defaultRoute": "backend-build"
+    }
+  }
+}
+```
+
 ## OMS Control Plane
 
 Stage 1 adds host-local control-plane commands:

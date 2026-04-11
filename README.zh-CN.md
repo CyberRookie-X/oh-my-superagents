@@ -176,6 +176,68 @@ npx oh-my-superagents sync --host opencode
 - 老的单 preset router 配置仍可读取，并会迁移到 `presets.default`
 - 对于 `--host codex`，profile 里的 model id 需要本身就是 Codex 兼容值，例如 `gpt-5.4` 或 `gpt-5.3-codex-spark`。Codex 适配层不会把任意 OpenCode provider/model id 自动转换成 Codex 可用值。
 
+## Lane 路由模型
+
+Lane-aware 路由会继续把 `phase` 固定为 upstream `superpowers` 的工作流 key，只是在它下面增加一层路由：
+
+- `phase` 仍然是稳定的 `superpowers` 工作流 key。
+- `lane` 是一个按技术栈组织的 route bundle，例如 `frontend`、`backend`、`infra`。
+- `profile` 是最终的 model/config 叶子对象，真正承载可执行设置。
+- `preset` 仍然负责选择工作模式，`usesLanes` 用来限制该 preset 可使用的全局 lane。
+- `settings.defaultLane` 是当前 active preset 的持久化基线 lane。
+- `laneSelection.mode` 支持 `manual`、`suggest`、`auto`。
+
+其中 `manual` 只走持久化/默认 lane 路径，`suggest` 会先给出推荐 lane 并等待确认，`auto` 则可以在当前会话里直接应用一个 `effectiveLane`，但不会静默写回配置。
+
+紧凑示例：
+
+```jsonc
+{
+  "settings": {
+    "activePreset": "default",
+    "defaultLane": "backend",
+    "laneSelection": { "mode": "suggest" }
+  },
+  "profiles": {
+    "frontend-build": {
+      "model": "openai/gpt-5",
+      "effort": "balanced"
+    },
+    "backend-build": {
+      "model": "gpt-5.4",
+      "effort": "balanced",
+      "codexFast": true
+    }
+  },
+  "lanes": {
+    "frontend": {
+      "label": "Frontend",
+      "routes": {
+        "frontend-design": "frontend-build"
+      },
+      "defaultRoute": "frontend-build"
+    },
+    "backend": {
+      "label": "Backend",
+      "routes": {
+        "writing-plans": "backend-build"
+      },
+      "defaultRoute": "backend-build"
+    }
+  },
+  "presets": {
+    "default": {
+      "label": "Default",
+      "short": "def",
+      "usesLanes": ["frontend", "backend"],
+      "defaultLane": "backend",
+      "routes": {},
+      "defaultRoute": "backend-build"
+    }
+  }
+}
+```
+
 ## OMS 控制平面
 
 Stage 1 新增了宿主本地控制平面命令：
