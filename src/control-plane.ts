@@ -200,63 +200,6 @@ function validatePresetShorts(config: ControlPlaneConfig) {
   }
 }
 
-function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConfig {
-  const visiting = new Set<string>()
-  const resolved = new Map<string, ControlPlanePreset>()
-
-  const resolvePreset = (presetKey: string): ControlPlanePreset => {
-    const cached = resolved.get(presetKey)
-    if (cached) {
-      return cached
-    }
-
-    const preset = config.presets[presetKey]
-    if (!preset) {
-      throw new Error(`Unknown preset: ${presetKey}`)
-    }
-
-    if (visiting.has(presetKey)) {
-      throw new Error(`Cyclic preset reuse detected: ${presetKey}`)
-    }
-
-    visiting.add(presetKey)
-
-    let nextPreset: ControlPlanePreset
-    if (!preset.extends) {
-      nextPreset = clonePreset(preset)
-    } else {
-      const parentPreset = config.presets[preset.extends]
-      if (!parentPreset) {
-        throw new Error(`Preset ${presetKey} extends unknown preset: ${preset.extends}`)
-      }
-
-      const resolvedParent = resolvePreset(preset.extends)
-      nextPreset = {
-        ...preset,
-        profiles: {
-          ...resolvedParent.profiles,
-          ...preset.profiles,
-        },
-        routes: {
-          ...resolvedParent.routes,
-          ...preset.routes,
-        },
-      }
-    }
-
-    visiting.delete(presetKey)
-    resolved.set(presetKey, nextPreset)
-    return nextPreset
-  }
-
-  return {
-    ...config,
-    presets: Object.fromEntries(
-      Object.keys(config.presets).map((presetKey) => [presetKey, resolvePreset(presetKey)]),
-    ),
-  }
-}
-
 function validateCommandNames(config: ControlPlaneConfig) {
   if (!NAME_PATTERN.test(config.settings.commandPrefix)) {
     throw new Error(`Invalid command prefix: ${config.settings.commandPrefix}`)
@@ -444,7 +387,7 @@ export async function prepareControlPlaneStateWrite(
 
   let resolvedConfig: ControlPlaneConfig
   try {
-    resolvedConfig = resolvePresetReuse((await loadControlPlaneConfig(input)).config)
+    resolvedConfig = (await loadControlPlaneConfig(input)).config
   } catch (error) {
     if (!(error instanceof MissingControlPlaneConfigError)) {
       throw error
@@ -495,8 +438,7 @@ export async function prepareControlPlaneStateWrite(
 export async function resolveControlPlane(input: ResolveControlPlaneInput): Promise<ResolvedControlPlane> {
   try {
     const loaded = await loadControlPlaneConfig(input)
-    const config = resolvePresetReuse(loaded.config)
-    const activePreset = validateControlPlaneConfig(config)
+    const activePreset = validateControlPlaneConfig(loaded.config)
 
     return {
       source: {
@@ -505,7 +447,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
         path: loaded.path,
         sources: loaded.sources,
       },
-      config,
+      config: loaded.config,
       activePreset,
     }
   } catch (error) {

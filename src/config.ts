@@ -346,6 +346,73 @@ function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneCon
   }
 }
 
+function clonePreset(preset: ControlPlanePreset): ControlPlanePreset {
+  return {
+    ...preset,
+    profiles: Object.fromEntries(
+      Object.entries(preset.profiles).map(([key, profile]) => [key, { ...profile }]),
+    ),
+    routes: { ...preset.routes },
+  }
+}
+
+export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConfig {
+  const visiting = new Set<string>()
+  const resolved = new Map<string, ControlPlanePreset>()
+
+  const resolvePreset = (presetKey: string): ControlPlanePreset => {
+    const cached = resolved.get(presetKey)
+    if (cached) {
+      return cached
+    }
+
+    const preset = config.presets[presetKey]
+    if (!preset) {
+      throw new Error(`Unknown preset: ${presetKey}`)
+    }
+
+    if (visiting.has(presetKey)) {
+      throw new Error(`Cyclic preset reuse detected: ${presetKey}`)
+    }
+
+    visiting.add(presetKey)
+
+    let nextPreset: ControlPlanePreset
+    if (!preset.extends) {
+      nextPreset = clonePreset(preset)
+    } else {
+      const parentPreset = config.presets[preset.extends]
+      if (!parentPreset) {
+        throw new Error(`Preset ${presetKey} extends unknown preset: ${preset.extends}`)
+      }
+
+      const resolvedParent = resolvePreset(preset.extends)
+      nextPreset = {
+        ...preset,
+        profiles: {
+          ...resolvedParent.profiles,
+          ...preset.profiles,
+        },
+        routes: {
+          ...resolvedParent.routes,
+          ...preset.routes,
+        },
+      }
+    }
+
+    visiting.delete(presetKey)
+    resolved.set(presetKey, nextPreset)
+    return nextPreset
+  }
+
+  return {
+    ...config,
+    presets: Object.fromEntries(
+      Object.keys(config.presets).map((presetKey) => [presetKey, resolvePreset(presetKey)]),
+    ),
+  }
+}
+
 export async function readControlPlaneSourceDocument(
   filePath: string,
   reader: (filePath: string) => Promise<string>,
@@ -463,7 +530,7 @@ export async function loadControlPlaneConfig(
     path: sources[sources.length - 1]!,
     sources,
     hasRealSource: true,
-    config: finalizeConfig(merged ?? { presets: {} }),
+    config: resolvePresetReuse(finalizeConfig(merged ?? { presets: {} })),
   }
 }
 

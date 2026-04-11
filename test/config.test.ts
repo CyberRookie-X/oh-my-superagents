@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 import { describe, expect, it } from "vitest"
-import { discoverConfigPath, loadControlPlaneConfig } from "../src/config.js"
+import { discoverConfigPath, loadControlPlaneConfig, loadRouterConfig } from "../src/config.js"
 
 function createExists(files: Record<string, string>) {
   return async (filePath: string) => filePath in files
@@ -439,5 +439,57 @@ describe("loadControlPlaneConfig", () => {
     )
     expect(legacyShape?.required).toContain("profiles")
     expect(legacyShape?.required).toContain("defaultRoute")
+  })
+})
+
+describe("loadRouterConfig", () => {
+  it("resolves inherited preset profiles and routes before building router config", async () => {
+    const result = await loadRouterConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "child"
+        },
+        "presets": {
+          "base": {
+            "label": "Base",
+            "short": "base",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" },
+              "strategy": { "model": "anthropic/claude-sonnet-4-5" }
+            },
+            "routes": {
+              "brainstorming": "strategy"
+            },
+            "defaultRoute": "build"
+          },
+          "child": {
+            "label": "Child",
+            "short": "child",
+            "extends": "base",
+            "profiles": {
+              "review": { "model": "google/gemini-2.5-pro" }
+            },
+            "routes": {
+              "brainstorming": "review"
+            },
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.config.profiles).toEqual({
+      build: { model: "openai/gpt-5" },
+      strategy: { model: "anthropic/claude-sonnet-4-5" },
+      review: { model: "google/gemini-2.5-pro" },
+    })
+    expect(result.config.routes).toEqual({
+      brainstorming: "review",
+    })
+    expect(result.config.defaultRoute).toBe("build")
   })
 })
