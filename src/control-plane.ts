@@ -89,6 +89,10 @@ export type ExplainTrace = {
   reuseRelationship: "none" | "extends"
 }
 
+export type LaneExplainability = ResolvedControlPlane["laneState"] & {
+  laneSelection: ControlPlaneConfig["settings"]["laneSelection"]
+}
+
 export type RoutingValidationSummary = {
   defaultRoutedPhases: BuiltInPhase[]
   explicitRoutedPhases: BuiltInPhase[]
@@ -131,6 +135,19 @@ export function summarizeControlPlaneArtifacts(input: {
     present: input.present,
     missing: input.missing,
     stale: input.stale,
+  }
+}
+
+export function summarizeLaneExplainability(resolved: ResolvedControlPlane): LaneExplainability {
+  const laneState = (resolved as ResolvedControlPlane & { laneState?: ResolvedControlPlane["laneState"] }).laneState
+    ?? resolveLaneState(resolved.config, resolved.activePreset)
+
+  return {
+    allowedLanes: [...laneState.allowedLanes],
+    presetDefaultLane: laneState.presetDefaultLane,
+    defaultLane: laneState.defaultLane,
+    effectiveLane: laneState.effectiveLane,
+    laneSelection: { ...(resolved.config.settings.laneSelection ?? { mode: "suggest" }) },
   }
 }
 

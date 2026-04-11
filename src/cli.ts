@@ -8,9 +8,11 @@ import {
   buildOpenCodeStatusState,
   prepareControlPlaneStateWrite,
   resolveControlPlane,
+  summarizeLaneExplainability,
   summarizeRoutingValidation,
   summarizeControlPlaneArtifacts,
   type ExplainTrace,
+  type LaneExplainability,
   type ResolvedControlPlane,
 } from "./control-plane.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
@@ -281,6 +283,31 @@ function attachExplainTrace(
   }
 
   return withExplainTrace(payload, buildTrace(payload.phase as BuiltInPhase))
+}
+
+function withLaneExplainability(payload: Record<string, unknown>, laneExplainability: LaneExplainability) {
+  return {
+    ...payload,
+    ...laneExplainability,
+  }
+}
+
+function attachLaneExplainability(payload: unknown, resolved: ResolvedControlPlane) {
+  const laneExplainability = summarizeLaneExplainability(resolved)
+
+  if (Array.isArray(payload)) {
+    return payload.map((item) => (
+      isRecord(item)
+        ? withLaneExplainability(item, laneExplainability)
+        : item
+    ))
+  }
+
+  if (!isRecord(payload)) {
+    return payload
+  }
+
+  return withLaneExplainability(payload, laneExplainability)
 }
 
 function createFallbackCompatibility(
@@ -957,6 +984,7 @@ async function buildControlPlaneDoctor(
     },
     compatibility,
     artifacts: formattedArtifacts,
+    ...summarizeLaneExplainability(resolved),
     ...(artifactSummary ? { artifactSummary } : {}),
     ...(host === "opencode"
       ? {
@@ -1064,7 +1092,13 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           exitCode: 0,
           stdout: JSON.stringify(formatExplainOutput(
             resolved
-              ? attachExplainTrace(deps.explainAllForHost(toRouterConfig(resolved.config), host as "opencode" | "codex"), { cwd, resolved })
+              ? attachLaneExplainability(
+                attachExplainTrace(deps.explainAllForHost(toRouterConfig(resolved.config), host as "opencode" | "codex"), {
+                  cwd,
+                  resolved,
+                }),
+                resolved,
+              )
               : deps.explainAllForHost(loaded.config, host as "opencode" | "codex"),
             compatibility,
           ), null, 2),
@@ -1092,9 +1126,12 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         stdout: JSON.stringify(
           formatExplainOutput(
             resolved
-              ? attachExplainTrace(
-                deps.explainPhaseForHost(toRouterConfig(resolved.config), host as "opencode" | "codex", phase as BuiltInPhase),
-                { cwd, resolved },
+              ? attachLaneExplainability(
+                attachExplainTrace(
+                  deps.explainPhaseForHost(toRouterConfig(resolved.config), host as "opencode" | "codex", phase as BuiltInPhase),
+                  { cwd, resolved },
+                ),
+                resolved,
               )
               : deps.explainPhaseForHost(loaded.config, host as "opencode" | "codex", phase as BuiltInPhase),
             compatibility,

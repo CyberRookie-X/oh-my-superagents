@@ -496,6 +496,76 @@ describe("runCli", () => {
     expect(output.routeSource).toBe("lane-route")
   })
 
+  it("includes lane diagnostics in explain output", async () => {
+    const laneAwareControlPlaneConfig = {
+      ...controlPlaneConfig,
+      settings: {
+        ...controlPlaneConfig.settings,
+        defaultLane: "frontend",
+        laneSelection: { mode: "suggest" as const },
+      },
+      profiles: {
+        "frontend-strategy": {
+          model: "google/gemini-2.5-pro",
+          variant: "high",
+        },
+        build: { model: "openai/gpt-5" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { brainstorming: "frontend-strategy" },
+          defaultRoute: "build",
+        },
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          profiles: undefined,
+          usesLanes: ["frontend"],
+          defaultLane: "frontend",
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      explainPhaseForHost: (config: any, host: "opencode" | "codex", phase: any) => (
+        host === "opencode" ? explainPhase(config, phase) : { phase, profileId: "unused" }
+      ),
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: laneAwareControlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: laneAwareControlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend"],
+          defaultLane: "frontend",
+          presetDefaultLane: "frontend",
+          effectiveLane: "frontend",
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.allowedLanes).toEqual(["frontend"])
+    expect(output.defaultLane).toBe("frontend")
+    expect(output.presetDefaultLane).toBe("frontend")
+    expect(output.effectiveLane).toBe("frontend")
+    expect(output.laneSelection).toEqual({ mode: "suggest" })
+  })
+
   it("explains correctly when the active preset uses top-level profiles", async () => {
     const routedConfig = {
       ...controlPlaneConfig,
@@ -1910,6 +1980,10 @@ describe("runCli", () => {
         },
       },
       compatibility: compatibleOpencode,
+      allowedLanes: [],
+      laneSelection: {
+        mode: "suggest",
+      },
       artifacts: {
         present: [
           "/workspace/project/.opencode/agents/spr-build.md",
@@ -1944,6 +2018,78 @@ describe("runCli", () => {
         },
       },
     })
+  })
+
+  it("includes lane selection diagnostics in doctor output", async () => {
+    const laneAwareControlPlaneConfig = {
+      ...controlPlaneConfig,
+      settings: {
+        ...controlPlaneConfig.settings,
+        defaultLane: "frontend",
+        laneSelection: { mode: "suggest" as const },
+      },
+      profiles: {
+        "frontend-strategy": {
+          model: "google/gemini-2.5-pro",
+          variant: "high",
+        },
+        build: { model: "openai/gpt-5" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { brainstorming: "frontend-strategy" },
+          defaultRoute: "build",
+        },
+        backend: {
+          label: "Backend",
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          profiles: undefined,
+          usesLanes: ["frontend", "backend"],
+          defaultLane: "backend",
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: laneAwareControlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: laneAwareControlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend", "backend"],
+          defaultLane: "frontend",
+          presetDefaultLane: "backend",
+          effectiveLane: "frontend",
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.allowedLanes).toEqual(["frontend", "backend"])
+    expect(output.defaultLane).toBe("frontend")
+    expect(output.presetDefaultLane).toBe("backend")
+    expect(output.effectiveLane).toBe("frontend")
+    expect(output.laneSelection).toEqual({ mode: "suggest" })
   })
 
   it("summarizes expected, present, missing, and stale OpenCode artifacts in doctor output", async () => {
