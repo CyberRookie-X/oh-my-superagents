@@ -16,6 +16,12 @@ type PluginClient = {
   }
 }
 
+type StartupGuidanceState =
+  | "invalid_config"
+  | "missing_config"
+  | "upstream_incompatible"
+  | "upstream_not_detected"
+
 export const OhMySuperpowersPlugin: Plugin = async ({ client, directory }) => {
   const log = createPluginLogger(client as PluginClient)
   let compatibilityMode: SuperpowersCompatibilityMode = "warn"
@@ -32,8 +38,15 @@ export const OhMySuperpowersPlugin: Plugin = async ({ client, directory }) => {
     void log(
       level,
       level === "warn"
-        ? `Missing config. Run: oh-my-superagents sync --host opencode. ${message}`
-        : `Invalid config. ${message}`,
+        ? formatStartupGuidance({
+            state: "missing_config",
+            reason: message,
+            nextStep: "oh-my-superagents sync --host opencode",
+          })
+        : formatStartupGuidance({
+            state: "invalid_config",
+            reason: message,
+          }),
     )
   }
 
@@ -57,7 +70,11 @@ async function reportCompatibilityDiagnostics(input: {
     const detectedVersion = compatibility.detectedVersion ?? compatibility.detectedRef ?? "unknown"
     await input.log(
       "error",
-      `Incompatible superpowers upstream detected (${detectedVersion}). ${compatibility.reason}`,
+      formatStartupGuidance({
+        state: "upstream_incompatible",
+        reason: `Incompatible superpowers upstream detected (${detectedVersion}). ${compatibility.reason}`,
+        nextStep: "oh-my-superagents doctor --host opencode",
+      }),
     )
     return
   }
@@ -65,9 +82,25 @@ async function reportCompatibilityDiagnostics(input: {
   if (compatibility.status === "not_detected") {
     await input.log(
       "warn",
-      `Superpowers compatibility is not_detected. ${compatibility.reason}`,
+      formatStartupGuidance({
+        state: "upstream_not_detected",
+        reason: compatibility.reason,
+        nextStep: "oh-my-superagents doctor --host opencode",
+      }),
     )
   }
+}
+
+function formatStartupGuidance(input: {
+  state: StartupGuidanceState
+  reason: string
+  nextStep?: string
+}) {
+  return [
+    `Current state: ${input.state}`,
+    `Reason: ${input.reason}`,
+    ...(input.nextStep ? [`Next step: ${input.nextStep}`] : []),
+  ].join(" ")
 }
 
 async function resolveCompatibilityForStartup(input: {

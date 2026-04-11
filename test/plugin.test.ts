@@ -134,22 +134,17 @@ describe("OhMySuperpowersPlugin", () => {
     mocks.evaluateSuperpowersCompatibility.mockReturnValue(createCompatibilityResult())
   })
 
-  it("logs the recommended sync command when config is missing", async () => {
+  it("logs explicit first-run guidance when config is missing", async () => {
     const logs: unknown[] = []
 
     mocks.loadRouterConfig.mockRejectedValueOnce(
       new Error("Could not find oh-my-superagents.config.jsonc"),
     )
-    mocks.evaluateSuperpowersCompatibility.mockReturnValueOnce(
-      createCompatibilityResult({
-        status: "not_detected",
-        reason: "Could not detect a parseable superpowers version.",
-      }),
-    )
 
     await OhMySuperpowersPlugin(createPluginInput(logs))
 
-    expect(JSON.stringify(logs)).toContain("oh-my-superagents sync --host opencode")
+    expect(JSON.stringify(logs)).toContain("Current state: missing_config")
+    expect(JSON.stringify(logs)).toContain("Next step: oh-my-superagents sync --host opencode")
   })
 
   it.each([
@@ -223,7 +218,7 @@ describe("OhMySuperpowersPlugin", () => {
     )
   })
 
-  it("logs an error when the upstream superpowers version is incompatible and continues", async () => {
+  it("logs targeted guidance when upstream is incompatible", async () => {
     const logs: unknown[] = []
 
     mocks.detectOpenCodeSuperpowers.mockResolvedValueOnce(
@@ -240,18 +235,19 @@ describe("OhMySuperpowersPlugin", () => {
     )
 
     await expect(OhMySuperpowersPlugin(createPluginInput(logs))).resolves.toEqual({})
-    await waitForLogMessage(logs, "Incompatible")
+    await waitForLogMessage(logs, "Current state: upstream_incompatible")
 
     expect(logs).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           body: expect.objectContaining({
             level: "error",
-            message: expect.stringContaining("4.9.0"),
+            message: expect.stringContaining("Current state: upstream_incompatible"),
           }),
         }),
       ]),
     )
+    expect(JSON.stringify(logs)).toContain("Next step: oh-my-superagents doctor --host opencode")
   })
 
   it("degrades detector exceptions to not_detected, logs the detector issue, and continues", async () => {
