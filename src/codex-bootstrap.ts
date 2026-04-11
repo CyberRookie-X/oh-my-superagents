@@ -239,6 +239,10 @@ function buildControlPlaneSkillFiles(
       assertSafeCodexSkillSegment(renderedName, commandKey)
 
       const skillName = renderCodexControlPlaneSkillName(controlPlaneSettings, renderedName)
+      if (skillName === "oms-no-superpowers") {
+        throw new Error(`Codex skill collides with fixed helper skill: ${skillName}`)
+      }
+
       const existingCommand = seenSkillNames.get(skillName)
       if (existingCommand) {
         throw new Error(`Duplicate Codex skill rendering: ${skillName} (${existingCommand}, ${commandKey})`)
@@ -268,6 +272,12 @@ description: Temporarily disable superpowers for this conversation.
 ---
 
 <!-- generated-by: oh-my-superagents; do-not-edit: true -->
+${renderControlPlaneOwnershipMetadata({
+  host: "codex",
+  artifact: "skill",
+  logicalCommand: "disable",
+  renderedName: "oms-no-superpowers",
+})}
 Tell the assistant:
 - do not use superpowers in this conversation
 - do not proactively load superpowers skills, workflows, or phase agents

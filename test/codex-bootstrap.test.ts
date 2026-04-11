@@ -1,3 +1,4 @@
+import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { createDefaultControlPlaneConfig } from "../src/config.js"
 import {
@@ -5,6 +6,7 @@ import {
   buildStarterCodexConfig,
   runCodexBootstrap,
 } from "../src/codex-bootstrap.js"
+import { materializeArtifacts } from "../src/materialize.js"
 
 const incompatibleCodexStrict = {
   host: "codex" as const,
@@ -32,6 +34,91 @@ function createNotFoundError(filePath: string) {
   const error = new Error(`ENOENT: ${filePath}`) as Error & { code?: string }
   error.code = "ENOENT"
   return error
+}
+
+function createMemoryFs() {
+  const files = new Map<string, string>()
+  const directories = new Set<string>()
+
+  function ensureDirectory(directory: string) {
+    const resolved = path.resolve(directory)
+    directories.add(resolved)
+
+    const parent = path.dirname(resolved)
+    if (parent !== resolved) {
+      ensureDirectory(parent)
+    }
+  }
+
+  return {
+    mkdir: async (filePath: string) => {
+      ensureDirectory(filePath)
+    },
+    writeFile: async (filePath: string, content: string) => {
+      const resolved = path.resolve(filePath)
+      ensureDirectory(path.dirname(resolved))
+      files.set(resolved, content)
+    },
+    readFile: async (filePath: string) => {
+      const resolved = path.resolve(filePath)
+      const content = files.get(resolved)
+      if (content === undefined) {
+        throw createNotFoundError(filePath)
+      }
+      return content
+    },
+    readdir: async (directory: string) => {
+      const resolved = path.resolve(directory)
+      const entries = new Set<string>()
+
+      for (const knownDirectory of directories) {
+        const relative = path.relative(resolved, knownDirectory)
+        if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+          continue
+        }
+
+        const [first] = relative.split(path.sep)
+        if (first) {
+          entries.add(first)
+        }
+      }
+
+      for (const filePath of files.keys()) {
+        const relative = path.relative(resolved, filePath)
+        if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+          continue
+        }
+
+        const [first] = relative.split(path.sep)
+        if (first) {
+          entries.add(first)
+        }
+      }
+
+      return Array.from(entries)
+    },
+    stat: async (filePath: string) => {
+      const resolved = path.resolve(filePath)
+      return {
+        isFile: () => files.has(resolved),
+      }
+    },
+    rename: async (from: string, to: string) => {
+      const fromResolved = path.resolve(from)
+      const toResolved = path.resolve(to)
+      const content = files.get(fromResolved)
+      if (content === undefined) {
+        throw createNotFoundError(from)
+      }
+
+      ensureDirectory(path.dirname(toResolved))
+      files.set(toResolved, content)
+      files.delete(fromResolved)
+    },
+    unlink: async (filePath: string) => {
+      files.delete(path.resolve(filePath))
+    },
+  }
 }
 
 describe("buildStarterCodexConfig", () => {
@@ -153,11 +240,67 @@ describe("buildCodexBootstrapFiles", () => {
     )
 
     expect(helper?.content).toContain("name: oms-no-superpowers")
+    expect(helper?.content).toContain(
+      "oms-control-plane: stage=1; host=codex; artifact=skill; logical-command=disable; rendered-name=oms-no-superpowers",
+    )
     expect(helper?.content).toContain("do not use superpowers in this conversation")
     expect(helper?.content).toContain("do not proactively load superpowers skills, workflows, or phase agents")
     expect(helper?.content).toContain("only use superpowers again if I explicitly ask")
     expect(helper?.content).toContain("Extra instruction: $ARGUMENTS")
     expect(helper?.content).not.toContain("oh-my-superagents disable --host codex")
+  })
+
+  it("rejects rendered Codex skill names that collide with the fixed helper skill", () => {
+    const defaults = createDefaultControlPlaneConfig().settings
+
+    expect(() =>
+      buildCodexBootstrapFiles({
+        packageVersion: "0.1.0",
+        includeConfig: false,
+        controlPlaneSettings: {
+          ...defaults,
+          commands: {
+            ...defaults.commands,
+            status: {
+              name: "no-superpowers",
+              aliases: [],
+            },
+          },
+        },
+      }),
+    ).toThrow(/collide|helper|oms-no-superpowers/i)
+  })
+
+  it("materializes the fixed helper skill idempotently across reruns", async () => {
+    const helper = buildCodexBootstrapFiles({
+      packageVersion: "0.1.0",
+      includeConfig: false,
+      controlPlaneSettings: createDefaultControlPlaneConfig().settings,
+    }).files.find((file) => file.path === "plugins/oh-my-superagents-codex/skills/oms-no-superpowers/SKILL.md")
+
+    const fs = createMemoryFs()
+    const artifact = {
+      kind: "command" as const,
+      directory: path.dirname(helper!.path),
+      fileName: path.basename(helper!.path),
+      ownerPrefix: "unused-for-stage1-metadata",
+      content: helper!.content,
+    }
+
+    const first = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [artifact],
+      fs,
+    })
+    const second = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [artifact],
+      fs,
+    })
+
+    expect(first.exitCode).toBe(0)
+    expect(second.exitCode).toBe(0)
+    expect(second.warnings).toEqual([])
   })
 
   it("rejects duplicate rendered Codex skill names across primary names and aliases", () => {
