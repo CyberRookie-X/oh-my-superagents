@@ -447,6 +447,36 @@ function clonePreset(preset: ControlPlanePreset): ControlPlanePreset {
   }
 }
 
+function getEffectiveProfilesForPreset(config: ControlPlaneConfig, preset: ControlPlanePreset) {
+  return {
+    ...config.profiles,
+    ...(preset.profiles ?? {}),
+  }
+}
+
+function validateLaneTargets(config: ControlPlaneConfig) {
+  for (const [presetKey, preset] of Object.entries(config.presets)) {
+    const effectiveProfiles = getEffectiveProfilesForPreset(config, preset)
+
+    for (const laneKey of preset.usesLanes ?? []) {
+      const lane = config.lanes[laneKey]
+      if (!lane) {
+        continue
+      }
+
+      if (!effectiveProfiles[lane.defaultRoute]) {
+        throw new Error(`Preset ${presetKey} lane ${laneKey} has unknown defaultRoute profile: ${lane.defaultRoute}`)
+      }
+
+      for (const target of Object.values(lane.routes)) {
+        if (!effectiveProfiles[target]) {
+          throw new Error(`Preset ${presetKey} lane ${laneKey} has unknown profile: ${target}`)
+        }
+      }
+    }
+  }
+}
+
 export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConfig {
   const visiting = new Set<string>()
   const resolved = new Map<string, ControlPlanePreset>()
@@ -634,12 +664,15 @@ export async function loadControlPlaneConfig(
     merged = merged ? mergeLayeredConfigs(merged, loaded) : loaded
   }
 
+  const config = resolvePresetReuse(finalizeConfig(merged ?? { presets: {} }))
+  validateLaneTargets(config)
+
   return {
     path: sources[sources.length - 1]!,
     sources,
     layers,
     hasRealSource: true,
-    config: resolvePresetReuse(finalizeConfig(merged ?? { presets: {} })),
+    config,
   }
 }
 

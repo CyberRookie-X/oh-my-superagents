@@ -496,6 +496,74 @@ describe("runCli", () => {
     expect(output.routeSource).toBe("lane-route")
   })
 
+  it("applies --lane in explain when laneSelection.mode is auto", async () => {
+    const laneAwareControlPlaneConfig = {
+      ...controlPlaneConfig,
+      settings: {
+        ...controlPlaneConfig.settings,
+        laneSelection: { mode: "auto" as const },
+      },
+      profiles: {
+        "frontend-strategy": {
+          model: "google/gemini-2.5-pro",
+          variant: "high",
+        },
+        build: { model: "openai/gpt-5" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { brainstorming: "frontend-strategy" },
+          defaultRoute: "build",
+        },
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          profiles: undefined,
+          usesLanes: ["frontend"],
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming", "--lane", "frontend"], createCliDeps({
+      explainPhaseForHost: (config: any, host: "opencode" | "codex", phase: any) => (
+        host === "opencode" ? explainPhase(config, phase) : { phase, profileId: "unused" }
+      ),
+      resolveControlPlane: async (input: { runtimeLane?: string }) => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: laneAwareControlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: laneAwareControlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend"],
+          defaultLane: undefined,
+          presetDefaultLane: undefined,
+          effectiveLane: input.runtimeLane,
+          runtimeLane: input.runtimeLane,
+          mode: "auto" as const,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.profileId).toBe("frontend-strategy")
+    expect(output.effectiveLane).toBe("frontend")
+    expect(output.runtimeLane).toBe("frontend")
+  })
+
   it("includes lane diagnostics in explain output", async () => {
     const laneAwareControlPlaneConfig = {
       ...controlPlaneConfig,
@@ -598,6 +666,39 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(output.laneSelection).toEqual({ mode: "suggest" })
     expect(output.nonApplyingReason).toContain("Stage 1")
+  })
+
+  it("keeps --lane non-applying in status when laneSelection.mode is manual", async () => {
+    const result = await runCli(["status", "--host", "opencode", "--lane", "frontend"], createCliDeps({
+      resolveControlPlane: async (input: { runtimeLane?: string }) => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend", "backend"],
+          defaultLane: "backend",
+          presetDefaultLane: "backend",
+          effectiveLane: "backend",
+          runtimeLane: input.runtimeLane,
+          mode: "manual" as const,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.mode).toBe("manual")
+    expect(output.runtimeLane).toBe("frontend")
+    expect(output.effectiveLane).toBe("backend")
   })
 
   it("explains correctly when the active preset uses top-level profiles", async () => {
@@ -2138,6 +2239,77 @@ describe("runCli", () => {
     expect(output.effectiveLane).toBe("frontend")
     expect(output.laneSelection).toEqual({ mode: "suggest" })
     expect(output.nonApplyingReason).toContain("Stage 1")
+  })
+
+  it("keeps --lane non-applying in doctor when laneSelection.mode is suggest", async () => {
+    const result = await runCli(["doctor", "--host", "opencode", "--lane", "frontend"], createCliDeps({
+      resolveControlPlane: async (input: { runtimeLane?: string }) => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend", "backend"],
+          defaultLane: "backend",
+          presetDefaultLane: "backend",
+          effectiveLane: "backend",
+          runtimeLane: input.runtimeLane,
+          mode: "suggest" as const,
+          nonApplyingReason: "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session.",
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.mode).toBe("suggest")
+    expect(output.runtimeLane).toBe("frontend")
+    expect(output.effectiveLane).toBe("backend")
+    expect(output.nonApplyingReason).toContain("Stage 1")
+  })
+
+  it("uses --lane as the effective lane for sync when laneSelection.mode is auto", async () => {
+    let syncedEffectiveLane: string | undefined
+
+    const result = await runCli(["sync", "--host", "opencode", "--lane", "frontend"], createCliDeps({
+      resolveControlPlane: async (input: { runtimeLane?: string }) => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend"],
+          defaultLane: undefined,
+          presetDefaultLane: undefined,
+          effectiveLane: input.runtimeLane,
+          runtimeLane: input.runtimeLane,
+          mode: "auto" as const,
+        },
+      }),
+      buildArtifacts: (config: { effectiveLane?: string }) => {
+        syncedEffectiveLane = config.effectiveLane
+        return { agents: [], commands: [] }
+      },
+      materializeArtifacts: async () => ({ exitCode: 0 as const, warnings: [], written: [], removed: [] }),
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(syncedEffectiveLane).toBe("frontend")
   })
 
   it("summarizes expected, present, missing, and stale OpenCode artifacts in doctor output", async () => {

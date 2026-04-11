@@ -182,8 +182,16 @@ Lane-aware routing keeps `phase` fixed to the upstream `superpowers` workflow ke
 - `preset` still chooses the work mode, and `usesLanes` limits which global lanes that preset can use.
 - `settings.defaultLane` is the persisted baseline lane for the active preset.
 - `laneSelection.mode` supports `manual`, `suggest`, and `auto`.
+- `--lane <name>` is a per-invocation runtime lane override for `status`, `doctor`, `explain`, and `sync`; it is never persisted.
 
-`manual` uses only the persisted/default lane path, `suggest` asks for confirmation before switching the current task to a recommended lane, and `auto` may apply a session-scoped `effectiveLane` without persisting it back into config.
+`manual` uses only the persisted/default lane path, `suggest` surfaces the runtime lane as a non-applying Stage 1 suggestion, and `auto` may apply a session-scoped `effectiveLane` without persisting it back into config.
+
+Examples:
+
+```bash
+oh-my-superagents status --host opencode --lane frontend
+oh-my-superagents explain --host opencode --phase brainstorming --lane frontend
+```
 
 Compact example:
 

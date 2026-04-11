@@ -186,8 +186,16 @@ Lane-aware 路由会继续把 `phase` 固定为 upstream `superpowers` 的工作
 - `preset` 仍然负责选择工作模式，`usesLanes` 用来限制该 preset 可使用的全局 lane。
 - `settings.defaultLane` 是当前 active preset 的持久化基线 lane。
 - `laneSelection.mode` 支持 `manual`、`suggest`、`auto`。
+- `--lane <name>` 是 `status`、`doctor`、`explain`、`sync` 的单次运行时 lane 覆盖，不会被持久化。
 
-其中 `manual` 只走持久化/默认 lane 路径，`suggest` 会先给出推荐 lane 并等待确认，`auto` 则可以在当前会话里直接应用一个 `effectiveLane`，但不会静默写回配置。
+其中 `manual` 只走持久化/默认 lane 路径，`suggest` 会把运行时 lane 作为 Stage 1 的非应用型建议暴露出来，`auto` 则可以在当前会话里直接应用一个 `effectiveLane`，但不会静默写回配置。
+
+示例：
+
+```bash
+oh-my-superagents status --host opencode --lane frontend
+oh-my-superagents explain --host opencode --phase brainstorming --lane frontend
+```
 
 紧凑示例：
 

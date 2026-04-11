@@ -435,10 +435,11 @@ async function getArtifactsForHost(
 async function getExpectedArtifacts(
   cwd: string,
   config: ResolvedControlPlane["config"],
+  laneState: ResolvedControlPlane["laneState"] | undefined,
   host: CliHost,
   deps: CliDeps,
 ) {
-  const routerConfig = toRouterConfig(config)
+  const routerConfig = toRouterConfig(config, laneState)
 
   if (host === "codex") {
     const built = deps.buildCodexArtifacts(routerConfig).agents
@@ -902,11 +903,17 @@ async function buildControlPlaneStatus(
   cwd: string,
   explicitPath: string | undefined,
   host: CliHost,
+  runtimeLane: string | undefined,
   deps: CliDeps,
 ) {
-  const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath })
+  const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
   const compatibility = await resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps)
-  const artifacts = await inspectArtifacts(cwd, await getExpectedArtifacts(cwd, resolved.config, host, deps), host, deps)
+  const artifacts = await inspectArtifacts(
+    cwd,
+    await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps),
+    host,
+    deps,
+  )
   const formattedArtifacts = formatArtifactInspection(artifacts)
   const openCodeStatus = host === "opencode"
     ? (() => {
@@ -956,11 +963,17 @@ async function buildControlPlaneDoctor(
   cwd: string,
   explicitPath: string | undefined,
   host: CliHost,
+  runtimeLane: string | undefined,
   deps: CliDeps,
 ) {
-  const resolved = await deps.resolveControlPlane({ command: "doctor", cwd, explicitPath })
+  const resolved = await deps.resolveControlPlane({ command: "doctor", cwd, explicitPath, runtimeLane })
   const compatibility = await resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps)
-  const artifacts = await inspectArtifacts(cwd, await getExpectedArtifacts(cwd, resolved.config, host, deps), host, deps)
+  const artifacts = await inspectArtifacts(
+    cwd,
+    await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps),
+    host,
+    deps,
+  )
   const formattedArtifacts = formatArtifactInspection(artifacts)
   const artifactSummary = host === "opencode"
     ? summarizeControlPlaneArtifacts({
@@ -1008,6 +1021,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     const cwd = deps.getCwd()
     const host = getStringFlag(flags, "--host")
     const explicitPath = getStringFlag(flags, "--config")
+    const runtimeLane = getStringFlag(flags, "--lane")
 
     if (
       command !== "sync"
@@ -1066,7 +1080,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     if (command === "status") {
       return {
         exitCode: 0,
-        stdout: JSON.stringify(await buildControlPlaneStatus(cwd, explicitPath, cliHost, deps), null, 2),
+        stdout: JSON.stringify(await buildControlPlaneStatus(cwd, explicitPath, cliHost, runtimeLane, deps), null, 2),
         stderr: "",
       }
     }
@@ -1074,7 +1088,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     if (command === "doctor") {
       return {
         exitCode: 0,
-        stdout: JSON.stringify(await buildControlPlaneDoctor(cwd, explicitPath, cliHost, deps), null, 2),
+        stdout: JSON.stringify(await buildControlPlaneDoctor(cwd, explicitPath, cliHost, runtimeLane, deps), null, 2),
         stderr: "",
       }
     }
@@ -1082,7 +1096,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     if (command === "explain") {
       const loaded = await deps.loadConfig({ cwd, explicitPath })
       const resolved = host === "opencode"
-        ? await deps.resolveControlPlane({ command: "status", cwd, explicitPath })
+        ? await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
         : null
 
       if (flags.get("--all") === true) {
@@ -1292,14 +1306,14 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       let resolved: ResolvedControlPlane
       let bootstrappedConfigPath: string | undefined
 
-      try {
-        resolved = await deps.resolveControlPlane({ command: "sync", cwd, explicitPath })
-      } catch (error) {
+        try {
+          resolved = await deps.resolveControlPlane({ command: "sync", cwd, explicitPath, runtimeLane })
+        } catch (error) {
         if (cliHost !== "opencode" || !(error instanceof Error) || error.message !== "Command sync requires a real config source") {
           throw error
         }
 
-        const fallback = await deps.resolveControlPlane({ command: "status", cwd, explicitPath })
+        const fallback = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
         const prepared = await deps.prepareControlPlaneStateWrite({
           command: "sync",
           cwd,
@@ -1376,13 +1390,19 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           resolved.source.kind === "file" && resolved.source.path
             ? resolved.source.path
             : path.join(cwd, "oh-my-superagents.config.jsonc"),
-          toRouterConfig(resolved.config),
+          toRouterConfig(resolved.config, resolved.laneState),
           resolved.config.settings,
           deps,
         )
         : await deps.materializeArtifacts({
           cwd,
-          artifacts: await getArtifactsForHost(cwd, toRouterConfig(resolved.config), cliHost, deps, resolved.config.settings),
+          artifacts: await getArtifactsForHost(
+            cwd,
+            toRouterConfig(resolved.config, resolved.laneState),
+            cliHost,
+            deps,
+            resolved.config.settings,
+          ),
           fs: nodeFs,
         })
 

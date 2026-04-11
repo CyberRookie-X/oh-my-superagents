@@ -295,6 +295,76 @@ describe("loadControlPlaneConfig", () => {
     ).rejects.toThrow(/lane/i)
   })
 
+  it("rejects a lane route target that does not exist in the effective profile set", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "settings": { "activePreset": "default" },
+          "profiles": {
+            "build": { "model": "openai/gpt-5" }
+          },
+          "lanes": {
+            "frontend": {
+              "label": "Frontend",
+              "routes": {
+                "brainstorming": "missing-profile"
+              },
+              "defaultRoute": "build"
+            }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "usesLanes": ["frontend"],
+              "defaultLane": "frontend",
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/lane|profile|missing-profile/i)
+  })
+
+  it("rejects a lane defaultRoute target that does not exist in the effective profile set", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "settings": { "activePreset": "default" },
+          "profiles": {
+            "build": { "model": "openai/gpt-5" }
+          },
+          "lanes": {
+            "frontend": {
+              "label": "Frontend",
+              "routes": {},
+              "defaultRoute": "missing-profile"
+            }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "usesLanes": ["frontend"],
+              "defaultLane": "frontend",
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/lane|defaultRoute|profile|missing-profile/i)
+  })
+
   it("inherits usesLanes and defaultLane from an extended parent preset", async () => {
     const result = await loadControlPlaneConfig({
       cwd: "/workspace/project",
