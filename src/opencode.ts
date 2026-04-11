@@ -10,6 +10,7 @@ import { PHASE_TO_AGENT, PHASE_TO_COMMAND, resolvePhase, type BuiltInPhase } fro
 export const MARKER_TEXT = "generated-by: oh-my-superagents; do-not-edit: true"
 export const MARKER = `<!-- ${MARKER_TEXT} -->`
 export const CONTROL_PLANE_MARKER_PREFIX = "oms-control-plane:"
+export const AUXILIARY_MARKER_PREFIX = "oms-auxiliary:"
 
 type PermissionTask = Record<string, "allow" | "deny" | "ask">
 
@@ -48,6 +49,15 @@ export function renderControlPlaneOwnershipMetadata(input: {
   renderedName: string
 }) {
   return `<!-- ${CONTROL_PLANE_MARKER_PREFIX} stage=1; host=${input.host}; artifact=${input.artifact}; logical-command=${input.logicalCommand}; rendered-name=${input.renderedName} -->`
+}
+
+export function renderAuxiliaryOwnershipMetadata(input: {
+  host: "codex"
+  artifact: "skill"
+  helper: "temporary-disable"
+  renderedName: string
+}) {
+  return `<!-- ${AUXILIARY_MARKER_PREFIX} stage=1; host=${input.host}; artifact=${input.artifact}; helper=${input.helper}; rendered-name=${input.renderedName} -->`
 }
 
 export function renderAgentFile(input: {

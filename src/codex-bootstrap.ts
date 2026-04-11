@@ -13,7 +13,7 @@ import {
 import { buildCodexArtifacts } from "./codex.js"
 import type { GeneratedArtifact } from "./opencode.js"
 import type { MaterializeArtifactsResult, materializeArtifacts } from "./materialize.js"
-import { renderControlPlaneOwnershipMetadata } from "./opencode.js"
+import { renderAuxiliaryOwnershipMetadata, renderControlPlaneOwnershipMetadata } from "./opencode.js"
 import type {
   SuperpowersCompatibilityMode,
   SuperpowersCompatibilityResult,
@@ -273,10 +273,10 @@ description: Temporarily disable superpowers for this conversation.
 ---
 
 <!-- generated-by: oh-my-superagents; do-not-edit: true -->
-${renderControlPlaneOwnershipMetadata({
+${renderAuxiliaryOwnershipMetadata({
   host: "codex",
   artifact: "skill",
-  logicalCommand: "disable",
+  helper: "temporary-disable",
   renderedName: "oms-no-superpowers",
 })}
 Tell the assistant:

@@ -133,6 +133,25 @@ function renderOwnedCodexOmsSkill(skillName: string, logicalCommand: string) {
   ].join("\n")
 }
 
+function renderOwnedCodexTemporaryDisableHelperSkill(skillName: string) {
+  return [
+    `# ${OWNERSHIP_MARKER.slice(5, -4)}`,
+    "---",
+    `name: ${skillName}`,
+    "description: Generated OMS helper skill",
+    "---",
+    "",
+    `<!-- oms-auxiliary: stage=1; host=codex; artifact=skill; helper=temporary-disable; rendered-name=${skillName} -->`,
+    "Tell the assistant:",
+    "- do not use superpowers in this conversation",
+    "- do not proactively load superpowers skills, workflows, or phase agents",
+    "- only use superpowers again if I explicitly ask",
+    "",
+    "Extra instruction: $ARGUMENTS",
+    "",
+  ].join("\n")
+}
+
 function renderOwnedQwenOmsCommand(renderedName: string, logicalCommand: string) {
   return [
     "---",
@@ -501,6 +520,45 @@ describe("materializeArtifacts", () => {
       "/workspace/project/plugins/oh-my-superagents-codex/skills/legacy-state/SKILL.md",
     ])
     expect(removedPaths).toEqual(result.removed)
+  })
+
+  it("treats Codex temporary-disable helper skills as a distinct owned contract", async () => {
+    const helperDirectory = "plugins/oh-my-superagents-codex/skills/oms-no-superpowers"
+    const helperFilePath = "/workspace/project/plugins/oh-my-superagents-codex/skills/oms-no-superpowers/SKILL.md"
+
+    const ownedFs = createMemoryFs({
+      [helperFilePath]: renderOwnedCodexTemporaryDisableHelperSkill("oms-no-superpowers"),
+    })
+
+    const helperArtifact = {
+      kind: "command" as const,
+      directory: helperDirectory,
+      fileName: "SKILL.md",
+      ownerPrefix: "unused-for-stage1-metadata",
+      content: renderOwnedCodexTemporaryDisableHelperSkill("oms-no-superpowers"),
+    }
+
+    const ownedResult = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [helperArtifact],
+      fs: ownedFs.fs,
+    })
+
+    expect(ownedResult.exitCode).toBe(0)
+    expect(ownedResult.warnings).toEqual([])
+
+    const controlPlaneFs = createMemoryFs({
+      [helperFilePath]: renderOwnedCodexOmsSkill("oms-no-superpowers", "disable"),
+    })
+
+    const collisionResult = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [helperArtifact],
+      fs: controlPlaneFs.fs,
+    })
+
+    expect(collisionResult.exitCode).toBe(1)
+    expect(collisionResult.warnings).toEqual([`Collision at ${helperFilePath}`])
   })
 
   it("preserves non-OMS Codex skill files that do not satisfy the OMS ownership contract", async () => {

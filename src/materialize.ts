@@ -1,6 +1,11 @@
 import path from "node:path"
 import { CONTROL_PLANE_COMMAND_KEYS, type ControlPlaneCommandKey } from "./config.js"
-import { CONTROL_PLANE_MARKER_PREFIX, MARKER_TEXT, type GeneratedArtifact } from "./opencode.js"
+import {
+  AUXILIARY_MARKER_PREFIX,
+  CONTROL_PLANE_MARKER_PREFIX,
+  MARKER_TEXT,
+  type GeneratedArtifact,
+} from "./opencode.js"
 
 type StatsLike = {
   isFile: () => boolean
@@ -31,6 +36,7 @@ export type MaterializeArtifactsResult = {
 
 const CODEX_SKILL_FILE_NAME = "SKILL.md"
 const CONTROL_PLANE_LOGICAL_COMMANDS = new Set<ControlPlaneCommandKey>(CONTROL_PLANE_COMMAND_KEYS)
+const AUXILIARY_HELPER_NAME = "temporary-disable"
 
 function getTargetDirectory(cwd: string, directory: string) {
   return path.join(cwd, directory)
@@ -108,6 +114,31 @@ function parseControlPlaneOwnership(content: string) {
   }
 }
 
+function parseAuxiliaryOwnership(content: string) {
+  if (!hasArtifactOwnershipMarker(content)) {
+    return undefined
+  }
+
+  const escapedPrefix = AUXILIARY_MARKER_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const match = content.match(
+    new RegExp(
+      `<!-- ${escapedPrefix} stage=(1|2); host=(codex); artifact=(skill); helper=([a-z-]+); rendered-name=([a-z0-9-]+) -->`,
+    ),
+  )
+
+  if (!match || match[4] !== AUXILIARY_HELPER_NAME) {
+    return undefined
+  }
+
+  return {
+    stage: match[1] as "1" | "2",
+    host: match[2] as "codex",
+    artifact: match[3] as "skill",
+    helper: match[4] as typeof AUXILIARY_HELPER_NAME,
+    renderedName: match[5],
+  }
+}
+
 function isSameControlPlaneOwnership(leftContent: string, rightContent: string) {
   const left = parseControlPlaneOwnership(leftContent)
   const right = parseControlPlaneOwnership(rightContent)
@@ -140,6 +171,11 @@ function isCodexOmsControlPlaneSkillContent(content: string) {
   return ownership?.stage === "1" && ownership.host === "codex" && ownership.artifact === "skill"
 }
 
+function isCodexOmsAuxiliarySkillContent(content: string) {
+  const ownership = parseAuxiliaryOwnership(content)
+  return ownership?.stage === "1" && ownership.host === "codex" && ownership.artifact === "skill"
+}
+
 function isQwenOmsControlPlaneCommand(content: string) {
   const ownership = parseControlPlaneOwnership(content)
   return ownership?.stage === "2" && ownership.host === "qwen" && ownership.artifact === "command"
@@ -165,11 +201,30 @@ function isCodexOmsControlPlaneSkillFile(filePath: string, content: string) {
   )
 }
 
+function isCodexOmsAuxiliarySkillFile(filePath: string, content: string) {
+  const ownership = parseAuxiliaryOwnership(content)
+
+  return (
+    path.basename(filePath) === CODEX_SKILL_FILE_NAME
+    && filePath.includes(`${path.sep}plugins${path.sep}oh-my-superagents-codex${path.sep}skills${path.sep}`)
+    && isCodexOmsAuxiliarySkillContent(content)
+    && path.basename(path.dirname(filePath)) === ownership?.renderedName
+  )
+}
+
 function isCodexOmsControlPlaneSkillArtifact(artifact: GeneratedArtifact) {
   return (
     artifact.fileName === CODEX_SKILL_FILE_NAME
     && artifact.directory.startsWith("plugins/oh-my-superagents-codex/skills/")
     && isCodexOmsControlPlaneSkillContent(artifact.content)
+  )
+}
+
+function isCodexOmsAuxiliarySkillArtifact(artifact: GeneratedArtifact) {
+  return (
+    artifact.fileName === CODEX_SKILL_FILE_NAME
+    && artifact.directory.startsWith("plugins/oh-my-superagents-codex/skills/")
+    && isCodexOmsAuxiliarySkillContent(artifact.content)
   )
 }
 
@@ -186,6 +241,20 @@ function isArtifactOwnedByCurrentContract(
   if (isCodexOmsControlPlaneSkillArtifact(artifact)) {
     return isCodexOmsControlPlaneSkillFile(existingPath, existingContent)
       && isSameControlPlaneOwnership(artifact.content, existingContent)
+  }
+
+  if (isCodexOmsAuxiliarySkillArtifact(artifact)) {
+    const nextOwnership = parseAuxiliaryOwnership(artifact.content)
+    const existingOwnership = parseAuxiliaryOwnership(existingContent)
+
+    return (
+      isCodexOmsAuxiliarySkillFile(existingPath, existingContent)
+      && nextOwnership !== undefined
+      && existingOwnership !== undefined
+      && nextOwnership.host === existingOwnership.host
+      && nextOwnership.artifact === existingOwnership.artifact
+      && nextOwnership.helper === existingOwnership.helper
+    )
   }
 
   if (artifact.directory === ".qwen/commands" && isQwenOmsControlPlaneCommand(artifact.content)) {
@@ -229,7 +298,7 @@ export async function materializeArtifacts(
         qwenOmsCommandDirectories.add(targetDirectory)
       }
 
-      if (isCodexOmsControlPlaneSkillArtifact(artifact)) {
+      if (isCodexOmsControlPlaneSkillArtifact(artifact) || isCodexOmsAuxiliarySkillArtifact(artifact)) {
         const cleanupRoot = path.dirname(targetDirectory)
         const desiredSkillDirectories = codexSkillCleanupRoots.get(cleanupRoot) ?? new Set<string>()
         desiredSkillDirectories.add(path.basename(targetDirectory))
@@ -318,7 +387,7 @@ export async function materializeArtifacts(
 
       const skillPath = path.join(cleanupRoot, entry, CODEX_SKILL_FILE_NAME)
       const content = await input.fs.readFile(skillPath).catch(() => "")
-      if (!isCodexOmsControlPlaneSkillFile(skillPath, content)) {
+      if (!isCodexOmsControlPlaneSkillFile(skillPath, content) && !isCodexOmsAuxiliarySkillFile(skillPath, content)) {
         continue
       }
 

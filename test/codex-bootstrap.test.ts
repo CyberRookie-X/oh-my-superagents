@@ -243,6 +243,9 @@ describe("buildCodexBootstrapFiles", () => {
 
     expect(helper?.content).toContain("name: oms-no-superpowers")
     expect(helper?.content).toContain(
+      "oms-auxiliary: stage=1; host=codex; artifact=skill; helper=temporary-disable; rendered-name=oms-no-superpowers",
+    )
+    expect(helper?.content).not.toContain(
       "oms-control-plane: stage=1; host=codex; artifact=skill; logical-command=disable; rendered-name=oms-no-superpowers",
     )
     expect(helper?.content).toContain("do not use superpowers in this conversation")
