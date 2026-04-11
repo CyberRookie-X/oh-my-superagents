@@ -146,15 +146,21 @@ npx oh-my-superagents sync --host opencode
 }
 ```
 
-如果是给 Codex 兼容 profile 显式开启快速层，可以这样写：
+如果是在现代分层配置结构里给 Codex 兼容 profile 显式开启快速层，可以这样写：
 
 ```jsonc
 {
-  "profiles": {
-    "build": {
-      "model": "gpt-5.4",
-      "effort": "balanced",
-      "codexFast": true
+  "presets": {
+    "default": {
+      "profiles": {
+        "build": {
+          "model": "gpt-5.4",
+          "effort": "balanced",
+          "codexFast": true
+        }
+      },
+      "routes": {},
+      "defaultRoute": "build"
     }
   }
 }
@@ -168,6 +174,7 @@ npx oh-my-superagents sync --host opencode
 - 项目级同名 preset 会整体替换全局同名 preset
 - 项目级同名 command entry 会整体替换全局同名 command entry，然后再补默认值
 - 老的单 preset router 配置仍可读取，并会迁移到 `presets.default`
+- 对于 `--host codex`，profile 里的 model id 需要本身就是 Codex 兼容值，例如 `gpt-5.4` 或 `gpt-5.3-codex-spark`。Codex 适配层不会把任意 OpenCode provider/model id 自动转换成 Codex 可用值。
 
 ## OMS 控制平面
 

@@ -144,15 +144,21 @@ Create `oh-my-superagents.config.jsonc` in your project root:
 }
 ```
 
-For a Codex-compatible profile, enable `codexFast` explicitly:
+For a Codex-compatible profile inside the modern layered config shape, enable `codexFast` explicitly:
 
 ```jsonc
 {
-  "profiles": {
-    "build": {
-      "model": "gpt-5.4",
-      "effort": "balanced",
-      "codexFast": true
+  "presets": {
+    "default": {
+      "profiles": {
+        "build": {
+          "model": "gpt-5.4",
+          "effort": "balanced",
+          "codexFast": true
+        }
+      },
+      "routes": {},
+      "defaultRoute": "build"
     }
   }
 }
