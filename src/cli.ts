@@ -370,7 +370,10 @@ function joinStderr(parts: Array<string | undefined>) {
   return parts.filter((part): part is string => Boolean(part && part.length > 0)).join("\n")
 }
 
-function toRouterConfig(config: ResolvedControlPlane["config"]) {
+function toRouterConfig(
+  config: ResolvedControlPlane["config"],
+  laneState?: ResolvedControlPlane["laneState"],
+) {
   const activePreset = config.presets[config.settings.activePreset]
   if (!activePreset) {
     throw new Error(`Unknown preset: ${config.settings.activePreset}`)
@@ -384,7 +387,7 @@ function toRouterConfig(config: ResolvedControlPlane["config"]) {
     lanes: config.lanes,
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
-    effectiveLane: config.settings.defaultLane ?? activePreset.defaultLane,
+    effectiveLane: laneState?.effectiveLane ?? config.settings.defaultLane ?? activePreset.defaultLane,
     superpowersCompatibility: config.settings.superpowersCompatibility,
   }
 }
@@ -944,6 +947,7 @@ async function buildControlPlaneStatus(
     host,
     compatibility,
     artifacts: formattedArtifacts,
+    ...summarizeLaneExplainability(resolved),
     ...openCodeStatus,
   }
 }
@@ -1093,7 +1097,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           stdout: JSON.stringify(formatExplainOutput(
             resolved
               ? attachLaneExplainability(
-                attachExplainTrace(deps.explainAllForHost(toRouterConfig(resolved.config), host as "opencode" | "codex"), {
+                attachExplainTrace(deps.explainAllForHost(toRouterConfig(resolved.config, resolved.laneState), host as "opencode" | "codex"), {
                   cwd,
                   resolved,
                 }),
@@ -1128,7 +1132,11 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
             resolved
               ? attachLaneExplainability(
                 attachExplainTrace(
-                  deps.explainPhaseForHost(toRouterConfig(resolved.config), host as "opencode" | "codex", phase as BuiltInPhase),
+                  deps.explainPhaseForHost(
+                    toRouterConfig(resolved.config, resolved.laneState),
+                    host as "opencode" | "codex",
+                    phase as BuiltInPhase,
+                  ),
                   { cwd, resolved },
                 ),
                 resolved,

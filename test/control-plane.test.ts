@@ -381,7 +381,92 @@ describe("resolveControlPlane", () => {
       allowedLanes: ["frontend", "backend"],
       defaultLane: "frontend",
       effectiveLane: "frontend",
+      mode: "suggest",
+      nonApplyingReason: "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session.",
       presetDefaultLane: "backend",
+      runtimeLane: undefined,
+    })
+  })
+
+  it("keeps a runtime lane override non-applying in manual mode", async () => {
+    const result = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => true,
+      runtimeLane: "frontend",
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default",
+          "laneSelection": { "mode": "manual" }
+        },
+        "profiles": {
+          "frontend-build": { "model": "openai/gpt-5" },
+          "backend-build": { "model": "gpt-5.4" }
+        },
+        "lanes": {
+          "frontend": { "label": "Frontend", "routes": {}, "defaultRoute": "frontend-build" },
+          "backend": { "label": "Backend", "routes": {}, "defaultRoute": "backend-build" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["frontend", "backend"],
+            "defaultLane": "backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.laneState).toMatchObject({
+      mode: "manual",
+      runtimeLane: "frontend",
+      effectiveLane: "backend",
+      nonApplyingReason: undefined,
+    })
+  })
+
+  it("applies a runtime lane override in auto mode", async () => {
+    const result = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => true,
+      runtimeLane: "frontend",
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default",
+          "laneSelection": { "mode": "auto" }
+        },
+        "profiles": {
+          "frontend-build": { "model": "openai/gpt-5" },
+          "backend-build": { "model": "gpt-5.4" }
+        },
+        "lanes": {
+          "frontend": { "label": "Frontend", "routes": {}, "defaultRoute": "frontend-build" },
+          "backend": { "label": "Backend", "routes": {}, "defaultRoute": "backend-build" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["frontend", "backend"],
+            "defaultLane": "backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.laneState).toMatchObject({
+      mode: "auto",
+      runtimeLane: "frontend",
+      effectiveLane: "frontend",
+      nonApplyingReason: undefined,
     })
   })
 
@@ -1399,6 +1484,51 @@ describe("summarizeRoutingValidation", () => {
           routes: {
             brainstorming: "strategy",
           },
+          defaultRoute: "build",
+        },
+      },
+    }, "default")
+
+    expect(summary.unusedProfiles).toEqual(["unused"])
+  })
+
+  it("treats lane-only profiles as used during routing validation", () => {
+    const summary = summarizeRoutingValidation({
+      settings: {
+        enabled: true,
+        activePreset: "default",
+        laneSelection: { mode: "suggest" },
+        commandPrefix: "oms",
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      profiles: {
+        build: { model: "openai/gpt-5" },
+        "lane-strategy": { model: "anthropic/claude-sonnet-4-5" },
+        unused: { model: "google/gemini-2.5-pro" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: {
+            brainstorming: "lane-strategy",
+          },
+          defaultRoute: "lane-strategy",
+        },
+      },
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          usesLanes: ["frontend"],
+          defaultLane: "frontend",
+          routes: {},
           defaultRoute: "build",
         },
       },

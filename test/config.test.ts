@@ -295,6 +295,56 @@ describe("loadControlPlaneConfig", () => {
     ).rejects.toThrow(/lane/i)
   })
 
+  it("inherits usesLanes and defaultLane from an extended parent preset", async () => {
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "child"
+        },
+        "profiles": {
+          "frontend-build": { "model": "openai/gpt-5" },
+          "backend-build": { "model": "gpt-5.4" }
+        },
+        "lanes": {
+          "frontend": {
+            "label": "Frontend",
+            "routes": {},
+            "defaultRoute": "frontend-build"
+          },
+          "backend": {
+            "label": "Backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        },
+        "presets": {
+          "base": {
+            "label": "Base",
+            "short": "base",
+            "usesLanes": ["frontend", "backend"],
+            "defaultLane": "backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          },
+          "child": {
+            "label": "Child",
+            "short": "child",
+            "extends": "base",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.config.presets.child.usesLanes).toEqual(["frontend", "backend"])
+    expect(result.config.presets.child.defaultLane).toBe("backend")
+  })
+
   it("replaces a same-named project preset instead of deep-merging it", async () => {
     const files = {
       "/home/tester/.config/oh-my-superagents/config.jsonc": `{

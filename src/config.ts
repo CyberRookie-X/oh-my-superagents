@@ -486,6 +486,7 @@ export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConf
       const resolvedParent = resolvePreset(preset.extends)
       nextPreset = {
         ...preset,
+        defaultLane: preset.defaultLane ?? resolvedParent.defaultLane,
         profiles:
           resolvedParent.profiles || preset.profiles
             ? {
@@ -493,7 +494,11 @@ export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConf
                 ...(preset.profiles ?? {}),
               }
             : undefined,
-        usesLanes: preset.usesLanes ? [...preset.usesLanes] : undefined,
+        usesLanes: preset.usesLanes
+          ? [...preset.usesLanes]
+          : resolvedParent.usesLanes
+            ? [...resolvedParent.usesLanes]
+            : undefined,
         routes: {
           ...resolvedParent.routes,
           ...preset.routes,

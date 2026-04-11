@@ -25,6 +25,7 @@ const NAME_PATTERN = /^[a-z0-9-]+$/
 
 export type ResolveControlPlaneInput = LoadControlPlaneConfigInput & {
   command: ControlPlaneCommandKey
+  runtimeLane?: string
 }
 
 export type PrepareControlPlaneStateWriteInput = ResolveControlPlaneInput & {
@@ -56,6 +57,9 @@ export type ResolvedControlPlane = {
     presetDefaultLane?: string
     defaultLane?: string
     effectiveLane?: string
+    runtimeLane?: string
+    mode: ControlPlaneConfig["settings"]["laneSelection"]["mode"]
+    nonApplyingReason?: string
   }
 }
 
@@ -92,6 +96,9 @@ export type ExplainTrace = {
 export type LaneExplainability = ResolvedControlPlane["laneState"] & {
   laneSelection: ControlPlaneConfig["settings"]["laneSelection"]
 }
+
+const STAGE_1_SUGGESTION_MESSAGE =
+  "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session."
 
 export type RoutingValidationSummary = {
   defaultRoutedPhases: BuiltInPhase[]
@@ -141,13 +148,18 @@ export function summarizeControlPlaneArtifacts(input: {
 export function summarizeLaneExplainability(resolved: ResolvedControlPlane): LaneExplainability {
   const laneState = (resolved as ResolvedControlPlane & { laneState?: ResolvedControlPlane["laneState"] }).laneState
     ?? resolveLaneState(resolved.config, resolved.activePreset)
+  const laneSelection = { ...(resolved.config.settings.laneSelection ?? { mode: "suggest" as const }) }
+  const mode = laneState.mode ?? laneSelection.mode
 
   return {
     allowedLanes: [...laneState.allowedLanes],
     presetDefaultLane: laneState.presetDefaultLane,
     defaultLane: laneState.defaultLane,
     effectiveLane: laneState.effectiveLane,
-    laneSelection: { ...(resolved.config.settings.laneSelection ?? { mode: "suggest" }) },
+    runtimeLane: laneState.runtimeLane,
+    mode,
+    nonApplyingReason: laneState.nonApplyingReason ?? (mode === "suggest" ? STAGE_1_SUGGESTION_MESSAGE : undefined),
+    laneSelection,
   }
 }
 
@@ -250,7 +262,11 @@ export function summarizeRoutingValidation(
   const explicitRoutedPhases = BUILT_IN_PHASES.filter((phase) => phase in explicitRouteSource.routes)
   const defaultRoutedPhases = BUILT_IN_PHASES.filter((phase) => !(phase in explicitRouteSource.routes))
   const effectiveProfiles = getEffectiveProfiles(config, preset)
-  const usedProfiles = new Set<string>([preset.defaultRoute, ...Object.values(preset.routes)])
+  const usedProfiles = new Set<string>([
+    preset.defaultRoute,
+    ...Object.values(preset.routes),
+    ...collectUsedLaneProfiles(config, preset),
+  ])
   const reuseRelationship: RoutingValidationSummary["reuseRelationship"] = preset.extends
     ? {
         kind: "extends" as const,
@@ -269,6 +285,24 @@ export function summarizeRoutingValidation(
     unusedProfiles: Object.keys(effectiveProfiles).filter((profileKey) => !usedProfiles.has(profileKey)),
     reuseRelationship,
   }
+}
+
+function collectUsedLaneProfiles(config: ControlPlaneConfig, preset: ControlPlanePreset) {
+  const usedProfiles = new Set<string>()
+
+  for (const laneKey of preset.usesLanes ?? []) {
+    const lane = config.lanes[laneKey]
+    if (!lane) {
+      continue
+    }
+
+    usedProfiles.add(lane.defaultRoute)
+    for (const profileKey of Object.values(lane.routes)) {
+      usedProfiles.add(profileKey)
+    }
+  }
+
+  return usedProfiles
 }
 
 function isPresetReuseResolvable(config: ControlPlaneConfig, presetKey: string) {
@@ -425,8 +459,13 @@ function validateCommandNames(config: ControlPlaneConfig) {
   }
 }
 
-function resolveLaneState(config: ControlPlaneConfig, activePreset: { key: string; preset: ControlPlanePreset }) {
+function resolveLaneState(
+  config: ControlPlaneConfig,
+  activePreset: { key: string; preset: ControlPlanePreset },
+  runtimeLane?: string,
+) {
   const allowedLanes = [...(activePreset.preset.usesLanes ?? [])]
+  const laneSelection = config.settings.laneSelection ?? { mode: "suggest" as const }
 
   if (config.settings.defaultLane && !allowedLanes.includes(config.settings.defaultLane)) {
     throw new Error(
@@ -434,11 +473,23 @@ function resolveLaneState(config: ControlPlaneConfig, activePreset: { key: strin
     )
   }
 
+  if (runtimeLane && !allowedLanes.includes(runtimeLane)) {
+    throw new Error(`runtime lane must reference a lane allowed by preset ${activePreset.key}: ${runtimeLane}`)
+  }
+
+  const baselineLane = config.settings.defaultLane ?? activePreset.preset.defaultLane
+  const effectiveLane = laneSelection.mode === "auto"
+    ? runtimeLane ?? baselineLane
+    : baselineLane
+
   return {
     allowedLanes,
     presetDefaultLane: activePreset.preset.defaultLane,
     defaultLane: config.settings.defaultLane,
-    effectiveLane: config.settings.defaultLane ?? activePreset.preset.defaultLane,
+    effectiveLane,
+    runtimeLane,
+    mode: laneSelection.mode,
+    nonApplyingReason: laneSelection.mode === "suggest" ? STAGE_1_SUGGESTION_MESSAGE : undefined,
   }
 }
 
@@ -465,7 +516,7 @@ function clearInvalidDocumentDefaultLane(
     : { ...settings, defaultLane: null }
 }
 
-function validateControlPlaneConfig(config: ControlPlaneConfig) {
+function validateControlPlaneConfig(config: ControlPlaneConfig, runtimeLane?: string) {
   const activePreset = config.presets[config.settings.activePreset]
   if (!activePreset) {
     throw new Error(`settings.activePreset must reference an existing preset: ${config.settings.activePreset}`)
@@ -483,10 +534,10 @@ function validateControlPlaneConfig(config: ControlPlaneConfig) {
       key: config.settings.activePreset,
       preset: activePreset,
     },
-    laneState: resolveLaneState(config, {
-      key: config.settings.activePreset,
-      preset: activePreset,
-    }),
+      laneState: resolveLaneState(config, {
+        key: config.settings.activePreset,
+        preset: activePreset,
+      }, runtimeLane),
   }
 }
 
@@ -692,7 +743,7 @@ export async function prepareControlPlaneStateWrite(
 export async function resolveControlPlane(input: ResolveControlPlaneInput): Promise<ResolvedControlPlane> {
   try {
     const loaded = await loadControlPlaneConfig(input)
-    const { activePreset, laneState } = validateControlPlaneConfig(loaded.config)
+    const { activePreset, laneState } = validateControlPlaneConfig(loaded.config, input.runtimeLane)
     const activePresetDefinition = resolvePresetDefinitionFromLayers(loaded.layers, activePreset.key)
     const parentPresetDefinition = activePreset.preset.extends
       ? resolvePresetDefinitionFromLayers(loaded.layers, activePreset.preset.extends)
@@ -723,7 +774,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
     }
 
     const config = createDefaultControlPlaneConfig()
-    const { activePreset, laneState } = validateControlPlaneConfig(config)
+    const { activePreset, laneState } = validateControlPlaneConfig(config, input.runtimeLane)
 
     return {
       source: {

@@ -564,6 +564,40 @@ describe("runCli", () => {
     expect(output.presetDefaultLane).toBe("frontend")
     expect(output.effectiveLane).toBe("frontend")
     expect(output.laneSelection).toEqual({ mode: "suggest" })
+    expect(output.nonApplyingReason).toContain("Stage 1")
+  })
+
+  it("surfaces Stage 1 suggestion guidance in status output", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend"],
+          defaultLane: undefined,
+          effectiveLane: undefined,
+          mode: "suggest" as const,
+          nonApplyingReason: "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session.",
+          presetDefaultLane: undefined,
+          runtimeLane: "frontend",
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.laneSelection).toEqual({ mode: "suggest" })
+    expect(output.nonApplyingReason).toContain("Stage 1")
   })
 
   it("explains correctly when the active preset uses top-level profiles", async () => {
@@ -1767,6 +1801,13 @@ describe("runCli", () => {
       },
       host: "opencode",
       compatibility: compatibleOpencode,
+      allowedLanes: [],
+      laneSelection: {
+        mode: "suggest",
+      },
+      mode: "suggest",
+      nonApplyingReason:
+        "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session.",
       artifacts: {
         present: [
           "/workspace/project/.opencode/agents/spr-build.md",
@@ -1984,6 +2025,9 @@ describe("runCli", () => {
       laneSelection: {
         mode: "suggest",
       },
+      mode: "suggest",
+      nonApplyingReason:
+        "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session.",
       artifacts: {
         present: [
           "/workspace/project/.opencode/agents/spr-build.md",
@@ -2078,6 +2122,9 @@ describe("runCli", () => {
           defaultLane: "frontend",
           presetDefaultLane: "backend",
           effectiveLane: "frontend",
+          mode: "suggest" as const,
+          nonApplyingReason: "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session.",
+          runtimeLane: undefined,
         },
       }),
     }))
@@ -2090,6 +2137,7 @@ describe("runCli", () => {
     expect(output.presetDefaultLane).toBe("backend")
     expect(output.effectiveLane).toBe("frontend")
     expect(output.laneSelection).toEqual({ mode: "suggest" })
+    expect(output.nonApplyingReason).toContain("Stage 1")
   })
 
   it("summarizes expected, present, missing, and stale OpenCode artifacts in doctor output", async () => {
@@ -2187,6 +2235,64 @@ describe("runCli", () => {
       parentPresetKey: "default",
       resolvable: true,
     })
+  })
+
+  it("counts lane-only profiles as used in OpenCode doctor output", async () => {
+    const routedConfig = {
+      ...controlPlaneConfig,
+      profiles: {
+        build: { model: "openai/gpt-5" },
+        "lane-strategy": { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+        unused: { model: "google/gemini-2.5-pro" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { brainstorming: "lane-strategy" },
+          defaultRoute: "lane-strategy",
+        },
+      },
+      presets: {
+        default: {
+          ...controlPlaneConfig.presets.default,
+          profiles: undefined,
+          usesLanes: ["frontend"],
+          defaultLane: "frontend",
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: routedConfig,
+        activePreset: {
+          key: "default",
+          preset: routedConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend"],
+          defaultLane: undefined,
+          presetDefaultLane: "frontend",
+          effectiveLane: "frontend",
+          mode: "suggest" as const,
+          nonApplyingReason: "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session.",
+          runtimeLane: undefined,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.routing.unusedProfiles).toEqual(["unused"])
   })
 
   it("treats inherited routes as default-routed in the child doctor view when the child has no local override", async () => {
