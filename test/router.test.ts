@@ -20,6 +20,26 @@ describe("resolvePhase", () => {
   it("falls back to default route for other built-in phases", () => {
     expect(resolvePhase(config, "webapp-testing").profileId).toBe("build")
   })
+
+  it("keeps effort and codexFast as independent resolved route properties", () => {
+    const resolved = resolvePhase(
+      {
+        profiles: {
+          build: { model: "gpt-5.4", effort: "deep", codexFast: true },
+        },
+        routes: {},
+        defaultRoute: "build",
+      },
+      "writing-plans",
+    )
+
+    expect(resolved.selection).toMatchObject({
+      model: "gpt-5.4",
+      effort: "deep",
+      codexFast: true,
+      variant: "high",
+    })
+  })
 })
 
 describe("explainPhase", () => {

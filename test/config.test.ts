@@ -446,6 +446,23 @@ describe("loadControlPlaneConfig", () => {
 })
 
 describe("loadRouterConfig", () => {
+  it("accepts codexFast in a profile loaded from config", async () => {
+    const result = await loadRouterConfig({
+      cwd: "/workspace/project",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "profiles": {
+          "build": { "model": "gpt-5.4", "effort": "deep", "codexFast": true }
+        },
+        "routes": {},
+        "defaultRoute": "build"
+      }`,
+    })
+
+    expect(result.config.profiles.build.codexFast).toBe(true)
+  })
+
   it("resolves inherited preset profiles and routes before building router config", async () => {
     const result = await loadRouterConfig({
       cwd: "/workspace/project",

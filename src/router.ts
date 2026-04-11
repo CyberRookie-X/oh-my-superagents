@@ -36,6 +36,7 @@ export type ResolvedRoute = {
     model: string
     variant?: string
     effort?: "fast" | "balanced" | "deep" | "max"
+    codexFast?: boolean
     temperature?: number
   }
   description: string
@@ -59,6 +60,7 @@ export function resolvePhase(config: RouterConfig, phase: BuiltInPhase): Resolve
     selection: {
       model: profile.model,
       effort: profile.effort,
+      codexFast: profile.codexFast,
       temperature: profile.temperature,
       variant: profile.variant ?? (profile.effort ? EFFORT_TO_VARIANT[profile.effort] : undefined),
     },

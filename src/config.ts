@@ -35,6 +35,7 @@ const ProfileSchema = z
     model: z.string().min(1),
     variant: z.string().min(1).optional(),
     effort: z.enum(["fast", "balanced", "deep", "max"]).optional(),
+    codexFast: z.boolean().optional(),
     temperature: z.number().optional(),
   })
   .strict()

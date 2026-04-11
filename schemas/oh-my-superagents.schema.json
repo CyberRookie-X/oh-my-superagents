@@ -185,6 +185,7 @@
         "model": { "type": "string", "minLength": 1 },
         "variant": { "type": "string", "minLength": 1 },
         "effort": { "enum": ["fast", "balanced", "deep", "max"] },
+        "codexFast": { "type": "boolean" },
         "temperature": { "type": "number" }
       }
     },
