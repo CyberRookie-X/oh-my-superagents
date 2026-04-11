@@ -527,6 +527,38 @@ describe("resolveControlPlane", () => {
     }
   })
 
+  it("allows first-write global config preparation when parent directories do not exist yet", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "oms-control-plane-fresh-home-"))
+
+    try {
+      const projectDir = path.join(root, "workspace", "project")
+      const homeDir = path.join(root, "home")
+      await mkdir(projectDir, { recursive: true })
+      await mkdir(homeDir, { recursive: true })
+
+      const result = await prepareControlPlaneStateWrite({
+        command: "use",
+        cwd: projectDir,
+        homeDir,
+        nextState: {
+          activePreset: "default",
+          enabled: true,
+        },
+      })
+
+      expect(result.path).toBe(path.join(homeDir, ".config", "oh-my-superagents", "config.jsonc"))
+      expect(parse(result.content)).toEqual(expect.objectContaining({
+        settings: expect.objectContaining({
+          activePreset: "default",
+          enabled: true,
+          commandPrefix: "oms",
+        }),
+      }))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it("selects the global config as the write target when homeDir is omitted", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "oms-control-plane-home-"))
     const previousHome = process.env.HOME
