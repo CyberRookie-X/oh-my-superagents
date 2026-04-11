@@ -631,6 +631,7 @@ describe("runCli", () => {
     expect(output.profileId).toBe("frontend-strategy")
     expect(output.model).toBe("gpt-5.4")
     expect(output.effectiveLane).toBe("frontend")
+    expect(output.routeSource).toBe("lane-route")
   })
 
   it("includes lane diagnostics in explain output", async () => {

@@ -81,6 +81,7 @@ export function explainCodexPhase(config: RouterConfig, phase: BuiltInPhase) {
     profileId: resolved.profileId,
     model: resolved.selection.model,
     variant: undefined,
+    routeSource: resolved.routeSource,
     commandName: undefined,
     agentName: PHASE_TO_CODEX_AGENT[phase],
     reasoningEffort: codexEffort?.reasoningEffort,
