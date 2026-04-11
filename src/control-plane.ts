@@ -51,6 +51,12 @@ export type ResolvedControlPlane = {
     activePresetDefinition?: { path: string; preset: ControlPlanePreset }
     parentPresetDefinition?: { path: string; preset: ControlPlanePreset }
   }
+  laneState: {
+    allowedLanes: string[]
+    presetDefaultLane?: string
+    defaultLane?: string
+    effectiveLane?: string
+  }
 }
 
 export type OpenCodeStatusState = {
@@ -328,7 +334,12 @@ export function buildOpenCodeNextAction(input: {
 }
 
 function validatePresetGraph(config: ControlPlaneConfig, presetKey: string, preset: ControlPlanePreset) {
+  const allowedLanes = preset.usesLanes ?? []
   const effectiveProfiles = getEffectiveProfiles(config, preset)
+
+  if (preset.defaultLane && !allowedLanes.includes(preset.defaultLane)) {
+    throw new Error(`Preset ${presetKey} defaultLane must be included in usesLanes: ${preset.defaultLane}`)
+  }
 
   if (!effectiveProfiles[preset.defaultRoute]) {
     throw new Error(`Preset ${presetKey} has unknown defaultRoute profile: ${preset.defaultRoute}`)
@@ -397,6 +408,23 @@ function validateCommandNames(config: ControlPlaneConfig) {
   }
 }
 
+function resolveLaneState(config: ControlPlaneConfig, activePreset: { key: string; preset: ControlPlanePreset }) {
+  const allowedLanes = [...(activePreset.preset.usesLanes ?? [])]
+
+  if (config.settings.defaultLane && !allowedLanes.includes(config.settings.defaultLane)) {
+    throw new Error(
+      `settings.defaultLane must reference a lane allowed by preset ${activePreset.key}: ${config.settings.defaultLane}`,
+    )
+  }
+
+  return {
+    allowedLanes,
+    presetDefaultLane: activePreset.preset.defaultLane,
+    defaultLane: config.settings.defaultLane,
+    effectiveLane: config.settings.defaultLane ?? activePreset.preset.defaultLane,
+  }
+}
+
 function validateControlPlaneConfig(config: ControlPlaneConfig) {
   const activePreset = config.presets[config.settings.activePreset]
   if (!activePreset) {
@@ -411,8 +439,14 @@ function validateControlPlaneConfig(config: ControlPlaneConfig) {
   }
 
   return {
-    key: config.settings.activePreset,
-    preset: activePreset,
+    activePreset: {
+      key: config.settings.activePreset,
+      preset: activePreset,
+    },
+    laneState: resolveLaneState(config, {
+      key: config.settings.activePreset,
+      preset: activePreset,
+    }),
   }
 }
 
@@ -606,7 +640,7 @@ export async function prepareControlPlaneStateWrite(
 export async function resolveControlPlane(input: ResolveControlPlaneInput): Promise<ResolvedControlPlane> {
   try {
     const loaded = await loadControlPlaneConfig(input)
-    const activePreset = validateControlPlaneConfig(loaded.config)
+    const { activePreset, laneState } = validateControlPlaneConfig(loaded.config)
     const activePresetDefinition = resolvePresetDefinitionFromLayers(loaded.layers, activePreset.key)
     const parentPresetDefinition = activePreset.preset.extends
       ? resolvePresetDefinitionFromLayers(loaded.layers, activePreset.preset.extends)
@@ -621,6 +655,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       },
       config: loaded.config,
       activePreset,
+      laneState,
       trace: {
         activePresetDefinition,
         parentPresetDefinition,
@@ -636,7 +671,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
     }
 
     const config = createDefaultControlPlaneConfig()
-    const activePreset = validateControlPlaneConfig(config)
+    const { activePreset, laneState } = validateControlPlaneConfig(config)
 
     return {
       source: {
@@ -646,6 +681,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       },
       config,
       activePreset,
+      laneState,
     }
   }
 }

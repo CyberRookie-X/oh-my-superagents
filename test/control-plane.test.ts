@@ -344,6 +344,112 @@ describe("resolveControlPlane", () => {
     expect(result.config.profiles.strategy.model).toBe("anthropic/claude-sonnet-4-5")
   })
 
+  it("resolves settings.defaultLane when allowed by the active preset", async () => {
+    const result = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default",
+          "defaultLane": "frontend"
+        },
+        "profiles": {
+          "frontend-build": { "model": "openai/gpt-5" },
+          "backend-build": { "model": "gpt-5.4" }
+        },
+        "lanes": {
+          "frontend": { "label": "Frontend", "routes": {}, "defaultRoute": "frontend-build" },
+          "backend": { "label": "Backend", "routes": {}, "defaultRoute": "backend-build" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["frontend", "backend"],
+            "defaultLane": "backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.config.settings.defaultLane).toBe("frontend")
+    expect(result.laneState).toEqual({
+      allowedLanes: ["frontend", "backend"],
+      defaultLane: "frontend",
+      effectiveLane: "frontend",
+      presetDefaultLane: "backend",
+    })
+  })
+
+  it("rejects settings.defaultLane when the active preset does not allow that lane", async () => {
+    await expect(resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default",
+          "defaultLane": "frontend"
+        },
+        "profiles": {
+          "frontend-build": { "model": "openai/gpt-5" },
+          "backend-build": { "model": "gpt-5.4" }
+        },
+        "lanes": {
+          "frontend": { "label": "Frontend", "routes": {}, "defaultRoute": "frontend-build" },
+          "backend": { "label": "Backend", "routes": {}, "defaultRoute": "backend-build" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["backend"],
+            "defaultLane": "backend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        }
+      }`,
+    })).rejects.toThrow(/defaultLane|lane/i)
+  })
+
+  it("rejects preset.defaultLane when it is not included in usesLanes", async () => {
+    await expect(resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "profiles": {
+          "frontend-build": { "model": "openai/gpt-5" },
+          "backend-build": { "model": "gpt-5.4" }
+        },
+        "lanes": {
+          "frontend": { "label": "Frontend", "routes": {}, "defaultRoute": "frontend-build" },
+          "backend": { "label": "Backend", "routes": {}, "defaultRoute": "backend-build" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["backend"],
+            "defaultLane": "frontend",
+            "routes": {},
+            "defaultRoute": "backend-build"
+          }
+        }
+      }`,
+    })).rejects.toThrow(/defaultLane|usesLanes|lane/i)
+  })
+
   it("rejects cyclic preset reuse", async () => {
     await expect(
       resolveControlPlane({
