@@ -461,6 +461,7 @@ describe("runCli", () => {
     const parsed = JSON.parse(result.stdout)
 
     expect(result.exitCode).toBe(0)
+    expect(parsed.compatibility).toEqual(compatibleOpencode)
     expect(createdDirectories).toContain("/home/tester/.config/oh-my-superagents")
     expect(persistedPath).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
     expect(JSON.parse(persistedContent)).toEqual({
@@ -473,58 +474,6 @@ describe("runCli", () => {
     expect(materializeCalled).toBe(true)
     expect(parsed.written).toContain("/home/tester/.config/oh-my-superagents/config.jsonc")
     expect(parsed.written).toContain("/workspace/project/.opencode/agents/spr-build.md")
-  })
-
-  it("blocks first-run opencode sync in strict mode before config writes", async () => {
-    const createdDirectories: string[] = []
-    const writeCalls: string[] = []
-    let materializeCalled = false
-
-    const strictNoConfig = {
-      ...controlPlaneConfig,
-      settings: {
-        ...controlPlaneConfig.settings,
-        superpowersCompatibility: { mode: "strict" as const },
-      },
-    }
-
-    const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
-      resolveControlPlane: async ({ command }: { command: string }) => {
-        if (command === "sync") {
-          throw new Error("Command sync requires a real config source")
-        }
-
-        return {
-          source: { kind: "default" as const, hasRealSource: false, sources: [] },
-          config: strictNoConfig,
-          activePreset: { key: "default", preset: strictNoConfig.presets.default },
-        }
-      },
-      evaluateSuperpowersCompatibility: () => incompatibleOpencodeStrict,
-      prepareControlPlaneStateWrite: async () => ({
-        path: "/home/tester/.config/oh-my-superagents/config.jsonc",
-        content: "should-not-write",
-        config: strictNoConfig,
-      }),
-      mkdir: async (directory: string) => {
-        createdDirectories.push(directory)
-      },
-      writeFile: async (filePath: string) => {
-        writeCalls.push(filePath)
-      },
-      materializeArtifacts: async () => {
-        materializeCalled = true
-        return { exitCode: 0 as const, warnings: [], written: [], removed: [] }
-      },
-    }))
-
-    const parsed = JSON.parse(result.stdout)
-
-    expect(result.exitCode).toBe(1)
-    expect(parsed.compatibility).toEqual(incompatibleOpencodeStrict)
-    expect(createdDirectories).toEqual([])
-    expect(writeCalls).toEqual([])
-    expect(materializeCalled).toBe(false)
   })
 
   it("blocks sync in strict mode before materialization when incompatible", async () => {
