@@ -3083,6 +3083,11 @@ describe("runCli", () => {
       laneSelection: {
         mode: "suggest",
       },
+      subagentExecution: {
+        mode: "suggest",
+        availableLanes: [],
+        commandsByLane: {},
+      },
       mode: "suggest",
       nonApplyingReason:
         "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session.",
@@ -3338,6 +3343,11 @@ describe("runCli", () => {
       laneSelection: {
         mode: "suggest",
       },
+      subagentExecution: {
+        mode: "suggest",
+        availableLanes: [],
+        commandsByLane: {},
+      },
       mode: "suggest",
       nonApplyingReason:
         "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session.",
@@ -3384,6 +3394,7 @@ describe("runCli", () => {
         ...controlPlaneConfig.settings,
         defaultLane: "frontend",
         laneSelection: { mode: "suggest" as const },
+        subagentExecution: { mode: "suggest" as const },
       },
       profiles: {
         "frontend-strategy": {
@@ -3450,6 +3461,14 @@ describe("runCli", () => {
     expect(output.presetDefaultLane).toBe("backend")
     expect(output.effectiveLane).toBe("frontend")
     expect(output.laneSelection).toEqual({ mode: "suggest" })
+    expect(output.subagentExecution).toEqual({
+      mode: "suggest",
+      availableLanes: ["frontend", "backend"],
+      commandsByLane: {
+        frontend: "sp-execute-frontend",
+        backend: "sp-execute-backend",
+      },
+    })
     expect(output.nonApplyingReason).toContain("Stage 1")
   })
 

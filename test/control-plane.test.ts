@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest"
 import {
   prepareControlPlaneStateWrite,
   resolveControlPlane,
+  summarizeSubagentExecutionDiagnostics,
   summarizeRoutingValidation,
 } from "../src/control-plane.js"
 
@@ -1625,5 +1626,81 @@ describe("summarizeRoutingValidation", () => {
     }, "default")
 
     expect(summary.unusedProfiles).toEqual(["unused"])
+  })
+})
+
+describe("summarizeSubagentExecutionDiagnostics", () => {
+  it("reports mode, available lanes, and rendered lane-scoped execute commands", () => {
+    const summary = summarizeSubagentExecutionDiagnostics({
+      source: {
+        kind: "file",
+        hasRealSource: true,
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+      },
+      config: {
+        workflow: { kind: "superpowers" },
+        settings: {
+          enabled: true,
+          activePreset: "default",
+          laneSelection: { mode: "suggest" },
+          subagentExecution: { mode: "suggest" },
+          commandPrefix: "oms",
+          commands: {
+            status: { name: "status", aliases: ["st"] },
+            use: { name: "use", aliases: ["u"] },
+            disable: { name: "off", aliases: ["o"] },
+            sync: { name: "sync", aliases: ["sy"] },
+            doctor: { name: "doctor", aliases: ["dr"] },
+          },
+          superpowersCompatibility: { mode: "warn" },
+        },
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        lanes: {
+          frontend: { label: "Frontend", routes: {}, defaultRoute: "build" },
+          backend: { label: "Backend", routes: {}, defaultRoute: "build" },
+        },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            usesLanes: ["frontend", "backend"],
+            defaultLane: "backend",
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+      },
+      activePreset: {
+        key: "default",
+        preset: {
+          label: "Default",
+          short: "def",
+          usesLanes: ["frontend", "backend"],
+          defaultLane: "backend",
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+      laneState: {
+        allowedLanes: ["frontend", "backend"],
+        defaultLane: "backend",
+        effectiveLane: "backend",
+        presetDefaultLane: "backend",
+        runtimeLane: undefined,
+        mode: "suggest",
+      },
+    })
+
+    expect(summary).toEqual({
+      mode: "suggest",
+      availableLanes: ["frontend", "backend"],
+      commandsByLane: {
+        frontend: "sp-execute-frontend",
+        backend: "sp-execute-backend",
+      },
+    })
   })
 })

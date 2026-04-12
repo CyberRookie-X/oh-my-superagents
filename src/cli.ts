@@ -25,6 +25,7 @@ import {
   prepareControlPlaneStateWrite,
   resolveControlPlane,
   summarizeLaneExplainability,
+  summarizeSubagentExecutionDiagnostics,
   summarizeRoutingValidation,
   summarizeControlPlaneArtifacts,
   type ExplainTrace,
@@ -1299,6 +1300,9 @@ async function buildControlPlaneStatus(
       return { state, ...(nextAction ? { nextAction } : {}), artifactSummary }
     })()
     : undefined
+  const subagentExecution = host === "opencode"
+    ? summarizeSubagentExecutionDiagnostics(resolved)
+    : undefined
 
   return {
     enabled: resolved.config.settings.enabled,
@@ -1316,6 +1320,7 @@ async function buildControlPlaneStatus(
     compatibility,
     artifacts: formattedArtifacts,
     ...summarizeLaneExplainability(resolved),
+    ...(subagentExecution ? { subagentExecution } : {}),
     ...openCodeStatus,
   }
 }
@@ -1348,6 +1353,9 @@ async function buildControlPlaneDoctor(
       stale: artifacts.stale,
     })
     : undefined
+  const subagentExecution = host === "opencode"
+    ? summarizeSubagentExecutionDiagnostics(resolved)
+    : undefined
 
   return {
     activePreset: {
@@ -1368,6 +1376,7 @@ async function buildControlPlaneDoctor(
     compatibility,
     artifacts: formattedArtifacts,
     ...summarizeLaneExplainability(resolved),
+    ...(subagentExecution ? { subagentExecution } : {}),
     ...(artifactSummary ? { artifactSummary } : {}),
     ...(host === "opencode"
       ? {
