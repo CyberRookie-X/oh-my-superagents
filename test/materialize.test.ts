@@ -175,6 +175,18 @@ function renderUserCodexSkill(skillName: string) {
   return ["---", `name: ${skillName}`, "description: User-authored skill", "---", "", "Do something unrelated.", ""].join("\n")
 }
 
+function renderOwnedOpenCodeRuntimeMetadata() {
+  return JSON.stringify({
+    agents: {
+      "spr-build": {
+        profile: "build",
+        profiles: ["build"],
+        codexFast: true,
+      },
+    },
+  }, null, 2)
+}
+
 describe("materializeArtifacts", () => {
   it("writes agents and commands into fixed .opencode directories", async () => {
     const writes: string[] = []
@@ -304,15 +316,7 @@ describe("materializeArtifacts", () => {
       directory: RUNTIME_AGENT_METADATA_DIRECTORY,
       fileName: RUNTIME_AGENT_METADATA_FILE,
       ownerPrefix: RUNTIME_AGENT_METADATA_OWNER_PREFIX,
-      content: JSON.stringify({
-        agents: {
-          "spr-build": {
-            profile: "build",
-            profiles: ["build"],
-            codexFast: true,
-          },
-        },
-      }, null, 2),
+      content: renderOwnedOpenCodeRuntimeMetadata(),
     }
 
     const result = await materializeArtifacts({
@@ -325,6 +329,45 @@ describe("materializeArtifacts", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.warnings).toEqual([])
+  })
+
+  it("removes stale OpenCode runtime metadata when the current artifact set no longer includes it", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json": renderOwnedOpenCodeRuntimeMetadata(),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [],
+      fs,
+    })
+
+    expect(result.removed).toEqual([
+      "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json",
+    ])
+    expect(removedPaths).toEqual(result.removed)
+  })
+
+  it("rejects user-created JSON at the runtime metadata path when it does not match the OMS contract", async () => {
+    const runtimeArtifact = {
+      kind: "command" as const,
+      directory: RUNTIME_AGENT_METADATA_DIRECTORY,
+      fileName: RUNTIME_AGENT_METADATA_FILE,
+      ownerPrefix: RUNTIME_AGENT_METADATA_OWNER_PREFIX,
+      content: renderOwnedOpenCodeRuntimeMetadata(),
+    }
+
+    const runtimeFilePath = "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json"
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [runtimeArtifact],
+      fs: createMemoryFs({
+        [runtimeFilePath]: JSON.stringify({ hello: "user" }, null, 2),
+      }).fs,
+    })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.warnings).toEqual([`Collision at ${runtimeFilePath}`])
   })
 
   it("rejects path traversal in artifact filenames", async () => {

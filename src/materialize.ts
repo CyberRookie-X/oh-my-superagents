@@ -42,6 +42,10 @@ const AUXILIARY_HELPER_NAME = "temporary-disable"
 const OPENCODE_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["sp-", "ai-"])
 const OPENCODE_ROUTER_OWNED_AGENT_PREFIXES = new Set(["spr-", "rt-"])
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 function getTargetDirectory(cwd: string, directory: string) {
   return path.join(cwd, directory)
 }
@@ -102,6 +106,25 @@ function isOpenCodeRouterOwnedFile(directory: string, fileName: string, content:
 
 function isOpenCodeRuntimeMetadataFile(filePath: string) {
   return filePath.endsWith(`${path.sep}${RUNTIME_AGENT_METADATA_DIRECTORY.replace(/\//g, path.sep)}${path.sep}${RUNTIME_AGENT_METADATA_FILE}`)
+}
+
+function isOpenCodeRuntimeMetadataContent(content: string) {
+  try {
+    const parsed = JSON.parse(content) as unknown
+    if (!isRecord(parsed) || !isRecord(parsed.agents)) {
+      return false
+    }
+
+    return Object.values(parsed.agents).every((entry) => {
+      if (!isRecord(entry) || typeof entry.profile !== "string" || typeof entry.codexFast !== "boolean") {
+        return false
+      }
+
+      return entry.profiles === undefined || (Array.isArray(entry.profiles) && entry.profiles.every((value) => typeof value === "string"))
+    })
+  } catch {
+    return false
+  }
 }
 
 function parseControlPlaneOwnership(content: string) {
@@ -283,7 +306,7 @@ function isArtifactOwnedByCurrentContract(
   }
 
   if (artifact.directory === RUNTIME_AGENT_METADATA_DIRECTORY && artifact.fileName === RUNTIME_AGENT_METADATA_FILE) {
-    return isOpenCodeRuntimeMetadataFile(existingPath)
+    return isOpenCodeRuntimeMetadataFile(existingPath) && isOpenCodeRuntimeMetadataContent(existingContent)
   }
 
   return isPrefixOwned(artifact.fileName, existingContent, new Set([artifact.ownerPrefix]))
@@ -302,6 +325,11 @@ export async function materializeArtifacts(
   const opencodeRuntimeMetadataDirectories = new Set<string>()
   const qwenOmsCommandDirectories = new Set<string>()
   const codexSkillCleanupRoots = new Map<string, Set<string>>()
+  const openCodeRuntimeMetadataPath = path.join(
+    input.cwd,
+    RUNTIME_AGENT_METADATA_DIRECTORY,
+    RUNTIME_AGENT_METADATA_FILE,
+  )
 
   try {
     for (const artifact of input.artifacts) {
@@ -397,6 +425,22 @@ export async function materializeArtifacts(
 
         await input.fs.unlink(fullPath)
         removed.push(fullPath)
+      } catch (error) {
+        warnings.push(String(error))
+      }
+    }
+  }
+
+  if (!desiredFinalPaths.has(openCodeRuntimeMetadataPath)) {
+    const content = await input.fs.readFile(openCodeRuntimeMetadataPath).catch(() => "")
+
+    if (isOpenCodeRuntimeMetadataFile(openCodeRuntimeMetadataPath) && isOpenCodeRuntimeMetadataContent(content)) {
+      try {
+        const stats = await input.fs.stat(openCodeRuntimeMetadataPath)
+        if (stats.isFile()) {
+          await input.fs.unlink(openCodeRuntimeMetadataPath)
+          removed.push(openCodeRuntimeMetadataPath)
+        }
       } catch (error) {
         warnings.push(String(error))
       }
