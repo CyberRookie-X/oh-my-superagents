@@ -2234,7 +2234,6 @@ describe("runCli", () => {
         category: "oms",
         reason: "OMS is enabled and expected OpenCode artifacts are present.",
       },
-      nextAction: null,
       artifactSummary: {
         expected: 2,
         present: [
@@ -2403,6 +2402,42 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(output.state.code).toBe("disabled")
     expect(output.nextAction.command).toBe("oh-my-superagents use def --host opencode")
+  })
+
+  it("omits unsupported use guidance for disabled direct-mode OpenCode status", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createDirectCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...directControlPlaneConfig,
+          settings: {
+            ...directControlPlaneConfig.settings,
+            enabled: false,
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: directControlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend"],
+          defaultLane: "frontend",
+          effectiveLane: "frontend",
+          presetDefaultLane: "frontend",
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.state.code).toBe("disabled")
+    expect(output.nextAction).toBeUndefined()
   })
 
   it("returns OMS doctor details with rendered command names, aliases, artifact presence, and compatibility", async () => {

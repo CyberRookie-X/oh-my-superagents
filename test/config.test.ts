@@ -169,6 +169,38 @@ describe("loadControlPlaneConfig", () => {
     expect(result.config.lanes.frontend.routes.plan).toBe("plan-profile")
   })
 
+  it("rejects direct workflow intent ids that are not OpenCode-safe artifact names", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "workflow": {
+            "kind": "direct",
+            "intents": {
+              "foo/bar": { "label": "Plan" }
+            }
+          },
+          "profiles": {
+            "build": { "model": "openai/gpt-5" }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "routes": {
+                "foo/bar": "build"
+              },
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/invalid direct intent id|foo\/bar/i)
+  })
+
   it("rejects mixed-shape config", async () => {
     await expect(
       loadControlPlaneConfig({
@@ -990,6 +1022,37 @@ describe("loadRouterConfig", () => {
     expect(workflow?.intents?.plan?.label).toBe("Plan")
     expect(workflow?.intents?.build?.description).toBe("Implement the change")
     expect(result.config.routes.plan).toBe("plan-profile")
+  })
+
+  it("rejects direct workflow intent ids that are not OpenCode-safe when loading router config", async () => {
+    await expect(
+      loadRouterConfig({
+        cwd: "/workspace/project",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "workflow": {
+            "kind": "direct",
+            "intents": {
+              "foo/bar": { "label": "Plan" }
+            }
+          },
+          "profiles": {
+            "build": { "model": "openai/gpt-5" }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "routes": {
+                "foo/bar": "build"
+              },
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/invalid direct intent id|foo\/bar/i)
   })
 
   it("resolves inherited preset profiles and routes before building router config", async () => {

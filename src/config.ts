@@ -13,6 +13,7 @@ import { SUPERPOWERS_ROUTE_CATALOG } from "./workflow-superpowers.js"
 export { SUPERPOWERS_ROUTE_CATALOG as BUILT_IN_PHASES } from "./workflow-superpowers.js"
 
 const BUILT_IN_PHASE_SET = new Set<string>(SUPERPOWERS_ROUTE_CATALOG)
+const SAFE_NAME_PATTERN = /^[a-z0-9-]+$/
 
 export const CONTROL_PLANE_COMMAND_KEYS = ["status", "use", "disable", "sync", "doctor"] as const
 
@@ -69,7 +70,7 @@ const DirectIntentSchema = z
 const DirectWorkflowSchema = z
   .object({
     kind: z.literal("direct"),
-    intents: z.record(z.string().min(1), DirectIntentSchema),
+    intents: z.record(z.string().regex(SAFE_NAME_PATTERN), DirectIntentSchema),
   })
   .strict()
 
@@ -147,6 +148,18 @@ export type WorkflowConfig = z.infer<typeof WorkflowSchema>
 
 export function getWorkflowRouteIds(workflow?: WorkflowConfig) {
   return workflow?.kind === "direct" ? Object.keys(workflow.intents) : [...SUPERPOWERS_ROUTE_CATALOG]
+}
+
+function validateDirectIntentIds(workflow: WorkflowConfig) {
+  if (workflow.kind !== "direct") {
+    return
+  }
+
+  for (const intentId of Object.keys(workflow.intents)) {
+    if (!SAFE_NAME_PATTERN.test(intentId)) {
+      throw new Error(`Invalid direct intent id: ${intentId}`)
+    }
+  }
 }
 
 export type RouterConfig = {
@@ -463,6 +476,7 @@ function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneCon
     presets: merged.presets,
   }
 
+  validateDirectIntentIds(finalized.workflow)
   validateLaneReferences(finalized)
   return finalized
 }

@@ -426,6 +426,7 @@ function resolvePresetDefinitionFromLayers(
 
 export function buildOpenCodeNextAction(input: {
   host: SupportedSuperpowersHost | "qwen"
+  workflow: ControlPlaneConfig["workflow"]
   state: OpenCodeStatusState
   activePresetShort: string
 }): ControlPlaneNextAction | null {
@@ -443,6 +444,10 @@ export function buildOpenCodeNextAction(input: {
         reason: "Inspect superpowers detection and compatibility details for this workspace.",
       }
     case "disabled":
+      if (input.workflow.kind === "direct" && input.host === "opencode") {
+        return null
+      }
+
       return {
         command: `oh-my-superagents use ${input.activePresetShort} --host ${input.host}`,
         reason: "Re-enable OMS by selecting the active preset again.",

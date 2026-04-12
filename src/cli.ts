@@ -1016,11 +1016,12 @@ async function buildControlPlaneStatus(
       })
       const nextAction = buildOpenCodeNextAction({
         host,
+        workflow: resolved.config.workflow,
         state,
         activePresetShort: resolved.activePreset.preset.short,
       })
 
-      return { state, nextAction, artifactSummary }
+      return { state, ...(nextAction ? { nextAction } : {}), artifactSummary }
     })()
     : undefined
 
