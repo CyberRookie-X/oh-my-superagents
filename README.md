@@ -261,6 +261,18 @@ Compact example:
 }
 ```
 
+## Lane-Aware Subagent Execution
+
+Lane-aware subagent execution is an execution-layer enhancement under `superpowers`, not a separate workflow family. In the current slice, OMS keeps the main `/sp-execute` path on `superpowers/subagent-driven-development` and adds OpenCode-first lane-scoped wrappers such as `/sp-execute-frontend` with matching `spr-build--frontend` agents when the active preset enables lanes through `usesLanes`.
+
+Set `settings.subagentExecution.mode` to control split behavior:
+
+- `manual`: only use lane-specific execution when the user explicitly asks for it
+- `suggest`: propose the split first and wait for confirmation; this is the default
+- `auto`: apply the split across the matching lane helpers automatically for the current execution
+
+These lane-scoped helpers stay inside the existing `superpowers` execution flow. They make the selected lane explicit at execution time, but they do not introduce a new top-level workflow system.
+
 ## OMS Control Plane
 
 Stage 1 adds host-local control-plane commands:

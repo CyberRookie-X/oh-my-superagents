@@ -265,6 +265,18 @@ oh-my-superagents explain --host opencode --phase brainstorming --lane frontend
 }
 ```
 
+## Lane 感知子代理执行
+
+Lane-aware subagent execution 是 `superpowers` 下面的执行层增强，不是另一套工作流体系。在当前切片里，OMS 仍然把主 `/sp-execute` 路径保留在 `superpowers/subagent-driven-development` 上，并在 active preset 通过 `usesLanes` 启用 lanes 时，为 OpenCode 额外生成 `/sp-execute-frontend` 这类 lane-scoped wrapper，以及对应的 `spr-build--frontend` agents。
+
+可通过 `settings.subagentExecution.mode` 控制拆分行为：
+
+- `manual`：只有用户明确要求时才使用 lane-specific 执行
+- `suggest`：先提出拆分方案并等待确认；这是默认值
+- `auto`：在当前执行中自动把任务拆到匹配的 lane helpers 上
+
+这些 lane-scoped helpers 仍然属于现有的 `superpowers` 执行流。它们只是把执行时使用的 lane 更明确地暴露出来，并不会引入新的顶层工作流系统。
+
 ## OMS 控制平面
 
 Stage 1 新增了宿主本地控制平面命令：
