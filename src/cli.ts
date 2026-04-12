@@ -1445,11 +1445,12 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       }
 
       const write = flags.get("--write") === true
+      const output = await buildAuthorRoutingPreview(cwd, explicitPath, mode, modelsPath, write, deps)
 
       return {
         exitCode: 0,
-        stdout: formatAuthorRoutingOutput(await buildAuthorRoutingPreview(cwd, explicitPath, mode, modelsPath, write, deps)),
-        stderr: "",
+        stdout: JSON.stringify(output, null, 2),
+        stderr: formatAuthorRoutingOutput(output),
       }
     }
 

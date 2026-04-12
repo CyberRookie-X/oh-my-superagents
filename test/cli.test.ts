@@ -1528,17 +1528,24 @@ describe("runCli", () => {
     }))
 
     expect(result.exitCode).toBe(0)
+    const output = JSON.parse(result.stdout)
 
-    expect(result.stdout).toContain("Summary")
-    expect(result.stdout).toContain("Routing authoring preview")
-    expect(result.stdout).toContain("Detected lanes: frontend")
-    expect(result.stdout).toContain("Profiles: builder")
-    expect(result.stdout).toContain("Diff")
-    expect(result.stdout).toContain("+   \"workflow\": {")
-    expect(result.stdout).toContain("+   \"profiles\": {")
-    expect(result.stdout).toContain("Result")
-    expect(result.stdout).toContain("Written: no")
-    expect(result.stdout).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
+    expect(output.mode).toBe("direct")
+    expect(output.summary.lanes).toContain("frontend")
+    expect(output.summary.profiles).toContain("builder")
+    expect(output.summary.presets).toContain("default")
+    expect(output.preview.path).toContain("oh-my-superagents.config.jsonc")
+    expect(output.written).toBe(false)
+    expect(result.stderr).toContain("Summary")
+    expect(result.stderr).toContain("Routing authoring preview")
+    expect(result.stderr).toContain("Detected lanes: frontend")
+    expect(result.stderr).toContain("Profiles: builder")
+    expect(result.stderr).toContain("Diff")
+    expect(result.stderr).toContain("+   \"workflow\": {")
+    expect(result.stderr).toContain("+   \"profiles\": {")
+    expect(result.stderr).toContain("Result")
+    expect(result.stderr).toContain("Written: no")
+    expect(result.stderr).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
   })
 
   it("accepts a JSONC model inventory for routing preview", async () => {
@@ -1569,7 +1576,8 @@ describe("runCli", () => {
     }))
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Profiles: builder")
+    const output = JSON.parse(result.stdout)
+    expect(output.summary.profiles).toContain("builder")
   })
 
   it("targets the project config path when only a global config exists", async () => {
@@ -1601,8 +1609,9 @@ describe("runCli", () => {
     }))
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
-    expect(result.stdout).toContain("Operation: create")
+    const output = JSON.parse(result.stdout)
+    expect(output.preview.path).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(output.preview.operation).toBe("create")
   })
 
   it("writes the proposed routing config only when --write is provided", async () => {
@@ -1640,17 +1649,19 @@ describe("runCli", () => {
     }))
 
     expect(result.exitCode).toBe(0)
+    const output = JSON.parse(result.stdout)
     expect(writtenPath).toContain("oh-my-superagents.config.jsonc")
     expect(writtenContent).toContain('"profiles"')
     expect(writtenContent).toContain('"settings"')
-    expect(result.stdout).toContain("Summary")
-    expect(result.stdout).toContain("Routing authoring write")
-    expect(result.stdout).toContain("Profiles: builder")
-    expect(result.stdout).toContain("Diff")
-    expect(result.stdout).toContain("+   \"workflow\": {")
-    expect(result.stdout).toContain("+     \"builder\": {")
-    expect(result.stdout).toContain("Result")
-    expect(result.stdout).toContain("Written: yes")
+    expect(output.written).toBe(true)
+    expect(result.stderr).toContain("Summary")
+    expect(result.stderr).toContain("Routing authoring write")
+    expect(result.stderr).toContain("Profiles: builder")
+    expect(result.stderr).toContain("Diff")
+    expect(result.stderr).toContain("+   \"workflow\": {")
+    expect(result.stderr).toContain("+     \"builder\": {")
+    expect(result.stderr).toContain("Result")
+    expect(result.stderr).toContain("Written: yes")
   })
 
   it("derives update diffs from the existing rendered config and keeps retained routes visible", async () => {
@@ -1761,7 +1772,7 @@ describe("runCli", () => {
 
     expect(result.exitCode).toBe(0)
 
-    const diffText = getAuthorRoutingSection(result.stdout, "Diff", "Result")
+    const diffText = getAuthorRoutingSection(result.stderr, "Diff", "Result")
 
     expect(diffText).toContain('-         "ops"')
     expect(diffText).toContain('+         "frontend"')
@@ -1832,11 +1843,15 @@ describe("runCli", () => {
     }))
 
     expect(result.exitCode).toBe(0)
+    const output = JSON.parse(result.stdout)
     expect(writtenPath).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
     expect(writtenContent).toContain('"kind": "direct"')
-    expect(result.stdout).toContain("Target: /home/tester/.config/oh-my-superagents/config.jsonc")
-    expect(result.stdout).toContain("Operation: update")
-    expect(result.stdout).toContain("Written: yes")
+    expect(output.preview.path).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(output.preview.operation).toBe("update")
+    expect(output.written).toBe(true)
+    expect(result.stderr).toContain("Target: /home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(result.stderr).toContain("Operation: update")
+    expect(result.stderr).toContain("Written: yes")
   })
 
   it("fails closed on invalid existing config during --write", async () => {
@@ -2228,8 +2243,11 @@ describe("runCli", () => {
     expect(previewResult.exitCode).toBe(0)
     expect(writeResult.exitCode).toBe(0)
 
-    expect(getAuthorRoutingSection(previewResult.stdout, "Diff", "Result")).toBe(
-      getAuthorRoutingSection(writeResult.stdout, "Diff", "Result"),
+    const preview = JSON.parse(previewResult.stdout)
+
+    expect(preview.preview.rendered).toBe(writtenContent)
+    expect(getAuthorRoutingSection(previewResult.stderr, "Diff", "Result")).toBe(
+      getAuthorRoutingSection(writeResult.stderr, "Diff", "Result"),
     )
   })
 
