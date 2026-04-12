@@ -233,7 +233,6 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
     const agents: GeneratedArtifact[] = []
 
     for (const [intent, intentConfig] of Object.entries(config.workflow.intents)) {
-      const resolved = resolveRoute(config, intent)
       const agentName = `rt-${intent}`
       const commandName = `ai-${intent}`
       const intentDescription = intentConfig.description
@@ -255,6 +254,8 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
       if (input.includeAgents === false) {
         continue
       }
+
+      const resolved = resolveRoute(config, intent)
 
       agents.push({
         kind: "agent",

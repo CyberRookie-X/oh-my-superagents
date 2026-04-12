@@ -150,6 +150,31 @@ describe("buildQwenArtifacts", () => {
     expect(artifacts.commands.map((item) => item.fileName)).toContain("ai-plan.md")
   })
 
+  it("keeps direct-mode commands lightweight when includeAgents is false", async () => {
+    const artifacts = await buildQwenArtifacts(
+      {
+        workflow: {
+          kind: "direct",
+          intents: {
+            plan: { label: "Plan" },
+          },
+        },
+        profiles: {},
+        routes: { plan: "missing-profile" },
+        defaultRoute: "missing-profile",
+      } as never,
+      {
+        cwd: "/workspace/project",
+        homeDir: "/home/test",
+        controlPlaneSettings,
+        includeAgents: false,
+      },
+    )
+
+    expect(artifacts.agents).toEqual([])
+    expect(artifacts.commands.map((item) => item.fileName)).toContain("ai-plan.md")
+  })
+
   it("fails fast when a direct-mode command collides with a control-plane command", async () => {
     await expect(
       buildQwenArtifacts(
