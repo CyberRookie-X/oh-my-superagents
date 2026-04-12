@@ -126,7 +126,8 @@ export function buildRoutingProposal({
 
   const defaultLane = lanes[0]
   const defaultRoute = defaultLane ? proposedLanes[defaultLane].defaultRoute : inventoryEntries[0][0]
-  const intents = createDirectIntents(proposedLanes)
+  profiles[defaultRoute] ??= toProfile(inventory.models[defaultRoute])
+  const intents = createDirectIntents(defaultRoute, proposedLanes)
 
   return {
     workflow: mode === "direct" ? { kind: "direct", intents } : { kind: "superpowers" },
@@ -213,13 +214,14 @@ function toProfile(model: ModelInventory["models"][string]): ControlPlaneProfile
   }
 }
 
-function createDirectIntents(lanes: Record<string, ControlPlaneLane>) {
+function createDirectIntents(defaultRoute: string, lanes: Record<string, ControlPlaneLane>) {
   const intents: Record<string, DirectIntentConfig> = {}
-  const laneValues = Object.values(lanes)
 
-  if (laneValues.some((lane) => lane.defaultRoute)) {
+  if (defaultRoute) {
     intents.build = { label: "Build" }
   }
+
+  const laneValues = Object.values(lanes)
 
   if (laneValues.some((lane) => Boolean(lane.routes.review))) {
     intents.review = { label: "Review" }

@@ -52,4 +52,29 @@ describe("buildRoutingProposal", () => {
       },
     })
   })
+
+  it("keeps the default route valid when no known lanes are suggested", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: [],
+      inventory: {
+        models: {
+          builder: { model: "openai/gpt-5", specialties: ["build"] },
+        },
+      },
+    })
+
+    expect(proposal.profiles).toEqual({
+      builder: { model: "openai/gpt-5" },
+    })
+    expect(proposal.lanes).toEqual({})
+    expect(proposal.presets.default.defaultRoute).toBe("builder")
+    expect(proposal.presets.default.usesLanes).toEqual([])
+    expect(proposal.workflow).toEqual({
+      kind: "direct",
+      intents: {
+        build: { label: "Build" },
+      },
+    })
+  })
 })
