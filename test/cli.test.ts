@@ -1525,8 +1525,8 @@ describe("runCli", () => {
     expect(output.preview.path).toContain("oh-my-superagents.config.jsonc")
     expect(output.summaryText).toContain("Routing authoring preview")
     expect(output.summaryText).toContain("frontend")
-    expect(output.diffText).toContain("Workflow:")
-    expect(output.diffText).toContain("Profiles:")
+    expect(output.diffText).toContain("+   \"workflow\": {")
+    expect(output.diffText).toContain("+   \"profiles\": {")
     expect(output.written).toBe(false)
   })
 
@@ -1644,8 +1644,124 @@ describe("runCli", () => {
     expect(writtenContent).toContain('"settings"')
     expect(output.summaryText).toContain("Routing authoring write")
     expect(output.summaryText).toContain("builder")
-    expect(output.diffText).toContain("Target:")
-    expect(output.diffText).toContain("Operation:")
+    expect(output.diffText).toContain("+   \"workflow\": {")
+    expect(output.diffText).toContain("+     \"builder\": {")
+  })
+
+  it("derives update diffs from the existing rendered config and keeps retained routes visible", async () => {
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+        "/workspace/project/oh-my-superagents.config.jsonc",
+      ].includes(filePath),
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...directControlPlaneConfig,
+          settings: {
+            ...directControlPlaneConfig.settings,
+            activePreset: "default",
+          },
+          profiles: {
+            existing: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+            builder: { model: "openai/gpt-5" },
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "existing" },
+              defaultRoute: "existing",
+            },
+            frontend: {
+              label: "Frontend",
+              routes: {},
+              defaultRoute: "builder",
+            },
+          },
+          presets: {
+            default: {
+              label: "Default",
+              short: "def",
+              usesLanes: ["ops", "frontend"],
+              routes: { review: "existing" },
+              defaultLane: "frontend",
+              defaultRoute: "builder",
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            label: "Default",
+            short: "def",
+            usesLanes: ["ops", "frontend"],
+            routes: { review: "existing" },
+            defaultLane: "frontend",
+            defaultRoute: "builder",
+          },
+        },
+        laneState: defaultLaneState,
+      }),
+      readArtifactFile: async (filePath: string) => {
+        if (filePath.endsWith("models.json")) {
+          return JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        }
+
+        return JSON.stringify({
+          workflow: { kind: "direct", intents: { build: { label: "Build" }, review: { label: "Review" } } },
+          settings: { activePreset: "default", enabled: true },
+          profiles: {
+            existing: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "existing" },
+              defaultRoute: "existing",
+            },
+          },
+          presets: {
+            default: {
+              label: "Default",
+              short: "def",
+              usesLanes: ["ops"],
+              routes: { review: "existing" },
+              defaultRoute: "existing",
+            },
+          },
+        }, null, 2)
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+
+    const output = JSON.parse(result.stdout)
+
+    expect(output.diffText).toContain('-         "ops"')
+    expect(output.diffText).toContain('+         "frontend"')
+    expect(output.diffText).toContain('      "review": "existing"')
+    expect(output.diffText).not.toContain('-         "review": "existing"')
   })
 
   it("evolves an existing global config when --write is used without a project config", async () => {

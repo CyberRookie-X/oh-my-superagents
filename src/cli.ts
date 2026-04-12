@@ -256,6 +256,7 @@ async function buildAuthorRoutingPreview(
     hasExistingConfig ? (await readControlPlaneSourceDocument(targetPath, deps.readArtifactFile)).config : undefined,
     { effectiveConfig },
   )
+  const previousRenderedDocument = hasExistingConfig ? await deps.readArtifactFile(targetPath) : ""
   const renderedDocument = renderRoutingConfigDocument(nextDocument)
   const operation = hasExistingConfig ? "update" : "create"
   const summaryText = formatAuthorRoutingSummary({
@@ -267,10 +268,10 @@ async function buildAuthorRoutingPreview(
     proposal,
   })
   const diffText = formatAuthorRoutingDiff({
-    mode,
+    previousRenderedDocument,
+    renderedDocument,
     operation,
     targetPath,
-    proposal,
   })
 
   if (write) {
@@ -329,32 +330,95 @@ function formatAuthorRoutingSummary(input: {
 }
 
 function formatAuthorRoutingDiff(input: {
-  mode: "superpowers" | "direct"
+  previousRenderedDocument: string
+  renderedDocument: string
   operation: "create" | "update"
   targetPath: string
-  proposal: ReturnType<typeof buildRoutingProposal>
 }) {
-  const laneKeys = Object.keys(input.proposal.lanes)
-  const profileKeys = Object.keys(input.proposal.profiles)
-
   return [
     `Target: ${input.targetPath}`,
     `Operation: ${input.operation}`,
-    `Workflow: ${input.mode}`,
-    `Profiles: ${profileKeys.length > 0 ? profileKeys.join(", ") : "none"}`,
-    `Lanes: ${laneKeys.length > 0 ? laneKeys.join(", ") : "none"}`,
-    `Default preset route: ${input.proposal.presets.default.defaultRoute}`,
-    `Preset routes: ${formatAuthorRoutingRoutes(input.proposal.presets.default.routes)}`,
+    ...formatRenderedDocumentDiff(input.previousRenderedDocument, input.renderedDocument),
   ].join("\n")
 }
 
-function formatAuthorRoutingRoutes(routes: Record<string, string>) {
-  const routeEntries = Object.entries(routes)
-  if (routeEntries.length === 0) {
-    return "none"
+function formatRenderedDocumentDiff(previousRenderedDocument: string, renderedDocument: string) {
+  const previousLines = previousRenderedDocument.length > 0 ? previousRenderedDocument.trimEnd().split("\n") : []
+  const nextLines = renderedDocument.trimEnd().split("\n")
+
+  if (previousLines.length === 0) {
+    return nextLines.map((line) => `+ ${line}`)
   }
 
-  return routeEntries.map(([routeId, profileId]) => `${routeId}->${profileId}`).join(", ")
+  const diffLines: string[] = []
+  const linePairs = buildLineDiff(previousLines, nextLines)
+
+  for (const pair of linePairs) {
+    if (pair.type === "unchanged") {
+      diffLines.push(`  ${pair.line}`)
+      continue
+    }
+
+    if (pair.type === "removed") {
+      diffLines.push(`- ${pair.line}`)
+      continue
+    }
+
+    diffLines.push(`+ ${pair.line}`)
+  }
+
+  return diffLines
+}
+
+function buildLineDiff(previousLines: string[], nextLines: string[]) {
+  const lcs = Array.from({ length: previousLines.length + 1 }, () => Array<number>(nextLines.length + 1).fill(0))
+
+  for (let previousIndex = previousLines.length - 1; previousIndex >= 0; previousIndex--) {
+    for (let nextIndex = nextLines.length - 1; nextIndex >= 0; nextIndex--) {
+      lcs[previousIndex][nextIndex] = previousLines[previousIndex] === nextLines[nextIndex]
+        ? lcs[previousIndex + 1][nextIndex + 1] + 1
+        : Math.max(lcs[previousIndex + 1][nextIndex], lcs[previousIndex][nextIndex + 1])
+    }
+  }
+
+  const diffLines: Array<
+    | { type: "unchanged"; line: string }
+    | { type: "removed"; line: string }
+    | { type: "added"; line: string }
+  > = []
+
+  let previousIndex = 0
+  let nextIndex = 0
+
+  while (previousIndex < previousLines.length && nextIndex < nextLines.length) {
+    if (previousLines[previousIndex] === nextLines[nextIndex]) {
+      diffLines.push({ type: "unchanged", line: previousLines[previousIndex] })
+      previousIndex++
+      nextIndex++
+      continue
+    }
+
+    if (lcs[previousIndex + 1][nextIndex] >= lcs[previousIndex][nextIndex + 1]) {
+      diffLines.push({ type: "removed", line: previousLines[previousIndex] })
+      previousIndex++
+      continue
+    }
+
+    diffLines.push({ type: "added", line: nextLines[nextIndex] })
+    nextIndex++
+  }
+
+  while (previousIndex < previousLines.length) {
+    diffLines.push({ type: "removed", line: previousLines[previousIndex] })
+    previousIndex++
+  }
+
+  while (nextIndex < nextLines.length) {
+    diffLines.push({ type: "added", line: nextLines[nextIndex] })
+    nextIndex++
+  }
+
+  return diffLines
 }
 
 function formatCompatibilityWarning(result: SuperpowersCompatibilityResult | null) {
