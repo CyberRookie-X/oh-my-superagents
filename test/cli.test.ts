@@ -1485,6 +1485,47 @@ describe("runCli", () => {
     expect(result.stderr).toContain("Missing required --host")
   })
 
+  it("prints a routing proposal summary without writing by default", async () => {
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+      ].includes(filePath),
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.json")
+        ? JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        : JSON.stringify({ dependencies: { react: "18.0.0" } }),
+      writeFile: async () => {
+        throw new Error("writeFile should not be called in preview mode")
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+
+    const output = JSON.parse(result.stdout)
+
+    expect(output.mode).toBe("direct")
+    expect(output.summary.lanes).toContain("frontend")
+    expect(output.summary.profiles).toContain("builder")
+    expect(output.summary.presets).toContain("default")
+    expect(output.preview.path).toContain("oh-my-superagents.config.jsonc")
+    expect(output.written).toBe(false)
+  })
+
   it("prefers a preset key over a matching preset short in use", async () => {
     let persistedContent = ""
 

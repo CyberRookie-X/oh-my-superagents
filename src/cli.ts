@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 import { cwd as getCwd } from "node:process"
+import { buildRoutingProposal, inspectRoutingAuthoringInputs, type ModelInventory } from "./author-routing.js"
 import { BUILT_IN_PHASES, discoverConfigPath, loadRouterConfig } from "./config.js"
 import {
   buildControlPlaneExplainTrace,
@@ -42,6 +43,7 @@ type CliHost = SupportedSuperpowersHost | "qwen"
 const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
 const CODEX_PLUGIN_MANIFEST_PATH = "plugins/oh-my-superagents-codex/.codex-plugin/plugin.json"
 const CODEX_SKILLS_ROOT = "plugins/oh-my-superagents-codex/skills"
+const DEFAULT_CONFIG_FILE_NAME = "oh-my-superagents.config.jsonc"
 const QWEN_MANAGED_AGENT_FILE_NAMES = [
   "oms-brainstorm.md",
   "oms-plan.md",
@@ -163,6 +165,70 @@ function parseArgs(argv: string[]) {
 function getStringFlag(flags: Map<string, string | true>, name: string) {
   const value = flags.get(name)
   return typeof value === "string" ? value : undefined
+}
+
+function isAuthorRoutingMode(value: string | undefined): value is "superpowers" | "direct" {
+  return value === "superpowers" || value === "direct"
+}
+
+async function loadModelInventory(modelsPath: string, deps: CliDeps): Promise<ModelInventory> {
+  const parsed = JSON.parse(await deps.readArtifactFile(modelsPath)) as unknown
+
+  if (!isRecord(parsed) || !isRecord(parsed.models)) {
+    throw new Error(`Invalid model inventory: ${modelsPath}`)
+  }
+
+  return parsed as ModelInventory
+}
+
+async function buildAuthorRoutingPreview(
+  cwd: string,
+  explicitPath: string | undefined,
+  mode: "superpowers" | "direct",
+  modelsPath: string,
+  deps: CliDeps,
+) {
+  const inventory = await loadModelInventory(modelsPath, deps)
+  const authoringInputs = await inspectRoutingAuthoringInputs({
+    cwd,
+    exists: deps.artifactExists,
+    readFile: deps.readArtifactFile,
+  })
+  const proposal = buildRoutingProposal({
+    mode,
+    suggestedLanes: authoringInputs.suggestedLanes,
+    inventory,
+  })
+  const discoveredConfigPath = await deps.discoverConfigPath({
+    cwd,
+    explicitPath,
+    exists: deps.artifactExists,
+  })
+  const targetPath = discoveredConfigPath ?? path.join(cwd, DEFAULT_CONFIG_FILE_NAME)
+  const hasExistingConfig = await deps.artifactExists(targetPath)
+
+  return {
+    mode,
+    summary: {
+      lanes: authoringInputs.suggestedLanes,
+      profiles: Object.keys(proposal.profiles),
+      presets: Object.keys(proposal.presets),
+    },
+    detectedLanes: authoringInputs.suggestedLanes,
+    proposedProfiles: proposal.profiles,
+    proposedPresets: proposal.presets,
+    preview: {
+      path: targetPath,
+      operation: hasExistingConfig ? "update" : "create",
+      patch: {
+        workflow: proposal.workflow,
+        profiles: proposal.profiles,
+        lanes: proposal.lanes,
+        presets: proposal.presets,
+      },
+    },
+    written: false as const,
+  }
 }
 
 function formatCompatibilityWarning(result: SuperpowersCompatibilityResult | null) {
@@ -1118,6 +1184,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       command !== "sync"
       && command !== "explain"
       && command !== "bootstrap"
+      && command !== "author"
       && command !== "status"
       && command !== "doctor"
       && command !== "use"
@@ -1151,6 +1218,28 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
             formatCompatibilityWarning(result.compatibility),
             ...result.syncResult.warnings,
           ]),
+      }
+    }
+
+    if (command === "author") {
+      if (positionals[0] !== "routing") {
+        return { exitCode: 1, stdout: "", stderr: "Unknown author subcommand" }
+      }
+
+      const mode = getStringFlag(flags, "--mode")
+      if (!isAuthorRoutingMode(mode)) {
+        return { exitCode: 1, stdout: "", stderr: "Missing or invalid --mode (supported: superpowers, direct)" }
+      }
+
+      const modelsPath = getStringFlag(flags, "--models")
+      if (!modelsPath) {
+        return { exitCode: 1, stdout: "", stderr: "Missing required --models" }
+      }
+
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify(await buildAuthorRoutingPreview(cwd, explicitPath, mode, modelsPath, deps), null, 2),
+        stderr: "",
       }
     }
 
