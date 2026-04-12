@@ -1,4 +1,13 @@
-import { BUILT_IN_PHASES, type RouterConfig } from "./config.js"
+import type { RouterConfig } from "./config.js"
+import {
+  PHASE_TO_AGENT,
+  PHASE_TO_COMMAND,
+  SUPERPOWERS_ROUTE_CATALOG,
+  type BuiltInPhase,
+} from "./workflow-superpowers.js"
+
+export { PHASE_TO_AGENT, PHASE_TO_COMMAND } from "./workflow-superpowers.js"
+export type { BuiltInPhase } from "./workflow-superpowers.js"
 
 export const EFFORT_TO_VARIANT = {
   fast: "low",
@@ -7,30 +16,11 @@ export const EFFORT_TO_VARIANT = {
   max: "max",
 } as const
 
-export const PHASE_TO_COMMAND = {
-  brainstorming: "/sp-brainstorm",
-  "writing-plans": "/sp-plan",
-  "subagent-driven-development": "/sp-execute",
-  "requesting-code-review": "/sp-review",
-  "verification-before-completion": "/sp-verify",
-  "frontend-design": "/sp-visual",
-  "webapp-testing": "/sp-web-test",
-} as const satisfies Record<(typeof BUILT_IN_PHASES)[number], string>
-
-export const PHASE_TO_AGENT = {
-  brainstorming: "spr-strategy",
-  "writing-plans": "spr-plan",
-  "subagent-driven-development": "spr-build",
-  "requesting-code-review": "spr-review",
-  "verification-before-completion": "spr-verify",
-  "frontend-design": "spr-visual",
-  "webapp-testing": "spr-visual",
-} as const satisfies Record<(typeof BUILT_IN_PHASES)[number], string>
-
-export type BuiltInPhase = (typeof BUILT_IN_PHASES)[number]
+const SUPERPOWERS_ROUTE_SET = new Set<string>(SUPERPOWERS_ROUTE_CATALOG)
 
 export type ResolvedRoute = {
-  phaseId: BuiltInPhase
+  routeId: string
+  phaseId?: BuiltInPhase
   profileId: string
   routeSource: "preset-route" | "lane-route" | "lane-default" | "preset-default"
   effectiveLane?: string
@@ -44,16 +34,17 @@ export type ResolvedRoute = {
   description: string
 }
 
-type LaneContext = {
+type RouteContext = {
   effectiveLane?: string
 }
 
-export function resolvePhase(config: RouterConfig, phase: BuiltInPhase, laneContext: LaneContext = {}): ResolvedRoute {
-  const effectiveLane = laneContext.effectiveLane ?? config.effectiveLane
+export function resolveRoute(config: RouterConfig, routeId: string, routeContext: RouteContext = {}): ResolvedRoute {
+  const workflowKind = config.workflow?.kind ?? "superpowers"
+  const effectiveLane = routeContext.effectiveLane ?? config.effectiveLane
   const lane = effectiveLane ? config.lanes?.[effectiveLane] : undefined
 
-  const presetRoute = config.routes[phase]
-  const laneRoute = lane?.routes[phase]
+  const presetRoute = config.routes[routeId]
+  const laneRoute = lane?.routes[routeId]
   const laneDefaultRoute = lane?.defaultRoute
   const profileId = presetRoute ?? laneRoute ?? laneDefaultRoute ?? config.defaultRoute
   const routeSource = presetRoute
@@ -65,7 +56,7 @@ export function resolvePhase(config: RouterConfig, phase: BuiltInPhase, laneCont
         : "preset-default"
 
   if (!profileId) {
-    throw new Error(`No route configured for phase: ${phase}`)
+    throw new Error(`No route configured for ${workflowKind === "direct" ? "intent" : "phase"}: ${routeId}`)
   }
 
   const profile = config.profiles[profileId]
@@ -74,7 +65,8 @@ export function resolvePhase(config: RouterConfig, phase: BuiltInPhase, laneCont
   }
 
   return {
-    phaseId: phase,
+    routeId,
+    phaseId: workflowKind === "superpowers" && SUPERPOWERS_ROUTE_SET.has(routeId) ? (routeId as BuiltInPhase) : undefined,
     profileId,
     routeSource,
     effectiveLane,
@@ -85,12 +77,19 @@ export function resolvePhase(config: RouterConfig, phase: BuiltInPhase, laneCont
       temperature: profile.temperature,
       variant: profile.variant ?? (profile.effort ? EFFORT_TO_VARIANT[profile.effort] : undefined),
     },
-    description: `${phase} routed to ${profileId} via ${routeSource}`,
+    description: `${routeId} routed to ${profileId} via ${routeSource}`,
   }
 }
 
-export function explainPhase(config: RouterConfig, phase: BuiltInPhase, laneContext: LaneContext = {}) {
-  const resolved = resolvePhase(config, phase, laneContext)
+export function resolvePhase(config: RouterConfig, phase: BuiltInPhase, routeContext: RouteContext = {}): ResolvedRoute {
+  return {
+    ...resolveRoute(config, phase, routeContext),
+    phaseId: phase,
+  }
+}
+
+export function explainPhase(config: RouterConfig, phase: BuiltInPhase, routeContext: RouteContext = {}) {
+  const resolved = resolvePhase(config, phase, routeContext)
 
   return {
     phase,
@@ -104,6 +103,6 @@ export function explainPhase(config: RouterConfig, phase: BuiltInPhase, laneCont
   }
 }
 
-export function explainAll(config: RouterConfig, laneContext: LaneContext = {}) {
-  return BUILT_IN_PHASES.map((phase) => explainPhase(config, phase, laneContext))
+export function explainAll(config: RouterConfig, routeContext: RouteContext = {}) {
+  return SUPERPOWERS_ROUTE_CATALOG.map((phase) => explainPhase(config, phase, routeContext))
 }

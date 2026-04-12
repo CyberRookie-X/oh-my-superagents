@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { explainAll, explainPhase, resolvePhase } from "../src/router.js"
+import * as routerLibrary from "../src/router.js"
 
 const config = {
   profiles: {
@@ -80,6 +81,37 @@ describe("resolvePhase", () => {
       codexFast: true,
       variant: "high",
     })
+  })
+})
+
+describe("resolveRoute", () => {
+  it("resolves a direct-mode route id without relying on built-in superpowers phases", () => {
+    const directConfig = {
+      workflow: {
+        kind: "direct" as const,
+        intents: {
+          plan: { label: "Plan" },
+          build: { label: "Build" },
+        },
+      },
+      profiles: {
+        planner: { model: "openai/gpt-5" },
+        builder: { model: "gpt-5.4" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { plan: "planner" },
+          defaultRoute: "builder",
+        },
+      },
+      routes: {},
+      defaultRoute: "builder",
+      effectiveLane: "frontend",
+    }
+
+    expect(typeof routerLibrary.resolveRoute).toBe("function")
+    expect(routerLibrary.resolveRoute(directConfig as never, "plan").profileId).toBe("planner")
   })
 })
 

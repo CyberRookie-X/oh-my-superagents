@@ -9,4 +9,9 @@ describe("library exports", () => {
     expect(library.discoverQwenUpstreamSkills).toBeTypeOf("function")
     expect(library.renderQwenAgentFile).toBeTypeOf("function")
   })
+
+  it("exports the superpowers route catalog adapter surface", () => {
+    expect(Array.isArray(library.SUPERPOWERS_ROUTE_CATALOG)).toBe(true)
+    expect(library.SUPERPOWERS_ROUTE_CATALOG).toContain("brainstorming")
+  })
 })
