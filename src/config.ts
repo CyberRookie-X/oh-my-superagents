@@ -480,6 +480,19 @@ function getEffectiveProfilesForPreset(config: ControlPlaneConfig, preset: Contr
 }
 
 function validateLaneTargets(config: ControlPlaneConfig) {
+  const validRouteIds =
+    config.workflow.kind === "direct"
+      ? new Set(Object.keys(config.workflow.intents))
+      : BUILT_IN_PHASE_SET
+
+  for (const lane of Object.values(config.lanes)) {
+    for (const routeId of Object.keys(lane.routes)) {
+      if (!validRouteIds.has(routeId)) {
+        throw new Error(config.workflow.kind === "direct" ? `Unknown intent: ${routeId}` : `Unknown phase: ${routeId}`)
+      }
+    }
+  }
+
   for (const [presetKey, preset] of Object.entries(config.presets)) {
     const effectiveProfiles = getEffectiveProfilesForPreset(config, preset)
 

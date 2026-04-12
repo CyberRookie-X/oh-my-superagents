@@ -436,6 +436,50 @@ describe("loadControlPlaneConfig", () => {
     ).rejects.toThrow(/lane|profile|missing-profile/i)
   })
 
+  it("rejects a direct-mode lane route key that is not declared in workflow.intents", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "workflow": {
+            "kind": "direct",
+            "intents": {
+              "plan": { "label": "Plan" },
+              "build": { "label": "Build" }
+            }
+          },
+          "settings": { "activePreset": "default" },
+          "profiles": {
+            "plan-profile": { "model": "openai/gpt-5" },
+            "build-profile": { "model": "gpt-5.4" }
+          },
+          "lanes": {
+            "frontend": {
+              "label": "Frontend",
+              "routes": {
+                "pla": "plan-profile"
+              },
+              "defaultRoute": "build-profile"
+            }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "usesLanes": ["frontend"],
+              "defaultLane": "frontend",
+              "routes": {},
+              "defaultRoute": "build-profile"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow("Unknown intent: pla")
+  })
+
   it("rejects a lane defaultRoute target that does not exist in the effective profile set", async () => {
     await expect(
       loadControlPlaneConfig({

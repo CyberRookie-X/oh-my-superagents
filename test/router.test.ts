@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { explainAll, explainPhase, resolvePhase } from "../src/router.js"
 import * as routerLibrary from "../src/router.js"
+import { SUPERPOWERS_ROUTE_CATALOG } from "../src/workflow-superpowers.js"
 
 const config = {
   profiles: {
@@ -85,6 +86,10 @@ describe("resolvePhase", () => {
 })
 
 describe("resolveRoute", () => {
+  it("still exposes the superpowers built-in route catalog through the adapter", () => {
+    expect(SUPERPOWERS_ROUTE_CATALOG).toContain("brainstorming")
+  })
+
   it("resolves a direct-mode route id without relying on built-in superpowers phases", () => {
     const directConfig = {
       workflow: {
@@ -140,6 +145,10 @@ describe("resolveRoute", () => {
     }
 
     expect(() => routerLibrary.resolveRoute(directConfig as never, "pla")).toThrowError("Unknown intent: pla")
+  })
+
+  it("rejects an unknown superpowers route id instead of falling back", () => {
+    expect(() => routerLibrary.resolveRoute(config as never, "brainstormng")).toThrowError("Unknown phase: brainstormng")
   })
 })
 

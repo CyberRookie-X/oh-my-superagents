@@ -18,6 +18,10 @@ export const EFFORT_TO_VARIANT = {
 
 const SUPERPOWERS_ROUTE_SET = new Set<string>(SUPERPOWERS_ROUTE_CATALOG)
 
+function hasOwnKey(value: object, key: string) {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
 export type ResolvedRoute = {
   routeId: string
   phaseId?: BuiltInPhase
@@ -41,8 +45,12 @@ type RouteContext = {
 export function resolveRoute(config: RouterConfig, routeId: string, routeContext: RouteContext = {}): ResolvedRoute {
   const workflowKind = config.workflow?.kind ?? "superpowers"
 
-  if (config.workflow?.kind === "direct" && !(routeId in config.workflow.intents)) {
-    throw new Error(`Unknown intent: ${routeId}`)
+  if (config.workflow?.kind === "direct") {
+    if (!hasOwnKey(config.workflow.intents, routeId)) {
+      throw new Error(`Unknown intent: ${routeId}`)
+    }
+  } else if (!SUPERPOWERS_ROUTE_SET.has(routeId)) {
+    throw new Error(`Unknown phase: ${routeId}`)
   }
 
   const effectiveLane = routeContext.effectiveLane ?? config.effectiveLane
