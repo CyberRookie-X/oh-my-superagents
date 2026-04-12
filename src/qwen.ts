@@ -216,16 +216,21 @@ function buildQwenCommandArtifacts(settings: QwenControlPlaneSettings): Generate
   })
 }
 
+function appendQwenCommandArtifact(commands: GeneratedArtifact[], command: GeneratedArtifact) {
+  const existingCommand = commands.find((item) => item.fileName === command.fileName)
+
+  if (existingCommand) {
+    throw new Error(`Duplicate Qwen command file rendering: ${command.fileName}`)
+  }
+
+  commands.push(command)
+}
+
 export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenArtifactsOptions) {
   const commands = input.controlPlaneSettings ? buildQwenCommandArtifacts(input.controlPlaneSettings) : []
 
-  if (input.includeAgents === false) {
-    return { agents: [], commands }
-  }
-
   if (config.workflow?.kind === "direct") {
     const agents: GeneratedArtifact[] = []
-    const directCommands: GeneratedArtifact[] = []
 
     for (const [intent, intentConfig] of Object.entries(config.workflow.intents)) {
       const resolved = resolveRoute(config, intent)
@@ -234,6 +239,22 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
       const intentDescription = intentConfig.description
         ? `${intentConfig.label}: ${intentConfig.description}`
         : intentConfig.label
+
+      appendQwenCommandArtifact(commands, {
+        kind: "command",
+        directory: ".qwen/commands",
+        fileName: `${commandName}.md`,
+        ownerPrefix: "ai-",
+        content: renderQwenDirectCommandFile({
+          description: `${intentConfig.label} command for Qwen direct mode.`,
+          intent,
+          renderedName: commandName,
+        }),
+      })
+
+      if (input.includeAgents === false) {
+        continue
+      }
 
       agents.push({
         kind: "agent",
@@ -248,21 +269,13 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
           intentDescription,
         }),
       })
-
-      directCommands.push({
-        kind: "command",
-        directory: ".qwen/commands",
-        fileName: `${commandName}.md`,
-        ownerPrefix: "ai-",
-        content: renderQwenDirectCommandFile({
-          description: `${intentConfig.label} command for Qwen direct mode.`,
-          intent,
-          renderedName: commandName,
-        }),
-      })
     }
 
-    return { agents, commands: [...commands, ...directCommands] }
+    return { agents, commands }
+  }
+
+  if (input.includeAgents === false) {
+    return { agents: [], commands }
   }
 
   const upstreamSkills = await discoverQwenUpstreamSkills(input)

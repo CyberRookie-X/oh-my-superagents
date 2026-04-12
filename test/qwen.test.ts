@@ -123,6 +123,61 @@ describe("buildQwenArtifacts", () => {
     ).resolves.toBeDefined()
   })
 
+  it("keeps direct-mode commands when includeAgents is false", async () => {
+    const artifacts = await buildQwenArtifacts(
+      {
+        workflow: {
+          kind: "direct",
+          intents: {
+            plan: { label: "Plan" },
+          },
+        },
+        profiles: {
+          planner: { model: "openai/gpt-5" },
+        },
+        routes: { plan: "planner" },
+        defaultRoute: "planner",
+      } as never,
+      {
+        cwd: "/workspace/project",
+        homeDir: "/home/test",
+        controlPlaneSettings,
+        includeAgents: false,
+      },
+    )
+
+    expect(artifacts.agents).toEqual([])
+    expect(artifacts.commands.map((item) => item.fileName)).toContain("ai-plan.md")
+  })
+
+  it("fails fast when a direct-mode command collides with a control-plane command", async () => {
+    await expect(
+      buildQwenArtifacts(
+        {
+          workflow: {
+            kind: "direct",
+            intents: {
+              sync: { label: "Sync" },
+            },
+          },
+          profiles: {
+            planner: { model: "openai/gpt-5" },
+          },
+          routes: { sync: "planner" },
+          defaultRoute: "planner",
+        } as never,
+        {
+          cwd: "/workspace/project",
+          homeDir: "/home/test",
+          controlPlaneSettings: {
+            ...controlPlaneSettings,
+            commandPrefix: "ai",
+          },
+        },
+      ),
+    ).rejects.toThrow(/ai-sync\.md|Duplicate Qwen command file rendering/i)
+  })
+
   it("materializes the required fixed Qwen wrapper agent names", async () => {
     const artifacts = await buildQwenArtifacts(
       {
