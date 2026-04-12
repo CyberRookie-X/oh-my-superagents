@@ -157,6 +157,20 @@ function renderOwnedCodexTemporaryDisableHelperSkill(skillName: string) {
   ].join("\n")
 }
 
+function renderOwnedCodexDirectSkill(skillName: string, intent: string) {
+  return [
+    `# ${OWNERSHIP_MARKER.slice(5, -4)}`,
+    "---",
+    `name: ${skillName}`,
+    "description: Generated OMS direct skill",
+    "---",
+    "",
+    `<!-- oms-direct: stage=1; host=codex; artifact=skill; intent=${intent}; rendered-name=${skillName} -->`,
+    `Use the Codex direct-mode agent \`rt-${intent}\` for the \`${intent}\` intent.`,
+    "",
+  ].join("\n")
+}
+
 function renderOwnedQwenOmsCommand(renderedName: string, logicalCommand: string) {
   return [
     "---",
@@ -670,6 +684,73 @@ describe("materializeArtifacts", () => {
 
     expect(collisionResult.exitCode).toBe(1)
     expect(collisionResult.warnings).toEqual([`Collision at ${helperFilePath}`])
+  })
+
+  it("treats Codex direct-mode skills as a distinct owned contract", async () => {
+    const skillDirectory = "plugins/oh-my-superagents-codex/skills/ai-plan"
+    const skillFilePath = "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md"
+
+    const ownedFs = createMemoryFs({
+      [skillFilePath]: renderOwnedCodexDirectSkill("ai-plan", "plan"),
+    })
+
+    const directArtifact = {
+      kind: "command" as const,
+      directory: skillDirectory,
+      fileName: "SKILL.md",
+      ownerPrefix: "unused-for-stage1-metadata",
+      content: renderOwnedCodexDirectSkill("ai-plan", "plan"),
+    }
+
+    const ownedResult = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [directArtifact],
+      fs: ownedFs.fs,
+    })
+
+    expect(ownedResult.exitCode).toBe(0)
+    expect(ownedResult.warnings).toEqual([])
+
+    const controlPlaneFs = createMemoryFs({
+      [skillFilePath]: renderOwnedCodexOmsSkill("ai-plan", "status"),
+    })
+
+    const collisionResult = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [directArtifact],
+      fs: controlPlaneFs.fs,
+    })
+
+    expect(collisionResult.exitCode).toBe(1)
+    expect(collisionResult.warnings).toEqual([`Collision at ${skillFilePath}`])
+  })
+
+  it("removes stale Codex direct-mode skill files after intent changes", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md": renderOwnedCodexDirectSkill(
+        "ai-plan",
+        "plan",
+      ),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "command",
+          directory: "plugins/oh-my-superagents-codex/skills/ai-build",
+          fileName: "SKILL.md",
+          ownerPrefix: "unused-for-stage1-metadata",
+          content: renderOwnedCodexDirectSkill("ai-build", "build"),
+        },
+      ],
+      fs,
+    })
+
+    expect(result.removed).toEqual([
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    ])
+    expect(removedPaths).toEqual(result.removed)
   })
 
   it("preserves non-OMS Codex skill files that do not satisfy the OMS ownership contract", async () => {

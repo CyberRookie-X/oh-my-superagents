@@ -45,6 +45,7 @@ export type CodexBootstrapResult = {
 type CodexBootstrapControlPlaneSettings = Pick<ControlPlaneConfig["settings"], "commandPrefix" | "commands">
 
 const SAFE_CODEX_SKILL_SEGMENT_PATTERN = /^[a-z0-9-]+$/
+const CODEX_DIRECT_SKILL_MARKER_PREFIX = "oms-direct:"
 
 const CODEX_CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string> = {
   status: "Show OMS status for Codex in this project.",
@@ -242,9 +243,9 @@ Treat this skill as the Codex host entry for the logical \`${input.logicalComman
 function buildControlPlaneSkillFiles(
   controlPlaneSettings: CodexBootstrapControlPlaneSettings,
   configArtifactPath: string,
+  seenSkillNames: Map<string, string>,
 ) {
   assertSafeCodexSkillSegment(controlPlaneSettings.commandPrefix, "commandPrefix")
-  const seenSkillNames = new Map<string, ControlPlaneCommandKey>()
 
   return CONTROL_PLANE_COMMAND_KEYS.flatMap((commandKey) => {
     const command = controlPlaneSettings.commands[commandKey]
@@ -258,9 +259,9 @@ function buildControlPlaneSkillFiles(
         throw new Error(`Codex skill collides with fixed helper skill: ${skillName}`)
       }
 
-      const existingCommand = seenSkillNames.get(skillName)
-      if (existingCommand) {
-        throw new Error(`Duplicate Codex skill rendering: ${skillName} (${existingCommand}, ${commandKey})`)
+      const existingSource = seenSkillNames.get(skillName)
+      if (existingSource) {
+        throw new Error(`Duplicate Codex skill rendering: ${skillName} (${existingSource}, ${commandKey})`)
       }
 
       seenSkillNames.set(skillName, commandKey)
@@ -293,6 +294,7 @@ description: Route ${input.intent} requests through ${input.agentName}.
 ---
 
 <!-- generated-by: oh-my-superagents; do-not-edit: true -->
+<!-- ${CODEX_DIRECT_SKILL_MARKER_PREFIX} stage=1; host=codex; artifact=skill; intent=${input.intent}; rendered-name=${input.skillName} -->
 Use the Codex direct-mode agent \`${input.agentName}\` for the \`${input.intent}\` intent.
 Handle requests that match this intent: ${intentDescription}.
 Forward any extra user instructions in $ARGUMENTS.
@@ -300,18 +302,26 @@ Stay focused on this intent unless the user explicitly asks to switch.
 `
 }
 
-function buildDirectModeSkillFiles(routerConfig?: RouterConfig) {
+function buildDirectModeSkillFiles(routerConfig: RouterConfig | undefined, seenSkillNames: Map<string, string>) {
   if (routerConfig?.workflow.kind !== "direct") {
     return []
   }
 
   return Object.entries(routerConfig.workflow.intents).map(([intent, intentConfig]) => {
     assertSafeCodexSkillSegment(intent, `direct intent ${intent}`)
+    const skillName = `ai-${intent}`
+
+    const existingSource = seenSkillNames.get(skillName)
+    if (existingSource) {
+      throw new Error(`Duplicate Codex skill rendering: ${skillName} (${existingSource}, direct:${intent})`)
+    }
+
+    seenSkillNames.set(skillName, `direct:${intent}`)
 
     return {
-      path: `plugins/oh-my-superagents-codex/skills/ai-${intent}/SKILL.md`,
+      path: `plugins/oh-my-superagents-codex/skills/${skillName}/SKILL.md`,
       content: buildDirectModeSkill({
-        skillName: `ai-${intent}`,
+        skillName,
         agentName: `rt-${intent}`,
         intent,
         label: intentConfig.label,
@@ -356,8 +366,9 @@ export function buildCodexBootstrapFiles(input: {
 }): CodexBootstrapBuildResult {
   const configArtifactPath = input.configArtifactPath ?? buildStarterCodexConfig().path
   const controlPlaneSettings = input.controlPlaneSettings ?? createDefaultControlPlaneConfig().settings
-  const controlPlaneSkillFiles = buildControlPlaneSkillFiles(controlPlaneSettings, configArtifactPath)
-  const directModeSkillFiles = buildDirectModeSkillFiles(input.routerConfig)
+  const seenSkillNames = new Map<string, string>()
+  const controlPlaneSkillFiles = buildControlPlaneSkillFiles(controlPlaneSettings, configArtifactPath, seenSkillNames)
+  const directModeSkillFiles = buildDirectModeSkillFiles(input.routerConfig, seenSkillNames)
   const files: CodexBootstrapFile[] = [
     {
       path: ".agents/plugins/marketplace.json",
@@ -387,7 +398,7 @@ function toGeneratedArtifact(codexFile: CodexBootstrapFile): GeneratedArtifact {
     kind: "command",
     directory: path.dirname(codexFile.path),
     fileName: path.basename(codexFile.path),
-    ownerPrefix: "",
+    ownerPrefix: "unused-for-stage1-metadata",
     content: codexFile.content,
   }
 }
