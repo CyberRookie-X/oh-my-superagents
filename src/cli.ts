@@ -1,8 +1,10 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 import { cwd as getCwd } from "node:process"
+import { parse, type ParseError } from "jsonc-parser"
+import { z } from "zod"
 import { buildRoutingProposal, inspectRoutingAuthoringInputs, type ModelInventory } from "./author-routing.js"
-import { BUILT_IN_PHASES, discoverConfigPath, loadRouterConfig } from "./config.js"
+import { BUILT_IN_PHASES, discoverConfigPath, getProjectConfigPath, loadRouterConfig } from "./config.js"
 import {
   buildControlPlaneExplainTrace,
   buildControlPlaneRouteExplainTrace,
@@ -43,7 +45,6 @@ type CliHost = SupportedSuperpowersHost | "qwen"
 const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
 const CODEX_PLUGIN_MANIFEST_PATH = "plugins/oh-my-superagents-codex/.codex-plugin/plugin.json"
 const CODEX_SKILLS_ROOT = "plugins/oh-my-superagents-codex/skills"
-const DEFAULT_CONFIG_FILE_NAME = "oh-my-superagents.config.jsonc"
 const QWEN_MANAGED_AGENT_FILE_NAMES = [
   "oms-brainstorm.md",
   "oms-plan.md",
@@ -171,14 +172,44 @@ function isAuthorRoutingMode(value: string | undefined): value is "superpowers" 
   return value === "superpowers" || value === "direct"
 }
 
-async function loadModelInventory(modelsPath: string, deps: CliDeps): Promise<ModelInventory> {
-  const parsed = JSON.parse(await deps.readArtifactFile(modelsPath)) as unknown
+const ModelInventoryEntrySchema = z.object({
+  model: z.string().min(1),
+  specialties: z.array(z.string().min(1)).optional(),
+  effort: z.enum(["fast", "balanced", "deep", "max"]).optional(),
+  codexFast: z.boolean().optional(),
+}).strict()
 
-  if (!isRecord(parsed) || !isRecord(parsed.models)) {
-    throw new Error(`Invalid model inventory: ${modelsPath}`)
+const ModelInventorySchema = z.object({
+  models: z.record(z.string().min(1), ModelInventoryEntrySchema),
+}).strict()
+
+function parseJsoncDocument(filePath: string, content: string) {
+  const parseErrors: ParseError[] = []
+  const parsed = parse(content, parseErrors)
+
+  if (parseErrors.length > 0) {
+    throw new Error(`Invalid JSONC in ${filePath}`)
   }
 
-  return parsed as ModelInventory
+  if (!isRecord(parsed)) {
+    throw new Error(`Invalid model inventory: ${filePath}`)
+  }
+
+  return parsed
+}
+
+async function loadModelInventory(modelsPath: string, deps: CliDeps): Promise<ModelInventory> {
+  const parsed = parseJsoncDocument(modelsPath, await deps.readArtifactFile(modelsPath))
+  const validated = ModelInventorySchema.safeParse(parsed)
+
+  if (!validated.success) {
+    const issue = validated.error.issues[0]
+    const issuePath = issue?.path.join(".")
+    const issueDetail = issuePath ? ` (${issuePath}: ${issue.message})` : ""
+    throw new Error(`Invalid model inventory: ${modelsPath}${issueDetail}`)
+  }
+
+  return validated.data
 }
 
 async function buildAuthorRoutingPreview(
@@ -199,12 +230,7 @@ async function buildAuthorRoutingPreview(
     suggestedLanes: authoringInputs.suggestedLanes,
     inventory,
   })
-  const discoveredConfigPath = await deps.discoverConfigPath({
-    cwd,
-    explicitPath,
-    exists: deps.artifactExists,
-  })
-  const targetPath = discoveredConfigPath ?? path.join(cwd, DEFAULT_CONFIG_FILE_NAME)
+  const targetPath = explicitPath ?? getProjectConfigPath(cwd)
   const hasExistingConfig = await deps.artifactExists(targetPath)
 
   return {

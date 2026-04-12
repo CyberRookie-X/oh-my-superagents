@@ -1526,6 +1526,106 @@ describe("runCli", () => {
     expect(output.written).toBe(false)
   })
 
+  it("accepts a JSONC model inventory for routing preview", async () => {
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.jsonc",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.jsonc",
+      ].includes(filePath),
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.jsonc")
+        ? `{
+            // preview inventory
+            "models": {
+              "builder": {
+                "model": "openai/gpt-5",
+                "specialties": ["frontend", "build"]
+              }
+            }
+          }`
+        : JSON.stringify({ dependencies: { react: "18.0.0" } }),
+    }))
+
+    expect(result.exitCode).toBe(0)
+
+    const output = JSON.parse(result.stdout)
+
+    expect(output.summary.profiles).toContain("builder")
+  })
+
+  it("targets the project config path when only a global config exists", async () => {
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+        "/home/tester/.config/oh-my-superagents/config.jsonc",
+      ].includes(filePath),
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.json")
+        ? JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        : JSON.stringify({ dependencies: { react: "18.0.0" } }),
+    }))
+
+    expect(result.exitCode).toBe(0)
+
+    const output = JSON.parse(result.stdout)
+
+    expect(output.preview.path).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(output.preview.operation).toBe("create")
+  })
+
+  it("fails clearly for malformed model inventory entries", async () => {
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+      ].includes(filePath),
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.json")
+        ? JSON.stringify({
+            models: {
+              builder: {
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        : JSON.stringify({ dependencies: { react: "18.0.0" } }),
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Invalid model inventory")
+    expect(result.stderr).toContain("models.builder.model")
+  })
+
   it("prefers a preset key over a matching preset short in use", async () => {
     let persistedContent = ""
 
