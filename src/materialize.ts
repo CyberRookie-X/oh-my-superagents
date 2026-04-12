@@ -40,6 +40,7 @@ const CODEX_SKILL_FILE_NAME = "SKILL.md"
 const CONTROL_PLANE_LOGICAL_COMMANDS = new Set<ControlPlaneCommandKey>(CONTROL_PLANE_COMMAND_KEYS)
 const AUXILIARY_HELPER_NAME = "temporary-disable"
 const CODEX_DIRECT_SKILL_MARKER_PREFIX = "oms-direct:"
+const CODEX_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
 const OPENCODE_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["sp-", "ai-"])
 const OPENCODE_ROUTER_OWNED_AGENT_PREFIXES = new Set(["spr-", "rt-"])
 
@@ -100,6 +101,14 @@ function isOpenCodeRouterOwnedFile(directory: string, fileName: string, content:
 
   if (directory.endsWith(`${path.sep}.opencode${path.sep}agents`)) {
     return isPrefixOwned(fileName, content, OPENCODE_ROUTER_OWNED_AGENT_PREFIXES)
+  }
+
+  return false
+}
+
+function isCodexRouterOwnedFile(directory: string, fileName: string, content: string) {
+  if (directory.endsWith(`${path.sep}.codex${path.sep}agents`)) {
+    return isPrefixOwned(fileName, content, CODEX_ROUTER_OWNED_AGENT_PREFIXES)
   }
 
   return false
@@ -479,6 +488,7 @@ export async function materializeArtifacts(
           && isQwenOmsControlPlaneFile(fullPath, content)
         )
         || isOpenCodeRouterOwnedFile(directory, entry, content)
+        || isCodexRouterOwnedFile(directory, entry, content)
         || isPrefixOwned(entry, content, prefixes)
 
       if (!isOwnedByDirectoryContract) {

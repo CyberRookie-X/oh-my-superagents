@@ -436,6 +436,29 @@ describe("materializeArtifacts", () => {
     expect(result.exitCode).toBe(0)
   })
 
+  it("removes stale Codex direct agents when syncing superpowers agents", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.codex/agents/rt-plan.toml": "# generated-by: oh-my-superagents; do-not-edit: true\nname = \"rt-plan\"\n",
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "agent",
+          directory: ".codex/agents",
+          fileName: "oms-review.toml",
+          ownerPrefix: "oms-",
+          content: "# generated-by: oh-my-superagents; do-not-edit: true\nname = \"oms-review\"\n",
+        },
+      ],
+      fs,
+    })
+
+    expect(result.removed).toEqual(["/workspace/project/.codex/agents/rt-plan.toml"])
+    expect(removedPaths).toEqual(result.removed)
+  })
+
   it("removes stale OMS OpenCode command files after prefix and name changes", async () => {
     const { fs, removedPaths } = createMemoryFs({
       "/workspace/project/.opencode/commands/oms-status.md": renderOwnedOpenCodeOmsCommand("status", "oms-status"),
