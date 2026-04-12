@@ -74,10 +74,23 @@ export function buildStarterCodexConfig() {
     defaultRoute: "build",
   } satisfies RouterConfig
 
+  const document = {
+    workflow: { kind: "superpowers" as const },
+    presets: {
+      default: {
+        label: "Default",
+        short: "def",
+        profiles: config.profiles,
+        routes: config.routes,
+        defaultRoute: config.defaultRoute,
+      },
+    },
+  }
+
   return {
     path: "oh-my-superagents.config.jsonc",
     config,
-    content: JSON.stringify(config, null, 2),
+    content: JSON.stringify(document, null, 2),
   }
 }
 

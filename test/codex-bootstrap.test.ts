@@ -1,6 +1,6 @@
 import path from "node:path"
 import { describe, expect, it } from "vitest"
-import { createDefaultControlPlaneConfig } from "../src/config.js"
+import { createDefaultControlPlaneConfig, loadControlPlaneConfig } from "../src/config.js"
 import {
   buildCodexBootstrapFiles,
   buildStarterCodexConfig,
@@ -131,6 +131,22 @@ describe("buildStarterCodexConfig", () => {
     expect(result.content).toContain('"codexFast": true')
     expect(result.content).not.toContain('"effort": "fast"')
     expect(result.content).toContain('"defaultRoute": "build"')
+  })
+
+  it("emits starter content that loadControlPlaneConfig can read back", async () => {
+    const starter = buildStarterCodexConfig()
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => starter.content,
+    })
+
+    expect(result.config.workflow.kind).toBe("superpowers")
+    expect(result.config.settings.activePreset).toBe("default")
+    expect(result.config.presets.default.defaultRoute).toBe("build")
   })
 })
 
@@ -666,7 +682,7 @@ describe("runCodexBootstrap", () => {
           },
           readFile: async (filePath: string) => {
             if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
-              return JSON.stringify(buildStarterCodexConfig().config)
+              return buildStarterCodexConfig().content
             }
 
             if (filePath === "/workspace/project/.agents/plugins/marketplace.json") {

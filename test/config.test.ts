@@ -64,39 +64,30 @@ describe("loadControlPlaneConfig", () => {
     })
   })
 
-  it("preserves workflow when migrating legacy router config", async () => {
-    const result = await loadControlPlaneConfig({
-      cwd: "/workspace/project",
-      homeDir: "/home/tester",
-      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
-      exists: async () => true,
-      readFile: async () => `{
-        "workflow": {
-          "kind": "direct",
-          "intents": {
-            "plan": { "label": "Plan" }
-          }
-        },
-        "profiles": {
-          "build": { "model": "openai/gpt-5" }
-        },
-        "routes": {
-          "plan": "build"
-        },
-        "defaultRoute": "build"
-      }`,
-    })
-
-    expect(result.config.workflow.kind).toBe("direct")
-    if (result.config.workflow.kind !== "direct") {
-      throw new Error("Expected direct workflow")
-    }
-
-    expect(result.config.workflow.intents.plan.label).toBe("Plan")
-    expect(result.config.presets.default.routes).toEqual({
-      plan: "build",
-    })
-    expect(result.config.presets.default.defaultRoute).toBe("build")
+  it("rejects workflow on legacy flat config", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "workflow": {
+            "kind": "direct",
+            "intents": {
+              "plan": { "label": "Plan" }
+            }
+          },
+          "profiles": {
+            "build": { "model": "openai/gpt-5" }
+          },
+          "routes": {
+            "plan": "build"
+          },
+          "defaultRoute": "build"
+        }`,
+      }),
+    ).rejects.toThrow(/workflow/i)
   })
 
   it("defaults to the superpowers workflow when workflow is omitted", async () => {
@@ -119,6 +110,55 @@ describe("loadControlPlaneConfig", () => {
     expect((result.config as { workflow?: { kind?: string } }).workflow).toEqual({
       kind: "superpowers",
     })
+  })
+
+  it("accepts a direct workflow with named intents", async () => {
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "workflow": {
+          "kind": "direct",
+          "intents": {
+            "plan": { "label": "Plan" },
+            "build": { "label": "Build" },
+            "review": { "label": "Review" }
+          }
+        },
+        "profiles": {
+          "plan-profile": { "model": "openai/gpt-5" },
+          "build-profile": { "model": "gpt-5.4" }
+        },
+        "lanes": {
+          "frontend": {
+            "label": "Frontend",
+            "routes": { "plan": "plan-profile" },
+            "defaultRoute": "build-profile"
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["frontend"],
+            "defaultLane": "frontend",
+            "routes": {},
+            "defaultRoute": "build-profile"
+          }
+        }
+      }`,
+    })
+
+    expect(result.config.workflow.kind).toBe("direct")
+    if (result.config.workflow.kind !== "direct") {
+      throw new Error("Expected direct workflow")
+    }
+
+    expect(result.config.workflow.intents.plan.label).toBe("Plan")
+    expect(result.config.workflow.intents.build.label).toBe("Build")
+    expect(result.config.lanes.frontend.routes.plan).toBe("plan-profile")
   })
 
   it("rejects mixed-shape config", async () => {
@@ -786,7 +826,7 @@ describe("loadControlPlaneConfig", () => {
 
     expect(schema.properties?.workflow?.$ref).toBe("#/$defs/workflow")
     expect(layeredShape?.properties?.workflow?.$ref).toBe("#/$defs/workflow")
-    expect(legacyShape?.properties?.workflow?.$ref).toBe("#/$defs/workflow")
+    expect(legacyShape?.properties?.workflow).toBeUndefined()
     expect(layeredShape?.properties?.settings?.properties?.commandPrefix?.pattern).toBe("^[a-z0-9-]+$")
     expect(
       layeredShape?.properties?.settings?.properties?.commands?.properties?.status?.properties?.name?.pattern,
