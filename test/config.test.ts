@@ -406,6 +406,79 @@ describe("loadControlPlaneConfig", () => {
     expect(result.config.presets.default.usesLanes).toEqual(["frontend", "backend"])
   })
 
+  it("accepts subagent execution mode on layered config settings", async () => {
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default",
+          "subagentExecution": { "mode": "suggest" }
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        },
+        "lanes": {
+          "frontend": {
+            "label": "Frontend",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["frontend"],
+            "defaultLane": "frontend",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.config.settings.subagentExecution.mode).toBe("suggest")
+  })
+
+  it("defaults subagent execution mode to suggest when omitted", async () => {
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        },
+        "lanes": {
+          "frontend": {
+            "label": "Frontend",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "usesLanes": ["frontend"],
+            "defaultLane": "frontend",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.config.settings.subagentExecution.mode).toBe("suggest")
+  })
+
   it("rejects a preset that references a missing lane", async () => {
     await expect(
       loadControlPlaneConfig({
@@ -839,6 +912,11 @@ describe("loadControlPlaneConfig", () => {
                   mode?: { enum?: string[] }
                 }
               }
+              subagentExecution?: {
+                properties?: {
+                  mode?: { enum?: string[]; default?: string }
+                }
+              }
               commands?: {
                 properties?: {
                   status?: {
@@ -925,6 +1003,14 @@ describe("loadControlPlaneConfig", () => {
       "suggest",
       "auto",
     ])
+    expect(layeredShape?.properties?.settings?.properties?.subagentExecution?.properties?.mode?.enum).toEqual([
+      "manual",
+      "suggest",
+      "auto",
+    ])
+    expect(layeredShape?.properties?.settings?.properties?.subagentExecution?.properties?.mode?.default).toBe(
+      "suggest",
+    )
     expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.extends?.type).toBe("string")
     expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.extends?.minLength).toBe(1)
     expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.short?.pattern).toBe(
