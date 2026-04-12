@@ -29,13 +29,14 @@ type RuntimeAgentMetadata = {
   agents: Record<string, { profile: string; codexFast: boolean; profiles?: string[] }>
 }
 
-export const OhMySuperpowersPlugin: Plugin = async ({ client, directory }) => {
+export const OhMySuperpowersPlugin: Plugin = async ({ client, directory, worktree }) => {
   const log = createPluginLogger(client as PluginClient)
+  const rootDirectory = worktree ?? directory
   let compatibilityMode: SuperpowersCompatibilityMode = "warn"
   let shouldReportCompatibility = true
 
   try {
-    const { config } = await loadRouterConfig({ cwd: directory })
+    const { config } = await loadRouterConfig({ cwd: rootDirectory })
     compatibilityMode = config.superpowersCompatibility.mode
 
     void log("info", "router config loaded")
@@ -65,7 +66,7 @@ export const OhMySuperpowersPlugin: Plugin = async ({ client, directory }) => {
 
   if (shouldReportCompatibility) {
     void reportCompatibilityDiagnostics({
-      cwd: directory,
+      cwd: rootDirectory,
       policyMode: compatibilityMode,
       log,
     })
@@ -73,7 +74,7 @@ export const OhMySuperpowersPlugin: Plugin = async ({ client, directory }) => {
 
   return {
     "chat.params": async (input, output) => {
-      const metadata = await readRuntimeAgentMetadata(directory)
+      const metadata = await readRuntimeAgentMetadata(rootDirectory)
 
       if (metadata?.agents[input.agent]?.codexFast) {
         output.options.serviceTier = "fast"

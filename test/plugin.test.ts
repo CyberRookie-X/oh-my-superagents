@@ -83,9 +83,13 @@ function createCompatibilityResult(
   }
 }
 
-function createPluginInput(logs: unknown[]) {
+function createPluginInput(
+  logs: unknown[],
+  overrides: Partial<{ directory: string; worktree: string }> = {},
+) {
   return {
     directory: "/workspace/project",
+    worktree: "/workspace/project",
     client: {
       app: {
         log: async (entry: unknown) => {
@@ -93,6 +97,7 @@ function createPluginInput(logs: unknown[]) {
         },
       },
     },
+    ...overrides,
   } as never
 }
 
@@ -167,6 +172,47 @@ describe("OhMySuperpowersPlugin", () => {
     )
 
     const hooks = await OhMySuperpowersPlugin(createPluginInput([]))
+    const output = {
+      temperature: 0,
+      topP: 1,
+      topK: 40,
+      maxOutputTokens: undefined,
+      options: {},
+    }
+
+    await hooks["chat.params"]?.(
+      {
+        sessionID: "s1",
+        agent: "spr-build",
+        model: {} as never,
+        provider: { source: "config", info: {} as never, options: {} },
+        message: {} as never,
+      },
+      output,
+    )
+
+    expect(output.options.serviceTier).toBe("fast")
+  })
+
+  it("patches chat params from worktree-root runtime metadata when the session directory is a subdirectory", async () => {
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      expect(filePath).toBe("/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json")
+
+      return JSON.stringify({
+        agents: {
+          "spr-build": {
+            profile: "build",
+            profiles: ["build"],
+            codexFast: true,
+          },
+        },
+      })
+    })
+
+    const hooks = await OhMySuperpowersPlugin(createPluginInput([], {
+      directory: "/workspace/project/packages/app",
+      worktree: "/workspace/project",
+    }))
     const output = {
       temperature: 0,
       topP: 1,
