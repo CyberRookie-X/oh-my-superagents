@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { buildRoutingProposal, inspectRoutingAuthoringInputs } from "../src/author-routing.js"
+import { resolveRoute } from "../src/router.js"
 
 describe("inspectRoutingAuthoringInputs", () => {
   it("detects likely frontend/backend lanes from repo signals", async () => {
@@ -111,4 +112,60 @@ describe("buildRoutingProposal", () => {
       },
     })
   })
+
+  it("emits only supported intents for a review-only zero-lane direct proposal", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: [],
+      inventory: {
+        models: {
+          "review-heavy": {
+            model: "anthropic/claude-sonnet-4-5-20250929",
+            specialties: ["review"],
+          },
+        },
+      },
+    })
+
+    expect(proposal.workflow).toEqual({
+      kind: "direct",
+      intents: {
+        review: { label: "Review" },
+      },
+    })
+    expect(proposal.presets.default.routes).toEqual({
+      review: "review-heavy",
+    })
+  })
+
+  it("routes zero-lane direct review intents to the review profile", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: [],
+      inventory: {
+        models: {
+          "review-heavy": {
+            model: "anthropic/claude-sonnet-4-5-20250929",
+            specialties: ["review"],
+          },
+          "worker-build": {
+            model: "openai/gpt-5",
+            specialties: ["build"],
+          },
+        },
+      },
+    })
+
+    expect(resolveRoute(asRouterConfig(proposal), "review").profileId).toBe("review-heavy")
+  })
 })
+
+function asRouterConfig(proposal: ReturnType<typeof buildRoutingProposal>) {
+  return {
+    workflow: proposal.workflow,
+    profiles: proposal.profiles,
+    lanes: proposal.lanes,
+    routes: proposal.presets.default.routes,
+    defaultRoute: proposal.presets.default.defaultRoute,
+  }
+}

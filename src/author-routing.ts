@@ -125,20 +125,30 @@ export function buildRoutingProposal({
   ) as Record<string, ControlPlaneLane>
 
   const defaultLane = lanes[0]
+  const zeroLaneBuildRoute = lanes.length === 0 ? pickGenericIntentProfileId(inventoryEntries, lanes, BUILD_INTENT) : undefined
   const zeroLaneReviewRoute = lanes.length === 0 ? pickGenericIntentProfileId(inventoryEntries, lanes, REVIEW_INTENT) : undefined
   const defaultRoute = defaultLane
     ? proposedLanes[defaultLane].defaultRoute
-    : pickGenericIntentProfileId(inventoryEntries, lanes, BUILD_INTENT) ?? inventoryEntries[0][0]
+    : zeroLaneBuildRoute ?? zeroLaneReviewRoute ?? inventoryEntries[0][0]
   profiles[defaultRoute] ??= toProfile(inventory.models[defaultRoute])
 
   if (zeroLaneReviewRoute) {
     profiles[zeroLaneReviewRoute] ??= toProfile(inventory.models[zeroLaneReviewRoute])
   }
 
-  const intents = createDirectIntents(defaultRoute, proposedLanes, zeroLaneReviewRoute)
+  const hasLaneReviewRoute = Object.values(proposedLanes).some((lane) => Boolean(lane.routes.review))
+  const presetRoutes: Record<string, string> = {}
+
+  if (zeroLaneReviewRoute) {
+    presetRoutes.review = zeroLaneReviewRoute
+  }
+
+  const workflow = mode === "direct"
+    ? { kind: "direct" as const, intents: createDirectIntents(Boolean(defaultLane || zeroLaneBuildRoute), Boolean(hasLaneReviewRoute || zeroLaneReviewRoute)) }
+    : { kind: "superpowers" as const }
 
   return {
-    workflow: mode === "direct" ? { kind: "direct", intents } : { kind: "superpowers" },
+    workflow,
     profiles,
     lanes: proposedLanes,
     presets: {
@@ -147,7 +157,7 @@ export function buildRoutingProposal({
         short: "def",
         usesLanes: lanes,
         defaultLane,
-        routes: {},
+        routes: presetRoutes,
         defaultRoute,
       },
     },
@@ -222,24 +232,11 @@ function toProfile(model: ModelInventory["models"][string]): ControlPlaneProfile
   }
 }
 
-function createDirectIntents(
-  defaultRoute: string,
-  lanes: Record<string, ControlPlaneLane>,
-  reviewRoute?: string,
-) {
-  const intents: Record<string, DirectIntentConfig> = {}
-
-  if (defaultRoute) {
-    intents.build = { label: "Build" }
+function createDirectIntents(buildSupported: boolean, reviewSupported: boolean): Record<string, DirectIntentConfig> {
+  return {
+    ...(buildSupported ? { build: { label: "Build" } } : {}),
+    ...(reviewSupported ? { review: { label: "Review" } } : {}),
   }
-
-  const laneValues = Object.values(lanes)
-
-  if (reviewRoute || laneValues.some((lane) => Boolean(lane.routes.review))) {
-    intents.review = { label: "Review" }
-  }
-
-  return intents
 }
 
 function titleCase(value: string) {
