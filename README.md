@@ -4,13 +4,14 @@
 
 Architecture: [English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-Thin routing and host-local OMS control-plane support for `superpowers` on OpenCode, Codex, and Qwen.
+Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, and Qwen, with first-class `superpowers` support and an experimental OpenCode-first direct mode.
 
 ## Support Matrix
 
 | Capability | OpenCode | Codex | Qwen | Claude Code |
 | --- | --- | --- | --- | --- |
-| Phase routing | Full | Full | Partial | Not planned |
+| `superpowers` workflow routing | Full | Full | Partial | Not planned |
+| Direct mode | Experimental | None yet | None yet | Not planned |
 | OMS control plane | Full | Full | Full | Not planned |
 | Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | Not planned |
 | Compatibility monitor | Full | Full | None yet | Not planned |
@@ -21,6 +22,7 @@ Thin routing and host-local OMS control-plane support for `superpowers` on OpenC
 Support level notes:
 
 - `Full`: implemented and part of the supported surface
+- `Experimental`: implemented for the first generic slice and expected to evolve
 - `Partial`: implemented with explicit stage limits documented below
 - `None yet`: not implemented in the current release
 - `Not planned`: intentionally out of scope for now
@@ -32,17 +34,18 @@ Feature notes:
 
 ## Implementation Footprint
 
-The project is intentionally split into a thin host adapter layer plus a shared OMS core.
+The project is intentionally split into a shared OMS core plus thin workflow and host adapter layers.
 The table below uses current source line counts from the implementation files only; it excludes tests and docs.
 
 | Layer | Main files | Approx. source LOC | Thickness |
 | --- | --- | ---: | --- |
-| OMS control plane core | `src/control-plane.ts`, `src/config.ts`, `src/cli.ts` | 1853 | Medium |
-| OpenCode adapter | `src/opencode.ts` | 242 | Thin |
-| Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 565 | Medium |
+| OMS control plane core | `src/control-plane.ts`, `src/config.ts`, `src/cli.ts` | 3213 | Medium |
+| Workflow adapters | `src/router.ts`, `src/workflow-superpowers.ts` | 152 | Thin |
+| OpenCode adapter | `src/opencode.ts` | 399 | Thin |
+| Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 624 | Medium |
 | Qwen adapter | `src/qwen.ts` | 220 | Thin |
 | Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1051 | Medium |
-| Shared artifact reconciliation | `src/materialize.ts` | 345 | Thin-to-medium |
+| Shared artifact reconciliation | `src/materialize.ts` | 429 | Thin-to-medium |
 
 How to read this:
 
@@ -52,30 +55,44 @@ How to read this:
 
 ## Scope
 
-`oh-my-superagents` only targets hosts where `superpowers` still lacks a thin, host-native routing layer.
+`oh-my-superagents` is evolving into a broader routing and control-plane product.
+Today it still ships first-class `superpowers` support across the supported hosts, and the first generic slice is an experimental OpenCode direct mode.
+
 It is not a cross-host configuration sync tool.
-The supported surface for this early release is the CLI, generated host artifacts, packaged plugin entrypoints, the Stage 1 OMS control plane, the Stage 2 Qwen adapter, and the current `oh-my-superagents/library` export surface.
+The supported surface for this release is the CLI, generated host artifacts, packaged plugin entrypoints, the Stage 1 OMS control plane, the Stage 2 Qwen adapter, the experimental OpenCode direct-mode slice, and the current `oh-my-superagents/library` export surface.
 
 Today that means:
 
-- OpenCode: supported
-- Codex: supported
-- Qwen: supported with a limited Stage 2 surface
+- OpenCode: supported for `superpowers` workflow routing and the experimental direct-mode slice
+- Codex: supported for `superpowers` workflow routing
+- Qwen: supported with a limited Stage 2 surface for `superpowers` workflow routing
 - Claude Code: intentionally out of scope for now because Claude already provides strong native subagents, per-agent model selection, effort controls, and plugin distribution
 
 ## What It Does
 
 - Reads layered `oh-my-superagents.config.jsonc` from global and project locations
-- Resolves built-in `superpowers` phases to profiles from the active preset
+- Resolves built-in `superpowers` phases across supported hosts and user-defined direct intents for OpenCode
 - Generates `.opencode/agents/*.md` and `.opencode/commands/*.md`
 - Generates `.codex/agents/*.toml`
 - Generates `.qwen/agents/*.md` and `.qwen/commands/*.md`
 - Exposes `status`, `use`, `disable`, `sync`, `doctor`, `explain`, and `bootstrap` CLIs
 - Ships a minimal OpenCode plugin entrypoint for startup diagnostics
 
+## OpenCode Direct Mode
+
+The first generic-routing slice is an experimental direct workflow on OpenCode.
+
+- It uses user-defined intents and renders OpenCode-native `ai-<intent>` commands plus `rt-<intent>` agents.
+- It currently applies only to `--host opencode`.
+- The supported direct-mode control-plane surface is `status`, `doctor`, `explain`, and `sync`.
+- It does not require upstream `superpowers` to render or explain direct-mode OpenCode artifacts.
+
 ## Install
 
-Install upstream `superpowers` separately, then use the host-specific flow you need:
+For `superpowers` workflow mode, install upstream `superpowers` separately, then use the host-specific flow you need.
+For the experimental OpenCode direct mode, upstream `superpowers` is not required.
+
+Host-specific flow:
 
 - OpenCode: add `oh-my-superagents` to your OpenCode plugin list
 - Codex: use the packaged CLI to run `bootstrap --host codex`

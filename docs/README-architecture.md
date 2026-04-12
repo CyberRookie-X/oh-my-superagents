@@ -5,7 +5,8 @@ It is intentionally focused on structure and tradeoffs, not installation or comm
 
 ## Design Goal
 
-`oh-my-superagents` exists to fill the gaps a host still has when running `superpowers`.
+`oh-my-superagents` is evolving from a `superpowers`-first router into a broader routing and control-plane product.
+The current architecture keeps first-class `superpowers` support while adding an experimental OpenCode-first direct mode as the first generic slice.
 
 It is not:
 
@@ -21,7 +22,7 @@ That keeps host-specific code replaceable while preserving one consistent model 
 
 ## Layering
 
-The current architecture has five layers.
+The current architecture has six layers.
 
 ### 1. Control Plane Core
 
@@ -45,7 +46,26 @@ Why it is thicker:
 - all supported hosts depend on it
 - config and lifecycle rules must stay consistent across hosts
 
-### 2. Host Adapters
+### 2. Workflow Adapters
+
+Main files:
+
+- `src/router.ts`
+- `src/workflow-superpowers.ts`
+
+Responsibilities:
+
+- keep workflow-specific route vocabularies out of the generic route resolver
+- preserve `superpowers` as a first-party workflow adapter
+- let the OpenCode direct-mode slice resolve user-defined intents without upstream workflow-tool dependencies
+
+Why this layer now exists:
+
+- the router core is broader than one upstream phase catalog
+- `superpowers` support remains first-class, but it no longer has to define the entire product identity
+- direct mode can stay thin when adapter assumptions are explicit
+
+### 3. Host Adapters
 
 Main files:
 
@@ -65,7 +85,7 @@ Why these stay thinner:
 - they should be mostly rendering and translation layers
 - host-specific differences should not leak back into the core model unless unavoidable
 
-### 3. Compatibility Monitor
+### 4. Compatibility Monitor
 
 Main files:
 
@@ -83,7 +103,7 @@ Why it is medium-sized:
 - it is shared across hosts
 - detection is host-specific, but policy is shared
 
-### 4. Artifact Reconciliation
+### 5. Artifact Reconciliation
 
 Main file:
 
@@ -100,7 +120,7 @@ Why it stays separate:
 - every host eventually needs the same ownership and cleanup guarantees
 - it is easier to reason about cleanup centrally than inside each adapter
 
-### 5. Docs and Plans
+### 6. Docs and Plans
 
 Key locations:
 
@@ -123,11 +143,13 @@ Main characteristics:
 
 - native plugin entrypoint
 - project-local agents and commands
+- first host for the experimental direct-mode slice
 - good fit for thin generated wrappers
 
 Architectural consequence:
 
 - OpenCode gets a thin plugin plus generated artifacts
+- OpenCode is where the first generic direct workflow currently lives
 - host integration is relatively direct
 
 ### Codex
@@ -163,12 +185,13 @@ They exclude tests and documentation.
 
 | Layer | Main files | Approx. source LOC | Thickness |
 | --- | --- | ---: | --- |
-| OMS control plane core | `src/control-plane.ts`, `src/config.ts`, `src/cli.ts` | 1853 | Medium |
-| OpenCode adapter | `src/opencode.ts` | 242 | Thin |
-| Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 565 | Medium |
+| OMS control plane core | `src/control-plane.ts`, `src/config.ts`, `src/cli.ts` | 3213 | Medium |
+| Workflow adapters | `src/router.ts`, `src/workflow-superpowers.ts` | 152 | Thin |
+| OpenCode adapter | `src/opencode.ts` | 399 | Thin |
+| Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 624 | Medium |
 | Qwen adapter | `src/qwen.ts` | 220 | Thin |
 | Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1051 | Medium |
-| Shared artifact reconciliation | `src/materialize.ts` | 345 | Thin-to-medium |
+| Shared artifact reconciliation | `src/materialize.ts` | 429 | Thin-to-medium |
 
 Interpretation:
 
@@ -184,8 +207,10 @@ The important signal is that the shared OMS core is intentionally thicker than a
 This shape gives the project three useful properties:
 
 1. Host adapters can stay replaceable.
-2. OMS semantics stay consistent across supported hosts.
-3. New host support can be evaluated by asking one question:
+2. `superpowers` stays first-class without owning the whole product identity.
+3. OMS semantics stay consistent across supported hosts and modes.
+
+New host support can be evaluated by asking one question:
 
 > Does this host still have a real gap that OMS can fill without turning OMS into a host-specific framework?
 
