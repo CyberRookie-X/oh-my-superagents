@@ -257,6 +257,21 @@ async function buildAuthorRoutingPreview(
     { effectiveConfig },
   )
   const renderedDocument = renderRoutingConfigDocument(nextDocument)
+  const operation = hasExistingConfig ? "update" : "create"
+  const summaryText = formatAuthorRoutingSummary({
+    mode,
+    write,
+    operation,
+    targetPath,
+    suggestedLanes: authoringInputs.suggestedLanes,
+    proposal,
+  })
+  const diffText = formatAuthorRoutingDiff({
+    mode,
+    operation,
+    targetPath,
+    proposal,
+  })
 
   if (write) {
     await deps.mkdir(path.dirname(targetPath), { recursive: true })
@@ -275,7 +290,7 @@ async function buildAuthorRoutingPreview(
     proposedPresets: proposal.presets,
     preview: {
       path: targetPath,
-      operation: hasExistingConfig ? "update" : "create",
+      operation,
       patch: {
         workflow: proposal.workflow,
         profiles: proposal.profiles,
@@ -284,8 +299,62 @@ async function buildAuthorRoutingPreview(
       },
       rendered: renderedDocument,
     },
+    summaryText,
+    diffText,
     written: write,
   }
+}
+
+function formatAuthorRoutingSummary(input: {
+  mode: "superpowers" | "direct"
+  write: boolean
+  operation: "create" | "update"
+  targetPath: string
+  suggestedLanes: string[]
+  proposal: ReturnType<typeof buildRoutingProposal>
+}) {
+  const lanes = input.suggestedLanes.length > 0 ? input.suggestedLanes.join(", ") : "none"
+  const profiles = Object.keys(input.proposal.profiles).join(", ")
+  const presets = Object.keys(input.proposal.presets).join(", ")
+
+  return [
+    `Routing authoring ${input.write ? "write" : "preview"}`,
+    `Mode: ${input.mode}`,
+    `Operation: ${input.operation}`,
+    `Target: ${input.targetPath}`,
+    `Detected lanes: ${lanes}`,
+    `Profiles: ${profiles}`,
+    `Presets: ${presets}`,
+  ].join("\n")
+}
+
+function formatAuthorRoutingDiff(input: {
+  mode: "superpowers" | "direct"
+  operation: "create" | "update"
+  targetPath: string
+  proposal: ReturnType<typeof buildRoutingProposal>
+}) {
+  const laneKeys = Object.keys(input.proposal.lanes)
+  const profileKeys = Object.keys(input.proposal.profiles)
+
+  return [
+    `Target: ${input.targetPath}`,
+    `Operation: ${input.operation}`,
+    `Workflow: ${input.mode}`,
+    `Profiles: ${profileKeys.length > 0 ? profileKeys.join(", ") : "none"}`,
+    `Lanes: ${laneKeys.length > 0 ? laneKeys.join(", ") : "none"}`,
+    `Default preset route: ${input.proposal.presets.default.defaultRoute}`,
+    `Preset routes: ${formatAuthorRoutingRoutes(input.proposal.presets.default.routes)}`,
+  ].join("\n")
+}
+
+function formatAuthorRoutingRoutes(routes: Record<string, string>) {
+  const routeEntries = Object.entries(routes)
+  if (routeEntries.length === 0) {
+    return "none"
+  }
+
+  return routeEntries.map(([routeId, profileId]) => `${routeId}->${profileId}`).join(", ")
 }
 
 function formatCompatibilityWarning(result: SuperpowersCompatibilityResult | null) {

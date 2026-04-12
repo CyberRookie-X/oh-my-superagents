@@ -1523,6 +1523,10 @@ describe("runCli", () => {
     expect(output.summary.profiles).toContain("builder")
     expect(output.summary.presets).toContain("default")
     expect(output.preview.path).toContain("oh-my-superagents.config.jsonc")
+    expect(output.summaryText).toContain("Routing authoring preview")
+    expect(output.summaryText).toContain("frontend")
+    expect(output.diffText).toContain("Workflow:")
+    expect(output.diffText).toContain("Profiles:")
     expect(output.written).toBe(false)
   })
 
@@ -1638,6 +1642,10 @@ describe("runCli", () => {
     expect(writtenPath).toContain("oh-my-superagents.config.jsonc")
     expect(writtenContent).toContain('"profiles"')
     expect(writtenContent).toContain('"settings"')
+    expect(output.summaryText).toContain("Routing authoring write")
+    expect(output.summaryText).toContain("builder")
+    expect(output.diffText).toContain("Target:")
+    expect(output.diffText).toContain("Operation:")
   })
 
   it("evolves an existing global config when --write is used without a project config", async () => {
