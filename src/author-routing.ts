@@ -182,14 +182,15 @@ export function applyRoutingProposalToConfig(
   existingConfig?: LayeredRoutingSections,
 ): LayeredRoutingSections {
   const baseConfig = existingConfig ?? createDefaultAuthorRoutingDocument()
-  const modeChanged = baseConfig.workflow?.kind && baseConfig.workflow.kind !== proposal.workflow.kind
+  const baseWorkflowKind = baseConfig.workflow?.kind ?? "superpowers"
+  const modeChanged = baseWorkflowKind !== proposal.workflow.kind
   const presets = modeChanged
     ? { default: proposal.presets.default }
     : {
         ...(baseConfig.presets ?? {}),
         default: mergeDefaultPreset(baseConfig.presets?.default, proposal.presets.default),
       }
-  const settings = normalizeDefaultLane(baseConfig.settings, proposal.presets.default)
+  const settings = normalizeDefaultLane(baseConfig.settings, presets.default)
 
   return {
     ...baseConfig,

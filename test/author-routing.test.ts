@@ -381,7 +381,7 @@ describe("buildRoutingProposal", () => {
     })
 
     const document = applyRoutingProposalToConfig(proposal, {
-      workflow: { kind: "direct", intents: { build: { label: "Build" } } },
+      workflow: { kind: "superpowers" },
       settings: {
         activePreset: "default",
         enabled: true,
@@ -401,7 +401,7 @@ describe("buildRoutingProposal", () => {
       lanes: {
         ops: {
           label: "Ops",
-          routes: {},
+          routes: { brainstorming: "builder" },
           defaultRoute: "builder",
         },
       },
@@ -411,13 +411,133 @@ describe("buildRoutingProposal", () => {
           short: "def",
           usesLanes: ["ops"],
           defaultLane: "ops",
-          routes: {},
+          routes: { brainstorming: "builder" },
           defaultRoute: "builder",
         },
       },
     })
 
     expect(document.settings?.defaultLane).toBeNull()
+  })
+
+  it("treats an omitted base workflow as implicit superpowers when switching to direct", async () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: ["frontend"],
+      inventory: {
+        models: {
+          builder: { model: "openai/gpt-5", specialties: ["frontend", "build"] },
+        },
+      },
+    })
+
+    const document = applyRoutingProposalToConfig(proposal, {
+      settings: {
+        activePreset: "default",
+        enabled: true,
+        commandPrefix: "oms",
+        laneSelection: { mode: "suggest" },
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      profiles: {
+        existing: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+      },
+      lanes: {
+        ops: {
+          label: "Ops",
+          routes: { brainstorming: "existing" },
+          defaultRoute: "existing",
+        },
+      },
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          routes: { brainstorming: "existing" },
+          usesLanes: ["ops"],
+          defaultLane: "ops",
+          defaultRoute: "existing",
+        },
+      },
+    })
+
+    const rendered = renderRoutingConfigDocument(document)
+    const loaded = await loadRouterConfig({
+      cwd: "/workspace/project",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async (filePath) => filePath === "/workspace/project/oh-my-superagents.config.jsonc",
+      readFile: async () => rendered,
+    })
+
+    expect(document.lanes).toEqual(proposal.lanes)
+    expect(document.presets.default.routes).toEqual(proposal.presets.default.routes)
+    expect(loaded.config.workflow).toEqual({
+      kind: "direct",
+      intents: {
+        build: { label: "Build" },
+      },
+    })
+  })
+
+  it("keeps a retained defaultLane when the merged preset still allows it", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: ["frontend"],
+      inventory: {
+        models: {
+          builder: { model: "openai/gpt-5", specialties: ["frontend", "build"] },
+        },
+      },
+    })
+
+    const document = applyRoutingProposalToConfig(proposal, {
+      workflow: { kind: "direct", intents: { build: { label: "Build" }, review: { label: "Review" } } },
+      settings: {
+        activePreset: "default",
+        enabled: true,
+        defaultLane: "ops",
+        commandPrefix: "oms",
+        laneSelection: { mode: "suggest" },
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      profiles: {
+        reviewer: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+      },
+      lanes: {
+        ops: {
+          label: "Ops",
+          routes: { review: "reviewer" },
+          defaultRoute: "reviewer",
+        },
+      },
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          usesLanes: ["ops"],
+          defaultLane: "ops",
+          routes: { review: "reviewer" },
+          defaultRoute: "reviewer",
+        },
+      },
+    })
+
+    expect(document.presets.default.usesLanes).toEqual(["ops", "frontend"])
+    expect(document.settings?.defaultLane).toBe("ops")
   })
 })
 
