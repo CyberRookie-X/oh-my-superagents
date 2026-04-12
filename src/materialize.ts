@@ -100,9 +100,8 @@ function isOpenCodeRouterOwnedFile(directory: string, fileName: string, content:
   return false
 }
 
-function isOpenCodeRuntimeMetadataFile(filePath: string, content: string) {
+function isOpenCodeRuntimeMetadataFile(filePath: string) {
   return filePath.endsWith(`${path.sep}${RUNTIME_AGENT_METADATA_DIRECTORY.replace(/\//g, path.sep)}${path.sep}${RUNTIME_AGENT_METADATA_FILE}`)
-    && hasArtifactOwnershipMarker(content)
 }
 
 function parseControlPlaneOwnership(content: string) {
@@ -284,7 +283,7 @@ function isArtifactOwnedByCurrentContract(
   }
 
   if (artifact.directory === RUNTIME_AGENT_METADATA_DIRECTORY && artifact.fileName === RUNTIME_AGENT_METADATA_FILE) {
-    return isOpenCodeRuntimeMetadataFile(existingPath, existingContent)
+    return isOpenCodeRuntimeMetadataFile(existingPath)
   }
 
   return isPrefixOwned(artifact.fileName, existingContent, new Set([artifact.ownerPrefix]))
@@ -378,10 +377,7 @@ export async function materializeArtifacts(
           opencodeOmsCommandDirectories.has(directory)
           && isOpenCodeOmsControlPlaneFile(fullPath, content)
         )
-        || (
-          opencodeRuntimeMetadataDirectories.has(directory)
-          && isOpenCodeRuntimeMetadataFile(fullPath, content)
-        )
+        || (opencodeRuntimeMetadataDirectories.has(directory) && isOpenCodeRuntimeMetadataFile(fullPath))
         || (
           qwenOmsCommandDirectories.has(directory)
           && isQwenOmsControlPlaneFile(fullPath, content)

@@ -39,6 +39,7 @@ import {
   buildArtifacts,
   listRenderedOpenCodeControlPlaneCommands,
   RUNTIME_AGENT_METADATA_DIRECTORY,
+  RUNTIME_AGENT_METADATA_FILE,
 } from "./opencode.js"
 import { buildQwenArtifacts } from "./qwen.js"
 import { explainAll, explainPhase, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
@@ -1032,6 +1033,10 @@ async function discoverOwnedArtifacts(
       }
 
       const filePath = path.join(directory, entry)
+      const isOpenCodeRuntimeMetadata =
+        host === "opencode"
+        && rule.directory === RUNTIME_AGENT_METADATA_DIRECTORY
+        && entry === RUNTIME_AGENT_METADATA_FILE
 
       try {
         const stats = await deps.artifactStat(filePath)
@@ -1039,9 +1044,11 @@ async function discoverOwnedArtifacts(
           continue
         }
 
-        const content = await deps.readArtifactFile(filePath)
-        if (!hasArtifactOwnershipMarker(content)) {
-          continue
+        if (!isOpenCodeRuntimeMetadata) {
+          const content = await deps.readArtifactFile(filePath)
+          if (!hasArtifactOwnershipMarker(content)) {
+            continue
+          }
         }
 
         discovered.add(filePath)

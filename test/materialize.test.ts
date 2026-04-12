@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { materializeArtifacts } from "../src/materialize.js"
-import { buildArtifacts } from "../src/opencode.js"
+import {
+  RUNTIME_AGENT_METADATA_DIRECTORY,
+  RUNTIME_AGENT_METADATA_FILE,
+  RUNTIME_AGENT_METADATA_OWNER_PREFIX,
+} from "../src/opencode.js"
 
 const OWNERSHIP_MARKER = "<!-- generated-by: oh-my-superagents; do-not-edit: true -->"
 
@@ -294,23 +298,28 @@ describe("materializeArtifacts", () => {
     expect(result.removed).toEqual([])
   })
 
-  it("treats existing OpenCode runtime metadata as OMS-owned on repeated sync", async () => {
-    const runtimeArtifact = buildArtifacts({
-      workflow: { kind: "superpowers" },
-      profiles: {
-        build: { model: "gpt-5.4", codexFast: true },
-      },
-      routes: {},
-      defaultRoute: "build",
-    } as never).commands.find((artifact) => artifact.fileName === "runtime-agent-metadata.json")
-
-    expect(runtimeArtifact).toBeDefined()
+  it("treats existing OpenCode runtime metadata as OMS-owned on repeated sync without a marker", async () => {
+    const runtimeArtifact = {
+      kind: "command" as const,
+      directory: RUNTIME_AGENT_METADATA_DIRECTORY,
+      fileName: RUNTIME_AGENT_METADATA_FILE,
+      ownerPrefix: RUNTIME_AGENT_METADATA_OWNER_PREFIX,
+      content: JSON.stringify({
+        agents: {
+          "spr-build": {
+            profile: "build",
+            profiles: ["build"],
+            codexFast: true,
+          },
+        },
+      }, null, 2),
+    }
 
     const result = await materializeArtifacts({
       cwd: "/workspace/project",
-      artifacts: runtimeArtifact ? [runtimeArtifact] : [],
+      artifacts: [runtimeArtifact],
       fs: createMemoryFs({
-        "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json": runtimeArtifact?.content ?? "",
+        "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json": runtimeArtifact.content,
       }).fs,
     })
 

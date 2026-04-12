@@ -1,4 +1,3 @@
-import { parse, type ParseError } from "jsonc-parser"
 import { describe, expect, it } from "vitest"
 import { createDefaultControlPlaneConfig, type ControlPlaneConfig, type RouterConfig } from "../src/config.js"
 import * as opencode from "../src/opencode.js"
@@ -26,14 +25,9 @@ function createRouterConfig(): RouterConfig {
 }
 
 function parseRuntimeMetadata(content: string) {
-  const errors: ParseError[] = []
-  const parsed = parse(content, errors) as {
-    agents: Record<string, { profiles: string[]; codexFast: boolean }>
+  return JSON.parse(content) as {
+    agents: Record<string, { profile: string; profiles: string[]; codexFast: boolean }>
   }
-
-  expect(errors).toEqual([])
-
-  return parsed
 }
 
 describe("renderAgentFile", () => {
@@ -122,10 +116,11 @@ describe("buildArtifacts", () => {
 
     expect(runtimeFile).toBeDefined()
     expect(runtimeFile?.directory).toBe(".opencode/oh-my-superagents")
-    expect(runtimeFile?.content).toContain("generated-by: oh-my-superagents")
+    expect(runtimeFile?.content).not.toContain("generated-by: oh-my-superagents")
     expect(parseRuntimeMetadata(runtimeFile?.content ?? "")).toEqual({
       agents: expect.objectContaining({
         "spr-build": {
+          profile: "build",
           profiles: ["build"],
           codexFast: true,
         },
@@ -150,10 +145,12 @@ describe("buildArtifacts", () => {
     expect(parseRuntimeMetadata(runtimeFile?.content ?? "")).toEqual({
       agents: expect.objectContaining({
         "spr-strategy": {
+          profile: "strategy",
           profiles: ["strategy"],
           codexFast: false,
         },
         "spr-build": {
+          profile: "build",
           profiles: ["build"],
           codexFast: true,
         },
@@ -181,6 +178,7 @@ describe("buildArtifacts", () => {
     expect(parseRuntimeMetadata(runtimeFile?.content ?? "")).toEqual({
       agents: expect.objectContaining({
         "spr-visual": {
+          profile: "visualA",
           profiles: ["visualA", "visualB"],
           codexFast: false,
         },

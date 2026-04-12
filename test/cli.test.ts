@@ -3157,12 +3157,31 @@ describe("runCli", () => {
       defaultRoute: controlPlaneConfig.presets.default.defaultRoute,
       superpowersCompatibility: controlPlaneConfig.settings.superpowersCompatibility,
     } as never, controlPlaneConfig.settings)
-    const artifactFiles = Object.fromEntries(
-      [...built.agents, ...built.commands].map((artifact) => [
+    const artifactFiles = Object.fromEntries([
+      ...built.agents.map((artifact) => [
         path.join("/workspace/project", artifact.directory, artifact.fileName),
         artifact.content,
       ]),
-    )
+      ...built.commands.map((artifact) => [
+        path.join("/workspace/project", artifact.directory, artifact.fileName),
+        artifact.fileName === "runtime-agent-metadata.json"
+          ? JSON.stringify({
+              agents: {
+                "spr-strategy": {
+                  profile: "strategy",
+                  profiles: ["strategy"],
+                  codexFast: false,
+                },
+                "spr-build": {
+                  profile: "build",
+                  profiles: ["build"],
+                  codexFast: false,
+                },
+              },
+            }, null, 2)
+          : artifact.content,
+      ]),
+    ])
 
     const result = await runCli(["status", "--host", "opencode"], createCliDeps({
       buildArtifacts: buildOpenCodeArtifacts,

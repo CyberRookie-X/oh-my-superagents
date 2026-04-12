@@ -13,7 +13,6 @@ export const MARKER_TEXT = "generated-by: oh-my-superagents; do-not-edit: true"
 export const MARKER = `<!-- ${MARKER_TEXT} -->`
 export const CONTROL_PLANE_MARKER_PREFIX = "oms-control-plane:"
 export const AUXILIARY_MARKER_PREFIX = "oms-auxiliary:"
-const JSONC_MARKER = `// ${MARKER_TEXT}`
 
 type PermissionTask = Record<string, "allow" | "deny" | "ask">
 
@@ -239,14 +238,14 @@ function buildTemporaryDisableHelperArtifact(): GeneratedArtifact {
 }
 
 function buildRuntimeAgentMetadataArtifact(
-  agents: Map<string, { profiles: string[]; codexFast: boolean }>,
+  agents: Map<string, { profile: string; profiles: string[]; codexFast: boolean }>,
 ): GeneratedArtifact {
   return {
     kind: "command",
     directory: RUNTIME_AGENT_METADATA_DIRECTORY,
     fileName: RUNTIME_AGENT_METADATA_FILE,
     ownerPrefix: RUNTIME_AGENT_METADATA_OWNER_PREFIX,
-    content: `${JSONC_MARKER}\n${JSON.stringify({ agents: Object.fromEntries(agents) }, null, 2)}\n`,
+    content: `${JSON.stringify({ agents: Object.fromEntries(agents) }, null, 2)}\n`,
   }
 }
 
@@ -322,7 +321,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
   const commands: GeneratedArtifact[] = []
   const agents = new Map<string, GeneratedArtifact>()
   const agentSelections = new Map<string, string>()
-  const runtimeAgentMetadata = new Map<string, { profiles: string[]; codexFast: boolean }>()
+  const runtimeAgentMetadata = new Map<string, { profile: string; profiles: string[]; codexFast: boolean }>()
   const workflow = config.workflow
   const laneExecutionUnits =
     workflow?.kind === "superpowers" && controlPlaneSettings && config.lanes && Object.keys(config.lanes).length > 0
@@ -348,6 +347,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
     }
 
     runtimeAgentMetadata.set(agentName, {
+      profile,
       profiles: [profile],
       codexFast: nextCodexFast,
     })
