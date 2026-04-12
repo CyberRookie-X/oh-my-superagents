@@ -56,6 +56,7 @@ const CODEX_CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, s
 
 export function buildStarterCodexConfig() {
   const config = {
+    workflow: { kind: "superpowers" as const },
     profiles: {
       strategy: {
         model: "gpt-5.4",
@@ -77,6 +78,12 @@ export function buildStarterCodexConfig() {
     path: "oh-my-superagents.config.jsonc",
     config,
     content: JSON.stringify(config, null, 2),
+  }
+}
+
+function assertSupportedBootstrapWorkflow(config: Pick<RouterConfig, "workflow">) {
+  if (config.workflow.kind === "direct") {
+    throw new Error("Direct workflow is not yet supported for bootstrap --host codex")
   }
 }
 
@@ -407,6 +414,8 @@ export async function runCodexBootstrap(input: {
         })
       ).config.settings
     : createDefaultControlPlaneConfig().settings
+
+  assertSupportedBootstrapWorkflow(loaded.config)
 
   const compatibility = await input.resolveCompatibility(
     "superpowersCompatibility" in loaded.config && loaded.config.superpowersCompatibility

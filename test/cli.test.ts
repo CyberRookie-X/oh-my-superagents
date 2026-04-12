@@ -7,6 +7,7 @@ import { MARKER_TEXT } from "../src/opencode.js"
 import { explainPhase } from "../src/router.js"
 
 const baseConfig = {
+  workflow: { kind: "superpowers" as const },
   profiles: { build: { model: "openai/gpt-5" } },
   routes: {},
   defaultRoute: "build",
@@ -70,6 +71,7 @@ const incompatibleCodexStrict = {
 }
 
 const controlPlaneConfig = {
+  workflow: { kind: "superpowers" as const },
   settings: {
     enabled: true,
     activePreset: "default",
@@ -416,6 +418,64 @@ describe("runCli", () => {
         compatibility: compatibleOpencode,
       }),
     )
+  })
+
+  it("rejects explain for direct workflows until direct runtime support exists", async () => {
+    let explainCalled = false
+    const directConfig = {
+      ...controlPlaneConfig,
+      workflow: {
+        kind: "direct" as const,
+        intents: {
+          plan: { label: "Plan" },
+        },
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          routes: {
+            plan: "build",
+          },
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      loadConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        config: {
+          workflow: directConfig.workflow,
+          profiles: { build: { model: "openai/gpt-5" } },
+          routes: { plan: "build" },
+          defaultRoute: "build",
+          superpowersCompatibility: { mode: "warn" as const },
+        },
+      }),
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: directConfig,
+        activePreset: {
+          key: "default",
+          preset: directConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+      }),
+      explainPhaseForHost: () => {
+        explainCalled = true
+        throw new Error("unexpected explain")
+      },
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Direct workflow is not yet supported")
+    expect(explainCalled).toBe(false)
   })
 
   it("adds source tracing to explain output for opencode", async () => {
@@ -1056,6 +1116,24 @@ describe("runCli", () => {
       "Warning: superpowers compatibility is incompatible for opencode: Version is below minimum supported version 5.0.0.",
     )
     expect(result.stderr).toContain("cleanup failed")
+  })
+
+  it("threads workflow through sync artifact generation", async () => {
+    let capturedWorkflow: { kind: "superpowers" } | undefined
+
+    const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
+      buildArtifacts: (config: { workflow?: { kind: "superpowers" } }) => {
+        capturedWorkflow = config.workflow
+
+        return {
+          agents: [],
+          commands: [],
+        }
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(capturedWorkflow).toEqual({ kind: "superpowers" })
   })
 
   it("bootstraps a default layered config during first-run opencode sync", async () => {

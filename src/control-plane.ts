@@ -228,6 +228,7 @@ export function buildControlPlaneExplainTrace(input: {
 }): ExplainTrace {
   const laneState = input.resolved.laneState ?? resolveLaneState(input.resolved.config, input.resolved.activePreset)
   const routerConfig = {
+    workflow: input.resolved.config.workflow,
     profiles: {
       ...(input.resolved.config.profiles ?? {}),
       ...(input.resolved.activePreset.preset.profiles ?? {}),
@@ -603,8 +604,29 @@ function clonePreset(preset: ControlPlanePreset): ControlPlanePreset {
   }
 }
 
+function cloneWorkflow(config: { workflow: ControlPlaneConfig["workflow"] }) {
+  return config.workflow.kind === "direct"
+    ? {
+        kind: "direct" as const,
+        intents: Object.fromEntries(
+          Object.entries(config.workflow.intents).map(([key, intent]) => [key, { ...intent }]),
+        ),
+      }
+    : { kind: "superpowers" as const }
+}
+
 function cloneLayeredConfig(config: LayeredControlPlaneConfigInput): LayeredControlPlaneConfigInput {
   return {
+    workflow: config.workflow
+      ? config.workflow.kind === "direct"
+        ? {
+            kind: "direct",
+            intents: Object.fromEntries(
+              Object.entries(config.workflow.intents).map(([key, intent]) => [key, { ...intent }]),
+            ),
+          }
+        : { kind: "superpowers" }
+      : undefined,
     settings: config.settings
       ? {
           ...config.settings,
@@ -631,6 +653,7 @@ function cloneLayeredConfig(config: LayeredControlPlaneConfigInput): LayeredCont
 
 function toLayeredDocument(config: ControlPlaneConfig): LayeredControlPlaneConfigInput {
   return {
+    workflow: cloneWorkflow(config),
     settings: {
       enabled: config.settings.enabled,
       activePreset: config.settings.activePreset,

@@ -152,7 +152,7 @@ export type DirectIntentConfig = z.infer<typeof DirectIntentSchema>
 export type WorkflowConfig = z.infer<typeof WorkflowSchema>
 
 export type RouterConfig = {
-  workflow?: WorkflowConfig
+  workflow: WorkflowConfig
   profiles: Record<string, ControlPlaneProfile>
   lanes?: Record<string, ControlPlaneLane>
   routes: Record<string, string>
@@ -163,10 +163,7 @@ export type RouterConfig = {
 
 export type LoadedRouterConfig = {
   path: string
-  config: RouterConfig & {
-    workflow: WorkflowConfig
-    superpowersCompatibility: SuperpowersCompatibilityConfig
-  }
+  config: RouterConfig & { superpowersCompatibility: SuperpowersCompatibilityConfig }
 }
 
 export type ControlPlaneCommandKey = (typeof CONTROL_PLANE_COMMAND_KEYS)[number]
@@ -179,7 +176,7 @@ export type ControlPlaneLaneSelection = z.infer<typeof LaneSelectionSchema>
 export type ControlPlaneLane = z.infer<typeof LaneSchema>
 export type ControlPlanePreset = z.infer<typeof ControlPlanePresetSchema>
 export type ControlPlaneConfig = {
-  workflow?: WorkflowConfig
+  workflow: WorkflowConfig
   settings: {
     enabled: boolean
     activePreset: string
@@ -233,7 +230,7 @@ export type LoadedControlPlaneConfig = {
     config: LayeredControlPlaneConfigInput
   }>
   hasRealSource: boolean
-  config: ControlPlaneConfig & { workflow: WorkflowConfig }
+  config: ControlPlaneConfig
 }
 
 export class MissingControlPlaneConfigError extends Error {

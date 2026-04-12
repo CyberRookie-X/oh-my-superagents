@@ -370,16 +370,27 @@ function joinStderr(parts: Array<string | undefined>) {
   return parts.filter((part): part is string => Boolean(part && part.length > 0)).join("\n")
 }
 
+function assertSuperpowersWorkflow(
+  config: { workflow: ResolvedControlPlane["config"]["workflow"] },
+  command: string,
+  host: CliHost | SupportedSuperpowersHost,
+) {
+  if (config.workflow.kind === "direct") {
+    throw new Error(`Direct workflow is not yet supported for ${command} --host ${host}`)
+  }
+}
+
 function toRouterConfig(
   config: ResolvedControlPlane["config"],
   laneState?: ResolvedControlPlane["laneState"],
-) {
+): Awaited<ReturnType<typeof loadRouterConfig>>["config"] {
   const activePreset = config.presets[config.settings.activePreset]
   if (!activePreset) {
     throw new Error(`Unknown preset: ${config.settings.activePreset}`)
   }
 
   return {
+    workflow: config.workflow,
     profiles: {
       ...(config.profiles ?? {}),
       ...(activePreset.profiles ?? {}),
@@ -907,6 +918,7 @@ async function buildControlPlaneStatus(
   deps: CliDeps,
 ) {
   const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
+  assertSuperpowersWorkflow(resolved.config, "status", host)
   const compatibility = await resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps)
   const artifacts = await inspectArtifacts(
     cwd,
@@ -967,6 +979,7 @@ async function buildControlPlaneDoctor(
   deps: CliDeps,
 ) {
   const resolved = await deps.resolveControlPlane({ command: "doctor", cwd, explicitPath, runtimeLane })
+  assertSuperpowersWorkflow(resolved.config, "doctor", host)
   const compatibility = await resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps)
   const artifacts = await inspectArtifacts(
     cwd,
@@ -1098,6 +1111,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       const resolved = host === "opencode" || (host === "codex" && runtimeLane)
         ? await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
         : null
+      assertSuperpowersWorkflow(resolved?.config ?? loaded.config, "explain", host as SupportedSuperpowersHost)
 
       if (flags.get("--all") === true) {
         const compatibility = await resolveCompatibilityForHost(
@@ -1172,6 +1186,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       }
 
       const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath })
+      assertSuperpowersWorkflow(resolved.config, "use", cliHost)
       const nextPreset = resolvePresetKey(resolved, selector)
       const prepared = await deps.prepareControlPlaneStateWrite({
         command: "use",
@@ -1338,6 +1353,8 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           laneState: fallback.laneState,
         }
       }
+
+      assertSuperpowersWorkflow(resolved.config, "sync", cliHost)
 
       const compatibility = await resolveCompatibilityForCliHost(
         cliHost,
