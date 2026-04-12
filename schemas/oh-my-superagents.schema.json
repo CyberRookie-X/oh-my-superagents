@@ -3,6 +3,9 @@
   "type": "object",
   "description": "oh-my-superagents supports both the current layered config shape and the legacy single-routing shape during migration.",
   "properties": {
+    "workflow": {
+      "$ref": "#/$defs/workflow"
+    },
     "settings": {
       "type": "object",
       "additionalProperties": false,
@@ -123,6 +126,9 @@
       "required": ["presets"],
       "additionalProperties": false,
       "properties": {
+        "workflow": {
+          "$ref": "#/$defs/workflow"
+        },
         "settings": {
           "type": "object",
           "additionalProperties": false,
@@ -199,15 +205,8 @@
               "routes": {
                 "type": "object",
                 "propertyNames": {
-                  "enum": [
-                    "brainstorming",
-                    "writing-plans",
-                    "subagent-driven-development",
-                    "requesting-code-review",
-                    "verification-before-completion",
-                    "frontend-design",
-                    "webapp-testing"
-                  ]
+                  "type": "string",
+                  "minLength": 1
                 },
                 "additionalProperties": { "type": "string", "minLength": 1 }
               },
@@ -302,17 +301,49 @@
     "routes": {
       "type": "object",
       "propertyNames": {
-        "enum": [
-          "brainstorming",
-          "writing-plans",
-          "subagent-driven-development",
-          "requesting-code-review",
-          "verification-before-completion",
-          "frontend-design",
-          "webapp-testing"
-        ]
+        "type": "string",
+        "minLength": 1
       },
       "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "workflow": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "superpowers" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "intents"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "direct" },
+            "intents": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/directIntent"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "directIntent": {
+      "type": "object",
+      "required": ["label"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 }
+      }
     },
     "compatibility": {
       "type": "object",

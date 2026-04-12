@@ -60,6 +60,28 @@ const LaneSchema = z
   })
   .strict()
 
+const SuperpowersWorkflowSchema = z
+  .object({
+    kind: z.literal("superpowers"),
+  })
+  .strict()
+
+const DirectIntentSchema = z
+  .object({
+    label: z.string().min(1),
+    description: z.string().min(1).optional(),
+  })
+  .strict()
+
+const DirectWorkflowSchema = z
+  .object({
+    kind: z.literal("direct"),
+    intents: z.record(z.string().min(1), DirectIntentSchema),
+  })
+  .strict()
+
+const WorkflowSchema = z.discriminatedUnion("kind", [SuperpowersWorkflowSchema, DirectWorkflowSchema])
+
 const LegacyRouterConfigSchema = z
   .object({
     profiles: z.record(z.string().min(1), ProfileSchema),
@@ -114,6 +136,7 @@ const ControlPlanePresetSchema = z
 
 const LayeredControlPlaneConfigSchema = z
   .object({
+    workflow: WorkflowSchema.optional(),
     settings: LayeredSettingsSchema.optional(),
     profiles: z.record(z.string().min(1), ProfileSchema).optional(),
     lanes: z.record(z.string().min(1), LaneSchema).optional(),
@@ -125,8 +148,11 @@ type LegacyRouterConfigInput = z.infer<typeof LegacyRouterConfigSchema>
 export type SuperpowersCompatibilityConfig = {
   mode: SuperpowersCompatibilityMode
 }
+export type DirectIntentConfig = z.infer<typeof DirectIntentSchema>
+export type WorkflowConfig = z.infer<typeof WorkflowSchema>
 
 export type RouterConfig = {
+  workflow?: WorkflowConfig
   profiles: Record<string, ControlPlaneProfile>
   lanes?: Record<string, ControlPlaneLane>
   routes: Record<string, string>
@@ -137,7 +163,10 @@ export type RouterConfig = {
 
 export type LoadedRouterConfig = {
   path: string
-  config: RouterConfig & { superpowersCompatibility: SuperpowersCompatibilityConfig }
+  config: RouterConfig & {
+    workflow: WorkflowConfig
+    superpowersCompatibility: SuperpowersCompatibilityConfig
+  }
 }
 
 export type ControlPlaneCommandKey = (typeof CONTROL_PLANE_COMMAND_KEYS)[number]
@@ -150,6 +179,7 @@ export type ControlPlaneLaneSelection = z.infer<typeof LaneSelectionSchema>
 export type ControlPlaneLane = z.infer<typeof LaneSchema>
 export type ControlPlanePreset = z.infer<typeof ControlPlanePresetSchema>
 export type ControlPlaneConfig = {
+  workflow?: WorkflowConfig
   settings: {
     enabled: boolean
     activePreset: string
@@ -203,7 +233,7 @@ export type LoadedControlPlaneConfig = {
     config: LayeredControlPlaneConfigInput
   }>
   hasRealSource: boolean
-  config: ControlPlaneConfig
+  config: ControlPlaneConfig & { workflow: WorkflowConfig }
 }
 
 export class MissingControlPlaneConfigError extends Error {
@@ -300,6 +330,7 @@ export function createDefaultControlPlaneConfig(): ControlPlaneConfig {
   const defaultPreset = createDefaultPreset()
 
   return {
+    workflow: { kind: "superpowers" },
     settings: {
       enabled: true,
       activePreset: "default",
@@ -386,6 +417,7 @@ function mergeLayeredConfigs(
   }
 
   return {
+    workflow: higherPriority.workflow ?? lowerPriority.workflow,
     settings: mergedSettings,
     profiles: {
       ...lowerPriority.profiles,
@@ -420,6 +452,7 @@ function validateLaneReferences(config: ControlPlaneConfig) {
 
 function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneConfig {
   const finalized: ControlPlaneConfig = {
+    workflow: merged.workflow ?? { kind: "superpowers" },
     settings: {
       enabled: merged.settings?.enabled ?? true,
       activePreset: merged.settings?.activePreset ?? "default",
@@ -685,6 +718,7 @@ export async function loadRouterConfig(input: LoadRouterConfigInput): Promise<Lo
   }
 
   const config: LoadedRouterConfig["config"] = {
+    workflow: loaded.config.workflow,
     profiles: {
       ...loaded.config.profiles,
       ...(activePreset.profiles ?? {}),
@@ -696,12 +730,19 @@ export async function loadRouterConfig(input: LoadRouterConfigInput): Promise<Lo
     superpowersCompatibility: loaded.config.settings.superpowersCompatibility,
   }
 
-  for (const phase of Object.keys(config.routes)) {
-    if (!BUILT_IN_PHASE_SET.has(phase)) {
-      throw new Error(`Unknown phase: ${phase}`)
+  const validRouteIds =
+    config.workflow.kind === "direct"
+      ? new Set(Object.keys(config.workflow.intents))
+      : BUILT_IN_PHASE_SET
+
+  for (const routeId of Object.keys(config.routes)) {
+    if (!validRouteIds.has(routeId)) {
+      throw new Error(
+        config.workflow.kind === "direct" ? `Unknown intent: ${routeId}` : `Unknown phase: ${routeId}`,
+      )
     }
 
-    const target = config.routes[phase]
+    const target = config.routes[routeId]
     if (!config.profiles[target]) {
       throw new Error(`Unknown profile: ${target}`)
     }

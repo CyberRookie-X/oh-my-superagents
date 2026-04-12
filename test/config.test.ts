@@ -64,6 +64,28 @@ describe("loadControlPlaneConfig", () => {
     })
   })
 
+  it("defaults to the superpowers workflow when workflow is omitted", async () => {
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        },
+        "routes": {
+          "brainstorming": "build"
+        },
+        "defaultRoute": "build"
+      }`,
+    })
+
+    expect((result.config as { workflow?: { kind?: string } }).workflow).toEqual({
+      kind: "superpowers",
+    })
+  })
+
   it("rejects mixed-shape config", async () => {
     await expect(
       loadControlPlaneConfig({
@@ -642,9 +664,13 @@ describe("loadControlPlaneConfig", () => {
         "utf8",
       ),
     ) as {
+      properties?: {
+        workflow?: { $ref?: string }
+      }
       anyOf?: Array<{
         required?: string[]
         properties?: {
+          workflow?: { $ref?: string }
           settings?: {
             properties?: {
               commandPrefix?: { pattern?: string }
@@ -696,11 +722,35 @@ describe("loadControlPlaneConfig", () => {
           }
         }
       }>
+      $defs?: {
+        workflow?: {
+          anyOf?: Array<{
+            properties?: {
+              kind?: { const?: string }
+              intents?: {
+                propertyNames?: { type?: string; minLength?: number }
+                additionalProperties?: { $ref?: string }
+              }
+            }
+          }>
+        }
+        directIntent?: {
+          properties?: {
+            label?: { type?: string; minLength?: number }
+            description?: { type?: string; minLength?: number }
+          }
+        }
+      }
     }
 
     const layeredShape = schema.anyOf?.find((entry) => entry.required?.includes("presets"))
     const legacyShape = schema.anyOf?.find((entry) => entry.required?.includes("profiles"))
+    const directWorkflow = schema.$defs?.workflow?.anyOf?.find(
+      (entry) => entry.properties?.kind?.const === "direct",
+    )
 
+    expect(schema.properties?.workflow?.$ref).toBe("#/$defs/workflow")
+    expect(layeredShape?.properties?.workflow?.$ref).toBe("#/$defs/workflow")
     expect(layeredShape?.properties?.settings?.properties?.commandPrefix?.pattern).toBe("^[a-z0-9-]+$")
     expect(
       layeredShape?.properties?.settings?.properties?.commands?.properties?.status?.properties?.name?.pattern,
@@ -740,6 +790,13 @@ describe("loadControlPlaneConfig", () => {
     expect(layeredShape?.properties?.lanes?.additionalProperties?.properties?.defaultRoute?.minLength).toBe(1)
     expect(legacyShape?.required).toContain("profiles")
     expect(legacyShape?.required).toContain("defaultRoute")
+    expect(directWorkflow?.properties?.intents?.propertyNames?.type).toBe("string")
+    expect(directWorkflow?.properties?.intents?.propertyNames?.minLength).toBe(1)
+    expect(directWorkflow?.properties?.intents?.additionalProperties?.$ref).toBe("#/$defs/directIntent")
+    expect(schema.$defs?.directIntent?.properties?.label?.type).toBe("string")
+    expect(schema.$defs?.directIntent?.properties?.label?.minLength).toBe(1)
+    expect(schema.$defs?.directIntent?.properties?.description?.type).toBe("string")
+    expect(schema.$defs?.directIntent?.properties?.description?.minLength).toBe(1)
   })
 })
 
@@ -759,6 +816,52 @@ describe("loadRouterConfig", () => {
     })
 
     expect(result.config.profiles.build.codexFast).toBe(true)
+  })
+
+  it("accepts a direct workflow with named intents", async () => {
+    const result = await loadRouterConfig({
+      cwd: "/workspace/project",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "workflow": {
+          "kind": "direct",
+          "intents": {
+            "plan": { "label": "Plan" },
+            "build": {
+              "label": "Build",
+              "description": "Implement the change"
+            }
+          }
+        },
+        "profiles": {
+          "plan-profile": { "model": "openai/gpt-5" },
+          "build-profile": { "model": "gpt-5.4" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "routes": {
+              "plan": "plan-profile"
+            },
+            "defaultRoute": "build-profile"
+          }
+        }
+      }`,
+    })
+
+    const workflow = (result.config as {
+      workflow?: {
+        kind?: string
+        intents?: Record<string, { label?: string; description?: string }>
+      }
+    }).workflow
+
+    expect(workflow?.kind).toBe("direct")
+    expect(workflow?.intents?.plan?.label).toBe("Plan")
+    expect(workflow?.intents?.build?.description).toBe("Implement the change")
+    expect(result.config.routes.plan).toBe("plan-profile")
   })
 
   it("resolves inherited preset profiles and routes before building router config", async () => {
