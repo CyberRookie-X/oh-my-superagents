@@ -739,6 +739,7 @@ function toRouterConfig(
       ...(activePreset.profiles ?? {}),
     },
     lanes: config.lanes,
+    availableLanes: laneState?.allowedLanes ?? activePreset.usesLanes,
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
     effectiveLane: laneState?.effectiveLane ?? config.settings.defaultLane ?? activePreset.defaultLane,

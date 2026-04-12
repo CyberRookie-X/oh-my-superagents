@@ -305,7 +305,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
     workflow?.kind === "superpowers" && controlPlaneSettings && config.lanes && Object.keys(config.lanes).length > 0
       ? listLaneExecutionUnits({
           activePresetKey: controlPlaneSettings.activePreset,
-          activePreset: { usesLanes: Object.keys(config.lanes) },
+          activePreset: { usesLanes: config.availableLanes ?? Object.keys(config.lanes) },
         })
       : []
 
@@ -351,7 +351,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
       const agentName = PHASE_TO_AGENT[phase]
       const commandName = PHASE_TO_COMMAND[phase].slice(1)
       const skillName = `superpowers/${phase}`
-      const permissionTask =
+      const permissionTask: PermissionTask | undefined =
         phase === "subagent-driven-development"
           ? { "*": "deny", "spr-review": "allow", "spr-verify": "allow" }
           : undefined

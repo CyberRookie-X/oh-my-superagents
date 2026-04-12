@@ -173,6 +173,7 @@ export type RouterConfig = {
   workflow: WorkflowConfig
   profiles: Record<string, ControlPlaneProfile>
   lanes?: Record<string, ControlPlaneLane>
+  availableLanes?: string[]
   routes: Record<string, string>
   defaultRoute: string
   effectiveLane?: string
@@ -755,6 +756,7 @@ export async function loadRouterConfig(input: LoadRouterConfigInput): Promise<Lo
       ...(activePreset.profiles ?? {}),
     },
     lanes: loaded.config.lanes,
+    availableLanes: activePreset.usesLanes,
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
     effectiveLane: loaded.config.settings.defaultLane ?? activePreset.defaultLane,

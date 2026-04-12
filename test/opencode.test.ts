@@ -289,6 +289,40 @@ describe("buildArtifacts", () => {
     expect(execute?.content).toContain("sp-execute-backend")
   })
 
+  it("omits lane-scoped execute helpers for globally-defined lanes outside the active preset", () => {
+    const artifacts = buildArtifactsWithControlPlane(
+      {
+        workflow: { kind: "superpowers" },
+        profiles: {
+          frontendBuild: { model: "openai/gpt-5" },
+          backendBuild: { model: "gpt-5.4" },
+          reviewBuild: { model: "anthropic/claude-sonnet-4-5" },
+        },
+        lanes: {
+          frontend: { label: "Frontend", routes: {}, defaultRoute: "frontendBuild" },
+          backend: { label: "Backend", routes: {}, defaultRoute: "backendBuild" },
+          review: { label: "Review", routes: {}, defaultRoute: "reviewBuild" },
+        },
+        availableLanes: ["frontend", "backend"],
+        routes: {},
+        defaultRoute: "backendBuild",
+      } as never,
+      {
+        ...createDefaultControlPlaneConfig().settings,
+        subagentExecution: { mode: "suggest" },
+      },
+    )
+
+    expect(artifacts.commands.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["sp-execute-frontend.md", "sp-execute-backend.md"]),
+    )
+    expect(artifacts.agents.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["spr-build--frontend.md", "spr-build--backend.md"]),
+    )
+    expect(artifacts.commands.map((item) => item.fileName)).not.toContain("sp-execute-review.md")
+    expect(artifacts.agents.map((item) => item.fileName)).not.toContain("spr-build--review.md")
+  })
+
   it("fails when a direct-mode command collides with an OMS control-plane command path", () => {
     const defaults = createDefaultControlPlaneConfig().settings
 

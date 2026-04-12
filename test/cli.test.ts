@@ -3456,6 +3456,43 @@ describe("runCli", () => {
     expect(syncedEffectiveLane).toBe("frontend")
   })
 
+  it("passes allowed lanes into OpenCode sync artifact generation", async () => {
+    let syncedAvailableLanes: string[] | undefined
+
+    const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend"],
+          defaultLane: "frontend",
+          presetDefaultLane: "backend",
+          effectiveLane: "frontend",
+          runtimeLane: undefined,
+          mode: "suggest" as const,
+          nonApplyingReason: "Lane suggestions do not change routing in Stage 1.",
+        },
+      }),
+      buildArtifacts: (config: { availableLanes?: string[] }) => {
+        syncedAvailableLanes = config.availableLanes
+        return { agents: [], commands: [] }
+      },
+      materializeArtifacts: async () => ({ exitCode: 0 as const, warnings: [], written: [], removed: [] }),
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(syncedAvailableLanes).toEqual(["frontend"])
+  })
+
   it("summarizes expected, present, missing, and stale OpenCode artifacts in doctor output", async () => {
     const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
       ...createArtifactFs({
