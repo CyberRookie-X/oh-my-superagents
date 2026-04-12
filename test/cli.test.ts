@@ -2445,6 +2445,74 @@ describe("runCli", () => {
     expect(output.nextAction).toBeUndefined()
   })
 
+  it("scopes OpenCode use artifact generation to the target preset lanes", async () => {
+    let capturedAvailableLanes: string[] | undefined
+
+    const laneScopedConfig = {
+      ...controlPlaneConfig,
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: {},
+          defaultRoute: "build",
+        },
+        backend: {
+          label: "Backend",
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          usesLanes: ["frontend", "backend"],
+          defaultLane: "backend",
+        },
+        review: {
+          ...controlPlaneConfig.presets.review,
+          usesLanes: undefined,
+          defaultLane: undefined,
+        },
+      },
+    }
+
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: laneScopedConfig,
+        activePreset: {
+          key: "default",
+          preset: laneScopedConfig.presets.default,
+        },
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({ settings: nextState }, null, 2),
+        config: {
+          ...laneScopedConfig,
+          settings: {
+            ...laneScopedConfig.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+      buildArtifacts: (config: { availableLanes?: string[] }) => {
+        capturedAvailableLanes = config.availableLanes
+        return { agents: [], commands: [] }
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(capturedAvailableLanes).toEqual([])
+  })
+
   it("marks a phase as changed when only the resolved temperature changes", async () => {
     const temperatureConfig = {
       ...controlPlaneConfig,
