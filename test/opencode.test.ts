@@ -81,7 +81,11 @@ describe("buildArtifacts", () => {
       defaultRoute: "build",
     })
 
-    expect(artifacts.commands.map((item: { fileName: string }) => item.fileName)).toEqual([
+    expect(
+      artifacts.commands
+        .filter((item) => item.directory === ".opencode/commands")
+        .map((item: { fileName: string }) => item.fileName),
+    ).toEqual([
       "sp-brainstorm.md",
       "sp-plan.md",
       "sp-execute.md",
@@ -90,6 +94,42 @@ describe("buildArtifacts", () => {
       "sp-visual.md",
       "sp-web-test.md",
     ])
+  })
+
+  it("generates an OpenCode runtime metadata artifact for codexFast-enabled agents", () => {
+    const artifacts = buildArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: {
+        build: { model: "gpt-5.4", codexFast: true },
+      },
+      routes: {},
+      defaultRoute: "build",
+    } as never)
+
+    const runtimeFile = artifacts.commands.find((item) => item.fileName === "runtime-agent-metadata.json")
+
+    expect(runtimeFile).toBeDefined()
+    expect(runtimeFile?.directory).toBe(".opencode/oh-my-superagents")
+    expect(runtimeFile?.content).toContain('"spr-build"')
+    expect(runtimeFile?.content).toContain('"codexFast": true')
+  })
+
+  it("includes codexFast false or absent agents in the runtime metadata without enabling them", () => {
+    const artifacts = buildArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: {
+        strategy: { model: "openai/gpt-5" },
+        build: { model: "gpt-5.4", codexFast: true },
+      },
+      routes: { brainstorming: "strategy" },
+      defaultRoute: "build",
+    } as never)
+
+    const runtimeFile = artifacts.commands.find((item) => item.fileName === "runtime-agent-metadata.json")
+
+    expect(runtimeFile).toBeDefined()
+    expect(runtimeFile?.content).toContain('"spr-strategy"')
+    expect(runtimeFile?.content).toContain('"codexFast": false')
   })
 
   it("fails when a built-in phase has no route and no defaultRoute", () => {

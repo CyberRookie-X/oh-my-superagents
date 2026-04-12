@@ -44,6 +44,9 @@ const CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string>
 }
 const TEMPORARY_DISABLE_COMMAND_FILE = "oms-no-superpowers.md"
 const TEMPORARY_DISABLE_COMMAND_OWNER_PREFIX = TEMPORARY_DISABLE_COMMAND_FILE
+const RUNTIME_AGENT_METADATA_DIRECTORY = ".opencode/oh-my-superagents"
+const RUNTIME_AGENT_METADATA_FILE = "runtime-agent-metadata.json"
+const RUNTIME_AGENT_METADATA_OWNER_PREFIX = "oms-runtime-agent-metadata"
 
 const RESERVED_PHASE_COMMAND_FILES = new Set(
   Object.values(PHASE_TO_COMMAND).map((commandName) => `${commandName.slice(1)}.md`),
@@ -234,6 +237,18 @@ function buildTemporaryDisableHelperArtifact(): GeneratedArtifact {
   }
 }
 
+function buildRuntimeAgentMetadataArtifact(
+  agents: Map<string, { profile: string; codexFast: boolean }>,
+): GeneratedArtifact {
+  return {
+    kind: "command",
+    directory: RUNTIME_AGENT_METADATA_DIRECTORY,
+    fileName: RUNTIME_AGENT_METADATA_FILE,
+    ownerPrefix: RUNTIME_AGENT_METADATA_OWNER_PREFIX,
+    content: `${JSON.stringify({ agents: Object.fromEntries(agents) }, null, 2)}\n`,
+  }
+}
+
 export function listRenderedOpenCodeControlPlaneCommands(settings: OpenCodeControlPlaneSettings) {
   return Object.fromEntries(
     CONTROL_PLANE_COMMAND_KEYS.map((key) => {
@@ -306,6 +321,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
   const commands: GeneratedArtifact[] = []
   const agents = new Map<string, GeneratedArtifact>()
   const agentSelections = new Map<string, string>()
+  const runtimeAgentMetadata = new Map<string, { profile: string; codexFast: boolean }>()
   const workflow = config.workflow
   const laneExecutionUnits =
     workflow?.kind === "superpowers" && controlPlaneSettings && config.lanes && Object.keys(config.lanes).length > 0
@@ -315,6 +331,17 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
         })
       : []
 
+  function registerRuntimeAgentMetadata(agentName: string, profile: string, codexFast?: boolean) {
+    const next = { profile, codexFast: codexFast === true }
+    const current = runtimeAgentMetadata.get(agentName)
+
+    if (current && (current.profile !== next.profile || current.codexFast !== next.codexFast)) {
+      throw new Error(`Shared agent conflict for ${agentName}`)
+    }
+
+    runtimeAgentMetadata.set(agentName, next)
+  }
+
   if (workflow?.kind === "direct") {
     for (const intent of Object.keys(workflow.intents)) {
       if (!SAFE_NAME_PATTERN.test(intent)) {
@@ -323,6 +350,8 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
 
       const resolved = resolveRoute(config, intent)
       const agentName = `rt-${intent}`
+
+      registerRuntimeAgentMetadata(agentName, resolved.profileId, resolved.selection.codexFast)
 
       agents.set(agentName, {
         kind: "agent",
@@ -366,6 +395,8 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
               ),
             }
           : undefined
+
+      registerRuntimeAgentMetadata(agentName, resolved.profileId, resolved.selection.codexFast)
 
       if (!agents.has(agentName)) {
         agentSelections.set(
@@ -430,6 +461,8 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
         const laneResolved = resolvePhase(config, phase, { effectiveLane: unit.lane })
         const laneAgentName = unit.agentFileName.replace(/\.md$/, "")
 
+        registerRuntimeAgentMetadata(laneAgentName, laneResolved.profileId, laneResolved.selection.codexFast)
+
         agents.set(laneAgentName, {
           kind: "agent",
           directory: ".opencode/agents",
@@ -461,6 +494,8 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
       }
     }
   }
+
+  commands.push(buildRuntimeAgentMetadataArtifact(runtimeAgentMetadata))
 
   if (controlPlaneSettings) {
     const controlPlaneArtifacts = buildControlPlaneCommandArtifacts(controlPlaneSettings)
