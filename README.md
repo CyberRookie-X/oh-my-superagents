@@ -17,7 +17,7 @@ Host-native routing and OMS control-plane support for AI work on OpenCode, Codex
 | Compatibility monitor | Full | Full | None yet | Not planned |
 | Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | None |
 | Temporary disable helper | Full | Full | None yet | Not planned |
-| `codexFast` | Partial | Full | None yet | Not planned |
+| `codexFast` | Full | Full | None yet | Not planned |
 
 Support level notes:
 
@@ -30,7 +30,7 @@ Support level notes:
 Feature notes:
 
 - The temporary disable helper is host-local, conversation-scoped, and does not change persistent OMS state.
-- `codexFast` is full on Codex and staged on OpenCode. Qwen does not support it yet.
+- `codexFast` is full on OpenCode and Codex. Qwen does not support it yet.
 
 ## Implementation Footprint
 

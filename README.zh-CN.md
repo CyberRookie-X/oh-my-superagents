@@ -17,7 +17,7 @@
 | 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂不计划 |
 | 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | 无 |
 | 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂不计划 |
-| `codexFast` | 部分支持 | 完整支持 | 暂未实现 | 暂不计划 |
+| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂不计划 |
 
 支持等级说明：
 
@@ -30,7 +30,7 @@
 补充说明：
 
 - 临时停用 helper 是宿主本地、会话级的提示便捷功能，不会改变持久化的 OMS 状态。
-- `codexFast` 在 Codex 上是完整支持，在 OpenCode 上仍属于分阶段/部分支持；Qwen 目前还不支持。
+- `codexFast` 在 OpenCode 和 Codex 上都属于完整支持；Qwen 目前还不支持。
 
 ## 实现厚度
 

@@ -753,6 +753,36 @@ function toRouterConfig(
   }
 }
 
+function buildOpenCodeCodexFastRuntimeDiagnostics(
+  cwd: string,
+  config: ResolvedControlPlane["config"],
+  laneState: ResolvedControlPlane["laneState"] | undefined,
+  deps: CliDeps,
+) {
+  const manifestPath = path.join(cwd, RUNTIME_AGENT_METADATA_DIRECTORY, RUNTIME_AGENT_METADATA_FILE)
+  const built = deps.buildArtifacts(toRouterConfig(config, laneState), config.settings)
+  const runtimeMetadataArtifact = built.commands.find((artifact) => (
+    artifact.directory === RUNTIME_AGENT_METADATA_DIRECTORY
+    && artifact.fileName === RUNTIME_AGENT_METADATA_FILE
+  ))
+
+  if (!runtimeMetadataArtifact || !isOpenCodeRuntimeMetadataContent(runtimeMetadataArtifact.content)) {
+    return {
+      manifestPath,
+      hasEnabledAgents: false,
+    }
+  }
+
+  const parsed = JSON.parse(runtimeMetadataArtifact.content) as {
+    agents: Record<string, { codexFast: boolean }>
+  }
+
+  return {
+    manifestPath,
+    hasEnabledAgents: Object.values(parsed.agents).some((agent) => agent.codexFast),
+  }
+}
+
 function formatControlPlaneSource(resolved: ResolvedControlPlane) {
   if (resolved.source.kind === "default") {
     return {
@@ -1402,6 +1432,7 @@ async function buildControlPlaneDoctor(
             resolved.activePreset.key,
             resolved.trace?.activePresetDefinition?.preset,
           ),
+          codexFastRuntime: buildOpenCodeCodexFastRuntimeDiagnostics(cwd, resolved.config, resolved.laneState, deps),
         }
       : {}),
   }

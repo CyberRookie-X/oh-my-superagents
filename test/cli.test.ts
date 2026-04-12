@@ -3475,6 +3475,57 @@ describe("runCli", () => {
           resolvable: true,
         },
       },
+      codexFastRuntime: {
+        manifestPath: "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json",
+        hasEnabledAgents: false,
+      },
+    })
+  })
+
+  it("reports OpenCode codexFast runtime metadata diagnostics in doctor output", async () => {
+    const codexFastConfig = {
+      ...controlPlaneConfig,
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          profiles: {
+            ...controlPlaneConfig.presets.default.profiles,
+            build: {
+              ...controlPlaneConfig.presets.default.profiles.build,
+              model: "gpt-5.4",
+              codexFast: true,
+            },
+          },
+        },
+      },
+    }
+
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: codexFastConfig,
+        activePreset: {
+          key: "default",
+          preset: codexFastConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+      }),
+      buildArtifacts: (config: Parameters<typeof buildOpenCodeArtifacts>[0], settings: Parameters<typeof buildOpenCodeArtifacts>[1]) =>
+        buildOpenCodeArtifacts(config, settings),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.codexFastRuntime).toEqual({
+      manifestPath: "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json",
+      hasEnabledAgents: true,
     })
   })
 
