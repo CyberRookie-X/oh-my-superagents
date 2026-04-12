@@ -679,6 +679,7 @@ function toLayeredDocument(config: ControlPlaneConfig): LayeredControlPlaneConfi
       activePreset: config.settings.activePreset,
       defaultLane: config.settings.defaultLane,
       laneSelection: { ...config.settings.laneSelection },
+      subagentExecution: { ...config.settings.subagentExecution },
       commandPrefix: config.settings.commandPrefix,
       commands: Object.fromEntries(
         Object.entries(config.settings.commands).map(([key, command]) => [
@@ -723,6 +724,7 @@ function ensureStandaloneSettings(config: LayeredControlPlaneConfigInput) {
       ...config.settings,
       commandPrefix: config.settings?.commandPrefix ?? defaults.settings.commandPrefix,
       commands: config.settings?.commands ?? defaults.settings.commands,
+      subagentExecution: config.settings?.subagentExecution ?? defaults.settings.subagentExecution,
       superpowersCompatibility:
         config.settings?.superpowersCompatibility ?? defaults.settings.superpowersCompatibility,
     },

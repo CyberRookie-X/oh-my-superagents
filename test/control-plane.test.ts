@@ -874,6 +874,7 @@ describe("resolveControlPlane", () => {
           enabled: boolean
           commandPrefix: string
           commands: Record<string, { name: string; aliases: string[] }>
+          subagentExecution: { mode: string }
         }
         presets: Record<string, unknown>
       }
@@ -881,6 +882,7 @@ describe("resolveControlPlane", () => {
       expect(result.path).toBe(path.join(homeDir, ".config", "oh-my-superagents", "config.jsonc"))
       expect(serialized.settings.activePreset).toBe("default")
       expect(serialized.settings.enabled).toBe(true)
+      expect(serialized.settings.subagentExecution).toEqual({ mode: "suggest" })
       expect(serialized.settings.commandPrefix).toBe("oms")
       expect(serialized.settings.commands.use).toEqual({
         name: "use",
@@ -1053,6 +1055,7 @@ describe("resolveControlPlane", () => {
         enabled?: boolean
         commandPrefix?: string
         commands?: Record<string, unknown>
+        subagentExecution?: { mode: string }
         superpowersCompatibility?: { mode: string }
       }
       presets: Record<string, unknown>
@@ -1080,6 +1083,48 @@ describe("resolveControlPlane", () => {
     expect(serialized.settings?.commandPrefix).toBeUndefined()
     expect(serialized.settings?.commands).toBeUndefined()
     expect(serialized.settings?.superpowersCompatibility).toBeUndefined()
+  })
+
+  it("synthesizes subagentExecution when rewriting a standalone legacy target", async () => {
+    const files = {
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "profiles": {
+          "review": { "model": "anthropic/claude-sonnet-4-5" }
+        },
+        "routes": {
+          "brainstorming": "review"
+        },
+        "defaultRoute": "review"
+      }`,
+    }
+
+    const result = await prepareControlPlaneStateWrite({
+      command: "use",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+      isWritable: createIsWritable(["/workspace/project/oh-my-superagents.config.jsonc"]),
+      nextState: {
+        activePreset: "default",
+        enabled: true,
+      },
+    })
+    const serialized = parse(result.content) as {
+      settings?: {
+        activePreset?: string
+        enabled?: boolean
+        commandPrefix?: string
+        subagentExecution?: { mode: string }
+      }
+    }
+
+    expect(serialized.settings).toEqual(expect.objectContaining({
+      activePreset: "default",
+      enabled: true,
+      commandPrefix: "oms",
+      subagentExecution: { mode: "suggest" },
+    }))
   })
 
   it("produces the persisted next-config payload before later reconciliation concerns", async () => {

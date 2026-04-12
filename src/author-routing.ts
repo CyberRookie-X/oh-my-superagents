@@ -320,6 +320,7 @@ function createDefaultAuthorRoutingDocument(): LayeredRoutingSections {
       enabled: defaults.settings.enabled,
       activePreset: defaults.settings.activePreset,
       laneSelection: { ...defaults.settings.laneSelection },
+      subagentExecution: { ...defaults.settings.subagentExecution },
       commandPrefix: defaults.settings.commandPrefix,
       commands: Object.fromEntries(
         Object.entries(defaults.settings.commands).map(([key, command]) => [key, { ...command, aliases: [...command.aliases] }]),

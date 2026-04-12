@@ -222,6 +222,7 @@ describe("buildRoutingProposal", () => {
 
     expect(document.workflow).toEqual(proposal.workflow)
     expect(document.settings?.activePreset).toBe("default")
+    expect(document.settings?.subagentExecution).toEqual({ mode: "suggest" })
     expect(document.profiles).toEqual(proposal.profiles)
     expect(document.lanes).toEqual(proposal.lanes)
     expect(document.presets).toEqual(proposal.presets)
