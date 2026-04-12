@@ -539,6 +539,169 @@ describe("buildRoutingProposal", () => {
     expect(document.presets.default.usesLanes).toEqual(["ops", "frontend"])
     expect(document.settings?.defaultLane).toBe("ops")
   })
+
+  it("treats inherited direct workflow as same-mode when the written layer omits workflow", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: ["frontend"],
+      inventory: {
+        models: {
+          builder: { model: "openai/gpt-5", specialties: ["frontend", "build"] },
+        },
+      },
+    })
+
+    const document = applyRoutingProposalToConfig(proposal, {
+      settings: {
+        activePreset: "default",
+        enabled: true,
+        commandPrefix: "oms",
+        laneSelection: { mode: "suggest" },
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      profiles: {
+        reviewer: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+      },
+      lanes: {
+        ops: {
+          label: "Ops",
+          routes: { review: "reviewer" },
+          defaultRoute: "reviewer",
+        },
+      },
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          usesLanes: ["ops"],
+          routes: { review: "reviewer" },
+          defaultRoute: "reviewer",
+        },
+      },
+    }, {
+      effectiveWorkflowKind: "direct",
+    })
+
+    expect(document.lanes).toEqual({
+      ops: {
+        label: "Ops",
+        routes: { review: "reviewer" },
+        defaultRoute: "reviewer",
+      },
+      frontend: proposal.lanes.frontend,
+    })
+  })
+
+  it("normalizes an invalid activePreset to default when presets collapse on mode change", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: ["frontend"],
+      inventory: {
+        models: {
+          builder: { model: "openai/gpt-5", specialties: ["frontend", "build"] },
+        },
+      },
+    })
+
+    const document = applyRoutingProposalToConfig(proposal, {
+      workflow: { kind: "superpowers" },
+      settings: {
+        activePreset: "ci",
+        enabled: true,
+        commandPrefix: "oms",
+        laneSelection: { mode: "suggest" },
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      profiles: {},
+      lanes: {},
+      presets: {
+        ci: {
+          label: "CI",
+          short: "ci",
+          routes: {},
+          defaultRoute: "builder",
+        },
+      },
+    })
+
+    expect(document.settings?.activePreset).toBe("default")
+    expect(document.presets).toEqual({ default: proposal.presets.default })
+  })
+
+  it("validates defaultLane against the effective active preset instead of default", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: ["frontend"],
+      inventory: {
+        models: {
+          builder: { model: "openai/gpt-5", specialties: ["frontend", "build"] },
+        },
+      },
+    })
+
+    const document = applyRoutingProposalToConfig(proposal, {
+      workflow: { kind: "direct", intents: { build: { label: "Build" }, review: { label: "Review" } } },
+      settings: {
+        activePreset: "review",
+        enabled: true,
+        defaultLane: "ops",
+        commandPrefix: "oms",
+        laneSelection: { mode: "suggest" },
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      profiles: {
+        reviewer: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+      },
+      lanes: {
+        ops: {
+          label: "Ops",
+          routes: { review: "reviewer" },
+          defaultRoute: "reviewer",
+        },
+      },
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          usesLanes: [],
+          routes: {},
+          defaultRoute: "builder",
+        },
+        review: {
+          label: "Review",
+          short: "rev",
+          usesLanes: ["ops"],
+          defaultLane: "ops",
+          routes: { review: "reviewer" },
+          defaultRoute: "reviewer",
+        },
+      },
+    })
+
+    expect(document.settings?.activePreset).toBe("review")
+    expect(document.settings?.defaultLane).toBe("ops")
+  })
 })
 
 function asRouterConfig(proposal: ReturnType<typeof buildRoutingProposal>) {

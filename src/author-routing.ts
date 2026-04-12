@@ -51,6 +51,10 @@ export type RoutingProposal = {
 
 type LayeredRoutingSections = Pick<LayeredControlPlaneConfigInput, "workflow" | "settings" | "profiles" | "lanes" | "presets">
 
+type ApplyRoutingProposalOptions = {
+  effectiveWorkflowKind?: WorkflowConfig["kind"]
+}
+
 const FRONTEND_LANE = "frontend"
 const BACKEND_LANE = "backend"
 const BUILD_INTENT = "build"
@@ -180,9 +184,10 @@ export function buildRoutingProposal({
 export function applyRoutingProposalToConfig(
   proposal: RoutingProposal,
   existingConfig?: LayeredRoutingSections,
+  options: ApplyRoutingProposalOptions = {},
 ): LayeredRoutingSections {
   const baseConfig = existingConfig ?? createDefaultAuthorRoutingDocument()
-  const baseWorkflowKind = baseConfig.workflow?.kind ?? "superpowers"
+  const baseWorkflowKind = options.effectiveWorkflowKind ?? baseConfig.workflow?.kind ?? "superpowers"
   const modeChanged = baseWorkflowKind !== proposal.workflow.kind
   const presets = modeChanged
     ? { default: proposal.presets.default }
@@ -190,7 +195,7 @@ export function applyRoutingProposalToConfig(
         ...(baseConfig.presets ?? {}),
         default: mergeDefaultPreset(baseConfig.presets?.default, proposal.presets.default),
       }
-  const settings = normalizeDefaultLane(baseConfig.settings, presets.default)
+  const settings = normalizeSettings(baseConfig.settings, presets)
 
   return {
     ...baseConfig,
@@ -327,17 +332,29 @@ function mergeDefaultPreset(
   }
 }
 
-function normalizeDefaultLane(
+function normalizeSettings(
   settings: LayeredRoutingSections["settings"],
-  preset: ControlPlanePreset,
+  presets: Record<string, ControlPlanePreset>,
 ): LayeredRoutingSections["settings"] {
-  if (!settings?.defaultLane) {
+  if (!settings) {
     return settings
   }
 
-  return (preset.usesLanes ?? []).includes(settings.defaultLane)
+  const configuredActivePreset = settings.activePreset
+  const activePreset = configuredActivePreset && presets[configuredActivePreset] ? configuredActivePreset : "default"
+  const nextSettings = activePreset === settings.activePreset
     ? settings
-    : { ...settings, defaultLane: null }
+    : { ...settings, activePreset }
+
+  if (!nextSettings.defaultLane) {
+    return nextSettings
+  }
+
+  const preset = presets[activePreset]!
+
+  return (preset.usesLanes ?? []).includes(nextSettings.defaultLane)
+    ? nextSettings
+    : { ...nextSettings, defaultLane: null }
 }
 
 function titleCase(value: string) {
