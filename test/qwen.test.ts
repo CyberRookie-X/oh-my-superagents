@@ -72,6 +72,57 @@ describe("buildQwenArtifacts", () => {
     },
   }
 
+  it("renders direct-mode Qwen agents and commands for intents", async () => {
+    const artifacts = await buildQwenArtifacts(
+      {
+        workflow: {
+          kind: "direct",
+          intents: {
+            plan: { label: "Plan" },
+            build: { label: "Build" },
+          },
+        },
+        profiles: {
+          planner: { model: "openai/gpt-5" },
+          builder: { model: "gpt-5.4" },
+        },
+        routes: { plan: "planner" },
+        defaultRoute: "builder",
+      } as never,
+      {
+        cwd: "/workspace/project",
+        homeDir: "/home/test",
+        controlPlaneSettings,
+      },
+    )
+
+    expect(artifacts.commands.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["ai-plan.md", "ai-build.md"]),
+    )
+    expect(artifacts.agents.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["rt-plan.md", "rt-build.md"]),
+    )
+  })
+
+  it("skips upstream skill discovery and fail-closed behavior in direct mode", async () => {
+    await expect(
+      buildQwenArtifacts(
+        {
+          workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+          profiles: { planner: { model: "openai/gpt-5" } },
+          routes: { plan: "planner" },
+          defaultRoute: "planner",
+        } as never,
+        {
+          cwd: "/workspace/project",
+          homeDir: "/home/test",
+          controlPlaneSettings,
+          readDirectoryBasenames: async () => [],
+        },
+      ),
+    ).resolves.toBeDefined()
+  })
+
   it("materializes the required fixed Qwen wrapper agent names", async () => {
     const artifacts = await buildQwenArtifacts(
       {
