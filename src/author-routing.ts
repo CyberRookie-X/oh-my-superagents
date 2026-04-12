@@ -125,9 +125,17 @@ export function buildRoutingProposal({
   ) as Record<string, ControlPlaneLane>
 
   const defaultLane = lanes[0]
-  const defaultRoute = defaultLane ? proposedLanes[defaultLane].defaultRoute : inventoryEntries[0][0]
+  const zeroLaneReviewRoute = lanes.length === 0 ? pickGenericIntentProfileId(inventoryEntries, lanes, REVIEW_INTENT) : undefined
+  const defaultRoute = defaultLane
+    ? proposedLanes[defaultLane].defaultRoute
+    : pickGenericIntentProfileId(inventoryEntries, lanes, BUILD_INTENT) ?? inventoryEntries[0][0]
   profiles[defaultRoute] ??= toProfile(inventory.models[defaultRoute])
-  const intents = createDirectIntents(defaultRoute, proposedLanes)
+
+  if (zeroLaneReviewRoute) {
+    profiles[zeroLaneReviewRoute] ??= toProfile(inventory.models[zeroLaneReviewRoute])
+  }
+
+  const intents = createDirectIntents(defaultRoute, proposedLanes, zeroLaneReviewRoute)
 
   return {
     workflow: mode === "direct" ? { kind: "direct", intents } : { kind: "superpowers" },
@@ -214,7 +222,11 @@ function toProfile(model: ModelInventory["models"][string]): ControlPlaneProfile
   }
 }
 
-function createDirectIntents(defaultRoute: string, lanes: Record<string, ControlPlaneLane>) {
+function createDirectIntents(
+  defaultRoute: string,
+  lanes: Record<string, ControlPlaneLane>,
+  reviewRoute?: string,
+) {
   const intents: Record<string, DirectIntentConfig> = {}
 
   if (defaultRoute) {
@@ -223,7 +235,7 @@ function createDirectIntents(defaultRoute: string, lanes: Record<string, Control
 
   const laneValues = Object.values(lanes)
 
-  if (laneValues.some((lane) => Boolean(lane.routes.review))) {
+  if (reviewRoute || laneValues.some((lane) => Boolean(lane.routes.review))) {
     intents.review = { label: "Review" }
   }
 

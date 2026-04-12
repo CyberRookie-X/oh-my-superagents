@@ -77,4 +77,38 @@ describe("buildRoutingProposal", () => {
       },
     })
   })
+
+  it("uses build and review inventory support for mixed zero-lane direct proposals", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: [],
+      inventory: {
+        models: {
+          "review-heavy": {
+            model: "anthropic/claude-sonnet-4-5-20250929",
+            specialties: ["review"],
+          },
+          "worker-build": {
+            model: "openai/gpt-5",
+            specialties: ["build"],
+          },
+        },
+      },
+    })
+
+    expect(proposal.profiles).toEqual({
+      "review-heavy": { model: "anthropic/claude-sonnet-4-5-20250929" },
+      "worker-build": { model: "openai/gpt-5" },
+    })
+    expect(proposal.lanes).toEqual({})
+    expect(proposal.presets.default.defaultRoute).toBe("worker-build")
+    expect(proposal.presets.default.usesLanes).toEqual([])
+    expect(proposal.workflow).toEqual({
+      kind: "direct",
+      intents: {
+        build: { label: "Build" },
+        review: { label: "Review" },
+      },
+    })
+  })
 })
