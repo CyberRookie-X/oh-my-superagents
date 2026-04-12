@@ -1,6 +1,7 @@
 import {
   BUILT_IN_PHASES,
   CONTROL_PLANE_COMMAND_KEYS,
+  SAFE_NAME_PATTERN,
   type ControlPlaneCommandKey,
   type ControlPlaneConfig,
   type RouterConfig,
@@ -295,6 +296,10 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
 
   if (workflow?.kind === "direct") {
     for (const intent of Object.keys(workflow.intents)) {
+      if (!SAFE_NAME_PATTERN.test(intent)) {
+        throw new Error(`Invalid direct intent id: ${intent}`)
+      }
+
       const resolved = resolveRoute(config, intent)
       const agentName = `rt-${intent}`
 

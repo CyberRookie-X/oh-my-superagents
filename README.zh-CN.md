@@ -96,6 +96,7 @@
 首个通用路由切片是 OpenCode 上的实验性 direct workflow。
 
 - 使用用户定义的 intent，并生成 OpenCode 原生的 `ai-<intent>` commands 与 `rt-<intent>` agents。
+- Direct intent id 只能包含小写字母、数字和 `-`，这样生成的 OpenCode 文件名才合法。
 - 当前只适用于 `--host opencode`。
 - 当前 direct mode 的控制平面支持面为 `status`、`doctor`、`explain`、`sync`。
 - 渲染或解释 direct mode 的 OpenCode 工件时，不依赖 upstream `superpowers`。

@@ -13,7 +13,7 @@ import { SUPERPOWERS_ROUTE_CATALOG } from "./workflow-superpowers.js"
 export { SUPERPOWERS_ROUTE_CATALOG as BUILT_IN_PHASES } from "./workflow-superpowers.js"
 
 const BUILT_IN_PHASE_SET = new Set<string>(SUPERPOWERS_ROUTE_CATALOG)
-const SAFE_NAME_PATTERN = /^[a-z0-9-]+$/
+export const SAFE_NAME_PATTERN = /^[a-z0-9-]+$/
 
 export const CONTROL_PLANE_COMMAND_KEYS = ["status", "use", "disable", "sync", "doctor"] as const
 

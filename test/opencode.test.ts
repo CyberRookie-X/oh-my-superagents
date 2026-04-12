@@ -170,6 +170,26 @@ describe("buildArtifacts", () => {
     )
   })
 
+  it("rejects unsafe direct-mode intent ids before generating OpenCode artifact filenames", () => {
+    expect(() =>
+      buildArtifacts({
+        workflow: {
+          kind: "direct",
+          intents: {
+            "foo/bar": { label: "Plan" },
+          },
+        },
+        profiles: {
+          planner: { model: "openai/gpt-5" },
+        },
+        routes: {
+          "foo/bar": "planner",
+        },
+        defaultRoute: "planner",
+      } as never),
+    ).toThrow(/invalid direct intent id|foo\/bar/i)
+  })
+
   it("renders direct-mode agents without upstream superpowers skill handoff", () => {
     const artifacts = buildArtifacts({
       workflow: {

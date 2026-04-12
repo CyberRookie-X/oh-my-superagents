@@ -329,7 +329,8 @@
               "type": "object",
               "propertyNames": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "pattern": "^[a-z0-9-]+$"
               },
               "additionalProperties": {
                 "$ref": "#/$defs/directIntent"

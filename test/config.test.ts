@@ -887,7 +887,7 @@ describe("loadControlPlaneConfig", () => {
             properties?: {
               kind?: { const?: string }
               intents?: {
-                propertyNames?: { type?: string; minLength?: number }
+                propertyNames?: { type?: string; minLength?: number; pattern?: string }
                 additionalProperties?: { $ref?: string }
               }
             }
@@ -951,7 +951,7 @@ describe("loadControlPlaneConfig", () => {
     expect(legacyShape?.required).toContain("profiles")
     expect(legacyShape?.required).toContain("defaultRoute")
     expect(directWorkflow?.properties?.intents?.propertyNames?.type).toBe("string")
-    expect(directWorkflow?.properties?.intents?.propertyNames?.minLength).toBe(1)
+    expect(directWorkflow?.properties?.intents?.propertyNames?.pattern).toBe("^[a-z0-9-]+$")
     expect(directWorkflow?.properties?.intents?.additionalProperties?.$ref).toBe("#/$defs/directIntent")
     expect(schema.$defs?.directIntent?.properties?.label?.type).toBe("string")
     expect(schema.$defs?.directIntent?.properties?.label?.minLength).toBe(1)

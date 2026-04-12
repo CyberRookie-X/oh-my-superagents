@@ -83,6 +83,7 @@ Today that means:
 The first generic-routing slice is an experimental direct workflow on OpenCode.
 
 - It uses user-defined intents and renders OpenCode-native `ai-<intent>` commands plus `rt-<intent>` agents.
+- Direct intent ids must use lowercase letters, digits, and `-` only so the generated OpenCode filenames stay valid.
 - It currently applies only to `--host opencode`.
 - The supported direct-mode control-plane surface is `status`, `doctor`, `explain`, and `sync`.
 - It does not require upstream `superpowers` to render or explain direct-mode OpenCode artifacts.
