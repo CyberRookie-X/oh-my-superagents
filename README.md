@@ -75,6 +75,7 @@ Today that means:
 - Generates `.opencode/agents/*.md` and `.opencode/commands/*.md`
 - Generates `.codex/agents/*.toml`
 - Generates `.qwen/agents/*.md` and `.qwen/commands/*.md`
+- Proposes routing config changes with `author routing` from repo signals plus a user-supplied model inventory
 - Exposes `status`, `use`, `disable`, `sync`, `doctor`, `explain`, and `bootstrap` CLIs
 - Ships a minimal OpenCode plugin entrypoint for startup diagnostics
 
@@ -279,6 +280,31 @@ Behavior notes:
 - For `--host codex`, the OMS-managed surface includes `.codex/agents/*.toml`, the OMS marketplace entry inside `.agents/plugins/marketplace.json`, `plugins/oh-my-superagents-codex/.codex-plugin/plugin.json`, and OMS control-plane skills under `plugins/oh-my-superagents-codex/skills/*/SKILL.md`.
 - For `--host qwen`, the OMS-managed surface includes both `.qwen/commands/*.md` and `.qwen/agents/*.md`.
 - Artifact inspection in `status` and `doctor` is also invoking-host-only.
+
+## AI-Assisted Routing Authoring
+
+`author routing` is AI-assisted authoring support for routing config. It proposes lane, profile, preset, and optional direct-mode intent changes from repo signals plus a local model inventory. It does not autonomously rewrite your config or silently persist changes.
+
+First-slice command shape:
+
+```bash
+oh-my-superagents author routing --mode direct --models ./models.jsonc
+```
+
+Behavior notes:
+
+- `--mode <superpowers|direct>` is required.
+- `--models <path>` is required in the first slice and must point to a local JSON or JSONC model inventory.
+- Preview is the default behavior: the command prints a summary and diff, returns the proposed patch in JSON output, and leaves config on disk unchanged.
+- Add `--write` to apply the proposed config document after the same preview/diff output.
+- The first slice is CLI-first and host-independent. It helps bootstrap or evolve routing config faster, but the user remains responsible for reviewing model ids, lane names, and the final write.
+
+Examples:
+
+```bash
+oh-my-superagents author routing --mode superpowers --models ./models.jsonc
+oh-my-superagents author routing --mode direct --models ./models.jsonc --write
+```
 
 ## Command Prefix And Aliases
 

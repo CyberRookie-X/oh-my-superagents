@@ -88,6 +88,7 @@
 - 生成 `.opencode/agents/*.md` 与 `.opencode/commands/*.md`
 - 生成 `.codex/agents/*.toml`
 - 生成 `.qwen/agents/*.md` 与 `.qwen/commands/*.md`
+- 通过 `author routing` 基于仓库信号和用户提供的模型清单生成路由配置提案
 - 提供 `status`、`use`、`disable`、`sync`、`doctor`、`explain`、`bootstrap` CLI
 - 提供最小 OpenCode plugin 入口用于启动诊断
 
@@ -282,6 +283,31 @@ Stage 1 新增了宿主本地控制平面命令：
 - `use` 先按 preset key 匹配，再按唯一 `short` 匹配
 - `disable` 和禁用状态下的 `sync` 只清理**当前宿主**的 OMS 工件，不会去动别的宿主
 - `status` 与 `doctor` 的工件检查也只针对当前宿主
+
+## AI 辅助路由编写
+
+`author routing` 是面向路由配置的 AI 辅助编写能力。它会结合仓库信号与本地模型清单，提出 lane、profile、preset 以及可选的 direct-mode intent 配置建议。它不是自动改写器，也不会静默写入你的配置。
+
+首个切片的命令形态：
+
+```bash
+oh-my-superagents author routing --mode direct --models ./models.jsonc
+```
+
+行为说明：
+
+- `--mode <superpowers|direct>` 为必填。
+- `--models <path>` 在首个切片中为必填，指向本地 JSON 或 JSONC 模型清单。
+- 默认只做预览：命令会输出摘要和 diff，并在 JSON 输出中返回提议的 patch，但不会落盘。
+- 显式传入 `--write` 后，才会在输出相同摘要和 diff 之后写入提议的配置文档。
+- 该切片是 CLI-first、宿主无关的辅助编写能力，用来帮助更快地引导或演进路由配置；最终的模型 id、lane 名称和写入动作仍由用户确认。
+
+示例：
+
+```bash
+oh-my-superagents author routing --mode superpowers --models ./models.jsonc
+oh-my-superagents author routing --mode direct --models ./models.jsonc --write
+```
 
 ## 命令前缀与别名
 
