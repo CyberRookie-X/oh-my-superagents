@@ -51,6 +51,37 @@ describe("buildCodexArtifacts", () => {
     ])
   })
 
+  it("renders direct-mode Codex agents for workflow intents", () => {
+    const artifacts = buildCodexArtifacts({
+      workflow: {
+        kind: "direct",
+        intents: {
+          plan: { label: "Plan" },
+          build: { label: "Build" },
+        },
+      },
+      profiles: {
+        planner: { model: "openai/gpt-5" },
+        builder: { model: "gpt-5.4" },
+      },
+      routes: { plan: "planner" },
+      defaultRoute: "builder",
+    } as never)
+
+    expect(artifacts.agents.map((item) => item.fileName)).toEqual(["rt-plan.toml", "rt-build.toml"])
+  })
+
+  it("does not delegate to upstream superpowers skills in direct mode", () => {
+    const artifacts = buildCodexArtifacts({
+      workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+      profiles: { planner: { model: "openai/gpt-5" } },
+      routes: { plan: "planner" },
+      defaultRoute: "planner",
+    } as never)
+
+    expect(artifacts.agents[0]?.content).not.toContain("Use the superpowers skill")
+  })
+
   it("maps max effort to xhigh reasoning", () => {
     const artifacts = buildCodexArtifacts({
       profiles: { review: { model: "gpt-5.4", effort: "max" } },
