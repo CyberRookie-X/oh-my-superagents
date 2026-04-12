@@ -1,3 +1,4 @@
+import { parse, type ParseError } from "jsonc-parser"
 import { describe, expect, it } from "vitest"
 import { createDefaultControlPlaneConfig, type ControlPlaneConfig, type RouterConfig } from "../src/config.js"
 import * as opencode from "../src/opencode.js"
@@ -22,6 +23,17 @@ function createRouterConfig(): RouterConfig {
     routes: {},
     defaultRoute: "build",
   }
+}
+
+function parseRuntimeMetadata(content: string) {
+  const errors: ParseError[] = []
+  const parsed = parse(content, errors) as {
+    agents: Record<string, { profiles: string[]; codexFast: boolean }>
+  }
+
+  expect(errors).toEqual([])
+
+  return parsed
 }
 
 describe("renderAgentFile", () => {
@@ -110,8 +122,15 @@ describe("buildArtifacts", () => {
 
     expect(runtimeFile).toBeDefined()
     expect(runtimeFile?.directory).toBe(".opencode/oh-my-superagents")
-    expect(runtimeFile?.content).toContain('"spr-build"')
-    expect(runtimeFile?.content).toContain('"codexFast": true')
+    expect(runtimeFile?.content).toContain("generated-by: oh-my-superagents")
+    expect(parseRuntimeMetadata(runtimeFile?.content ?? "")).toEqual({
+      agents: expect.objectContaining({
+        "spr-build": {
+          profiles: ["build"],
+          codexFast: true,
+        },
+      }),
+    })
   })
 
   it("includes codexFast false or absent agents in the runtime metadata without enabling them", () => {
@@ -128,8 +147,62 @@ describe("buildArtifacts", () => {
     const runtimeFile = artifacts.commands.find((item) => item.fileName === "runtime-agent-metadata.json")
 
     expect(runtimeFile).toBeDefined()
-    expect(runtimeFile?.content).toContain('"spr-strategy"')
-    expect(runtimeFile?.content).toContain('"codexFast": false')
+    expect(parseRuntimeMetadata(runtimeFile?.content ?? "")).toEqual({
+      agents: expect.objectContaining({
+        "spr-strategy": {
+          profiles: ["strategy"],
+          codexFast: false,
+        },
+        "spr-build": {
+          profiles: ["build"],
+          codexFast: true,
+        },
+      }),
+    })
+  })
+
+  it("allows shared OpenCode agents to retain multiple profile ids when codexFast semantics match", () => {
+    const artifacts = buildArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: {
+        visualA: { model: "google/gemini-2.5-pro", variant: "high" },
+        visualB: { model: "google/gemini-2.5-pro", variant: "high" },
+      },
+      routes: {
+        "frontend-design": "visualA",
+        "webapp-testing": "visualB",
+      },
+      defaultRoute: "visualA",
+    } as never)
+
+    const runtimeFile = artifacts.commands.find((item) => item.fileName === "runtime-agent-metadata.json")
+
+    expect(runtimeFile).toBeDefined()
+    expect(parseRuntimeMetadata(runtimeFile?.content ?? "")).toEqual({
+      agents: expect.objectContaining({
+        "spr-visual": {
+          profiles: ["visualA", "visualB"],
+          codexFast: false,
+        },
+      }),
+    })
+  })
+
+  it("keeps shared OpenCode agents conflicting when matching selections disagree on codexFast", () => {
+    expect(() =>
+      buildArtifacts({
+        workflow: { kind: "superpowers" },
+        profiles: {
+          visualA: { model: "google/gemini-2.5-pro", variant: "high", codexFast: true },
+          visualB: { model: "google/gemini-2.5-pro", variant: "high" },
+        },
+        routes: {
+          "frontend-design": "visualA",
+          "webapp-testing": "visualB",
+        },
+        defaultRoute: "visualA",
+      } as never),
+    ).toThrow(/spr-visual/)
   })
 
   it("fails when a built-in phase has no route and no defaultRoute", () => {

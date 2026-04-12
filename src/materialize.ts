@@ -4,6 +4,8 @@ import {
   AUXILIARY_MARKER_PREFIX,
   CONTROL_PLANE_MARKER_PREFIX,
   MARKER_TEXT,
+  RUNTIME_AGENT_METADATA_DIRECTORY,
+  RUNTIME_AGENT_METADATA_FILE,
   type GeneratedArtifact,
 } from "./opencode.js"
 
@@ -96,6 +98,11 @@ function isOpenCodeRouterOwnedFile(directory: string, fileName: string, content:
   }
 
   return false
+}
+
+function isOpenCodeRuntimeMetadataFile(filePath: string, content: string) {
+  return filePath.endsWith(`${path.sep}${RUNTIME_AGENT_METADATA_DIRECTORY.replace(/\//g, path.sep)}${path.sep}${RUNTIME_AGENT_METADATA_FILE}`)
+    && hasArtifactOwnershipMarker(content)
 }
 
 function parseControlPlaneOwnership(content: string) {
@@ -276,6 +283,10 @@ function isArtifactOwnedByCurrentContract(
       && isSameControlPlaneOwnership(artifact.content, existingContent)
   }
 
+  if (artifact.directory === RUNTIME_AGENT_METADATA_DIRECTORY && artifact.fileName === RUNTIME_AGENT_METADATA_FILE) {
+    return isOpenCodeRuntimeMetadataFile(existingPath, existingContent)
+  }
+
   return isPrefixOwned(artifact.fileName, existingContent, new Set([artifact.ownerPrefix]))
 }
 
@@ -289,6 +300,7 @@ export async function materializeArtifacts(
   const desiredFinalPaths = new Set<string>()
   const directoryPrefixes = new Map<string, Set<string>>()
   const opencodeOmsCommandDirectories = new Set<string>()
+  const opencodeRuntimeMetadataDirectories = new Set<string>()
   const qwenOmsCommandDirectories = new Set<string>()
   const codexSkillCleanupRoots = new Map<string, Set<string>>()
 
@@ -306,6 +318,10 @@ export async function materializeArtifacts(
 
       if (artifact.directory === ".opencode/commands" && isOpenCodeOmsControlPlaneCommand(artifact.content)) {
         opencodeOmsCommandDirectories.add(targetDirectory)
+      }
+
+      if (artifact.directory === RUNTIME_AGENT_METADATA_DIRECTORY && artifact.fileName === RUNTIME_AGENT_METADATA_FILE) {
+        opencodeRuntimeMetadataDirectories.add(targetDirectory)
       }
 
       if (artifact.directory === ".qwen/commands" && isQwenOmsControlPlaneCommand(artifact.content)) {
@@ -361,6 +377,10 @@ export async function materializeArtifacts(
         (
           opencodeOmsCommandDirectories.has(directory)
           && isOpenCodeOmsControlPlaneFile(fullPath, content)
+        )
+        || (
+          opencodeRuntimeMetadataDirectories.has(directory)
+          && isOpenCodeRuntimeMetadataFile(fullPath, content)
         )
         || (
           qwenOmsCommandDirectories.has(directory)

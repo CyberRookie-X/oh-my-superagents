@@ -35,7 +35,11 @@ import {
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
 import { hasArtifactOwnershipMarker, materializeArtifacts } from "./materialize.js"
-import { buildArtifacts, listRenderedOpenCodeControlPlaneCommands } from "./opencode.js"
+import {
+  buildArtifacts,
+  listRenderedOpenCodeControlPlaneCommands,
+  RUNTIME_AGENT_METADATA_DIRECTORY,
+} from "./opencode.js"
 import { buildQwenArtifacts } from "./qwen.js"
 import { explainAll, explainPhase, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
 import {
@@ -834,6 +838,7 @@ const OWNED_ARTIFACT_RULES: Record<CliHost, Array<{ directory: string; extension
   opencode: [
     { directory: ".opencode/agents", extension: ".md" },
     { directory: ".opencode/commands", extension: ".md" },
+    { directory: RUNTIME_AGENT_METADATA_DIRECTORY, extension: ".json" },
   ],
   codex: [
     { directory: ".codex/agents", extension: ".toml" },

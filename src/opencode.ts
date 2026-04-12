@@ -13,6 +13,7 @@ export const MARKER_TEXT = "generated-by: oh-my-superagents; do-not-edit: true"
 export const MARKER = `<!-- ${MARKER_TEXT} -->`
 export const CONTROL_PLANE_MARKER_PREFIX = "oms-control-plane:"
 export const AUXILIARY_MARKER_PREFIX = "oms-auxiliary:"
+const JSONC_MARKER = `// ${MARKER_TEXT}`
 
 type PermissionTask = Record<string, "allow" | "deny" | "ask">
 
@@ -44,9 +45,9 @@ const CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string>
 }
 const TEMPORARY_DISABLE_COMMAND_FILE = "oms-no-superpowers.md"
 const TEMPORARY_DISABLE_COMMAND_OWNER_PREFIX = TEMPORARY_DISABLE_COMMAND_FILE
-const RUNTIME_AGENT_METADATA_DIRECTORY = ".opencode/oh-my-superagents"
-const RUNTIME_AGENT_METADATA_FILE = "runtime-agent-metadata.json"
-const RUNTIME_AGENT_METADATA_OWNER_PREFIX = "oms-runtime-agent-metadata"
+export const RUNTIME_AGENT_METADATA_DIRECTORY = ".opencode/oh-my-superagents"
+export const RUNTIME_AGENT_METADATA_FILE = "runtime-agent-metadata.json"
+export const RUNTIME_AGENT_METADATA_OWNER_PREFIX = "oms-runtime-agent-metadata"
 
 const RESERVED_PHASE_COMMAND_FILES = new Set(
   Object.values(PHASE_TO_COMMAND).map((commandName) => `${commandName.slice(1)}.md`),
@@ -238,14 +239,14 @@ function buildTemporaryDisableHelperArtifact(): GeneratedArtifact {
 }
 
 function buildRuntimeAgentMetadataArtifact(
-  agents: Map<string, { profile: string; codexFast: boolean }>,
+  agents: Map<string, { profiles: string[]; codexFast: boolean }>,
 ): GeneratedArtifact {
   return {
     kind: "command",
     directory: RUNTIME_AGENT_METADATA_DIRECTORY,
     fileName: RUNTIME_AGENT_METADATA_FILE,
     ownerPrefix: RUNTIME_AGENT_METADATA_OWNER_PREFIX,
-    content: `${JSON.stringify({ agents: Object.fromEntries(agents) }, null, 2)}\n`,
+    content: `${JSONC_MARKER}\n${JSON.stringify({ agents: Object.fromEntries(agents) }, null, 2)}\n`,
   }
 }
 
@@ -321,7 +322,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
   const commands: GeneratedArtifact[] = []
   const agents = new Map<string, GeneratedArtifact>()
   const agentSelections = new Map<string, string>()
-  const runtimeAgentMetadata = new Map<string, { profile: string; codexFast: boolean }>()
+  const runtimeAgentMetadata = new Map<string, { profiles: string[]; codexFast: boolean }>()
   const workflow = config.workflow
   const laneExecutionUnits =
     workflow?.kind === "superpowers" && controlPlaneSettings && config.lanes && Object.keys(config.lanes).length > 0
@@ -332,14 +333,24 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
       : []
 
   function registerRuntimeAgentMetadata(agentName: string, profile: string, codexFast?: boolean) {
-    const next = { profile, codexFast: codexFast === true }
     const current = runtimeAgentMetadata.get(agentName)
+    const nextCodexFast = codexFast === true
 
-    if (current && (current.profile !== next.profile || current.codexFast !== next.codexFast)) {
+    if (current && current.codexFast !== nextCodexFast) {
       throw new Error(`Shared agent conflict for ${agentName}`)
     }
 
-    runtimeAgentMetadata.set(agentName, next)
+    if (current) {
+      if (!current.profiles.includes(profile)) {
+        current.profiles.push(profile)
+      }
+      return
+    }
+
+    runtimeAgentMetadata.set(agentName, {
+      profiles: [profile],
+      codexFast: nextCodexFast,
+    })
   }
 
   if (workflow?.kind === "direct") {

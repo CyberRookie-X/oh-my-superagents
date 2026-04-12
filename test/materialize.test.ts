@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { materializeArtifacts } from "../src/materialize.js"
+import { buildArtifacts } from "../src/opencode.js"
 
 const OWNERSHIP_MARKER = "<!-- generated-by: oh-my-superagents; do-not-edit: true -->"
 
@@ -291,6 +292,30 @@ describe("materializeArtifacts", () => {
     })
 
     expect(result.removed).toEqual([])
+  })
+
+  it("treats existing OpenCode runtime metadata as OMS-owned on repeated sync", async () => {
+    const runtimeArtifact = buildArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: {
+        build: { model: "gpt-5.4", codexFast: true },
+      },
+      routes: {},
+      defaultRoute: "build",
+    } as never).commands.find((artifact) => artifact.fileName === "runtime-agent-metadata.json")
+
+    expect(runtimeArtifact).toBeDefined()
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: runtimeArtifact ? [runtimeArtifact] : [],
+      fs: createMemoryFs({
+        "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json": runtimeArtifact?.content ?? "",
+      }).fs,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.warnings).toEqual([])
   })
 
   it("rejects path traversal in artifact filenames", async () => {
