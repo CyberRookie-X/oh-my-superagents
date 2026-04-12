@@ -17,7 +17,7 @@ import {
   readControlPlaneSourceDocument,
   resolvePresetReuse,
 } from "./config.js"
-import { resolvePhase, type BuiltInPhase } from "./router.js"
+import { resolveRoute, type BuiltInPhase } from "./router.js"
 import type { SuperpowersCompatibilityResult, SupportedSuperpowersHost } from "./superpowers-compatibility.js"
 
 const READ_ONLY_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "doctor"])
@@ -221,10 +221,10 @@ export function buildOpenCodeStatusState(input: {
   }
 }
 
-export function buildControlPlaneExplainTrace(input: {
+export function buildControlPlaneRouteExplainTrace(input: {
   cwd: string
   resolved: ResolvedControlPlane
-  phase: BuiltInPhase
+  routeId: string
 }): ExplainTrace {
   const laneState = input.resolved.laneState ?? resolveLaneState(input.resolved.config, input.resolved.activePreset)
   const routerConfig = {
@@ -239,7 +239,7 @@ export function buildControlPlaneExplainTrace(input: {
     effectiveLane: laneState.effectiveLane,
     superpowersCompatibility: input.resolved.config.settings.superpowersCompatibility,
   }
-  const resolvedRoute = resolvePhase(routerConfig, input.phase)
+  const resolvedRoute = resolveRoute(routerConfig, input.routeId)
   const activeDefinition = input.resolved.trace?.activePresetDefinition
   const parentDefinition = input.resolved.trace?.parentPresetDefinition
   const fallbackPath = input.resolved.source.kind === "file" ? input.resolved.source.path : undefined
@@ -248,9 +248,9 @@ export function buildControlPlaneExplainTrace(input: {
     ? resolveLaneDefinitionFromLayers(input.resolved.layers ?? [], laneState.effectiveLane)
     : undefined
   const decisivePath = resolvedRoute.routeSource === "preset-route"
-    ? activeDefinition?.preset.routes[input.phase]
+    ? activeDefinition?.preset.routes[input.routeId]
       ? activeDefinition.path
-      : parentDefinition?.preset.routes[input.phase]
+      : parentDefinition?.preset.routes[input.routeId]
         ? parentDefinition.path
         : activeDefinition?.path ?? fallbackPath
     : resolvedRoute.routeSource === "lane-route" || resolvedRoute.routeSource === "lane-default"
@@ -270,6 +270,18 @@ export function buildControlPlaneExplainTrace(input: {
       : chooseMostLocalConfigSource([decisivePath, selectedProfilePath], input.cwd),
     reuseRelationship: input.resolved.activePreset.preset.extends ? "extends" : "none",
   }
+}
+
+export function buildControlPlaneExplainTrace(input: {
+  cwd: string
+  resolved: ResolvedControlPlane
+  phase: BuiltInPhase
+}): ExplainTrace {
+  return buildControlPlaneRouteExplainTrace({
+    cwd: input.cwd,
+    resolved: input.resolved,
+    routeId: input.phase,
+  })
 }
 
 function resolveLaneDefinitionFromLayers(

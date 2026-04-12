@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { runCli } from "../src/cli.js"
 import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-plane.js"
 import { explainCodexPhase } from "../src/codex.js"
-import { MARKER_TEXT } from "../src/opencode.js"
+import { buildArtifacts as buildOpenCodeArtifacts, MARKER_TEXT } from "../src/opencode.js"
 import { explainPhase } from "../src/router.js"
 
 const baseConfig = {
@@ -119,6 +119,82 @@ const controlPlaneConfig = {
       defaultRoute: "review",
     },
   },
+}
+
+const directWorkflow = {
+  kind: "direct" as const,
+  intents: {
+    plan: { label: "Plan" },
+    build: { label: "Build" },
+  },
+}
+
+const directControlPlaneConfig = {
+  ...controlPlaneConfig,
+  workflow: directWorkflow,
+  settings: {
+    ...controlPlaneConfig.settings,
+    defaultLane: "frontend",
+    superpowersCompatibility: { mode: "strict" as const },
+  },
+  profiles: {
+    planner: { model: "openai/gpt-5" },
+    builder: { model: "gpt-5.4" },
+  },
+  lanes: {
+    frontend: {
+      label: "Frontend",
+      routes: { plan: "planner" },
+      defaultRoute: "builder",
+    },
+  },
+  presets: {
+    default: {
+      ...controlPlaneConfig.presets.default,
+      profiles: undefined,
+      usesLanes: ["frontend"],
+      defaultLane: "frontend",
+      routes: {},
+      defaultRoute: "builder",
+    },
+  },
+}
+
+function createDirectCliDeps(overrides: Record<string, unknown> = {}) {
+  return createCliDeps({
+    loadConfig: async () => ({
+      path: "/workspace/project/oh-my-superagents.config.jsonc",
+      config: {
+        workflow: directWorkflow,
+        profiles: directControlPlaneConfig.profiles,
+        lanes: directControlPlaneConfig.lanes,
+        routes: {},
+        defaultRoute: "builder",
+        superpowersCompatibility: directControlPlaneConfig.settings.superpowersCompatibility,
+      },
+    }),
+    resolveControlPlane: async () => ({
+      source: {
+        kind: "file" as const,
+        hasRealSource: true,
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+      },
+      config: directControlPlaneConfig,
+      activePreset: {
+        key: "default",
+        preset: directControlPlaneConfig.presets.default,
+      },
+      laneState: {
+        allowedLanes: ["frontend"],
+        defaultLane: "frontend",
+        effectiveLane: "frontend",
+        presetDefaultLane: "frontend",
+      },
+    }),
+    buildArtifacts: buildOpenCodeArtifacts,
+    ...overrides,
+  })
 }
 
 const defaultLaneState = {
@@ -420,53 +496,35 @@ describe("runCli", () => {
     )
   })
 
-  it("rejects explain for direct workflows until direct runtime support exists", async () => {
-    let explainCalled = false
-    const directConfig = {
-      ...controlPlaneConfig,
-      workflow: {
-        kind: "direct" as const,
-        intents: {
-          plan: { label: "Plan" },
-        },
-      },
-      presets: {
-        ...controlPlaneConfig.presets,
-        default: {
-          ...controlPlaneConfig.presets.default,
-          routes: {
-            plan: "build",
-          },
-          defaultRoute: "build",
-        },
-      },
-    }
+  it("explains a direct workflow intent on OpenCode", async () => {
+    const result = await runCli(["explain", "--host", "opencode", "--intent", "plan"], createDirectCliDeps())
 
-    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
-      loadConfig: async () => ({
-        path: "/workspace/project/oh-my-superagents.config.jsonc",
-        config: {
-          workflow: directConfig.workflow,
-          profiles: { build: { model: "openai/gpt-5" } },
-          routes: { plan: "build" },
-          defaultRoute: "build",
-          superpowersCompatibility: { mode: "warn" as const },
-        },
-      }),
-      resolveControlPlane: async () => ({
-        source: {
-          kind: "file" as const,
-          hasRealSource: true,
-          path: "/workspace/project/oh-my-superagents.config.jsonc",
-          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
-        },
-        config: directConfig,
-        activePreset: {
-          key: "default",
-          preset: directConfig.presets.default,
-        },
-        laneState: defaultLaneState,
-      }),
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.intent).toBe("plan")
+    expect(output.profileId).toBe("planner")
+    expect(output.model).toBe("openai/gpt-5")
+  })
+
+  it("shows all direct workflow intents on OpenCode", async () => {
+    const result = await runCli(["explain", "--host", "opencode", "--all"], createDirectCliDeps())
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ intent: "plan", model: "openai/gpt-5" }),
+        expect.objectContaining({ intent: "build", model: "gpt-5.4" }),
+      ]),
+    )
+  })
+
+  it("keeps direct workflow explain scoped to OpenCode", async () => {
+    let explainCalled = false
+
+    const result = await runCli(["explain", "--host", "codex", "--intent", "plan"], createDirectCliDeps({
       explainPhaseForHost: () => {
         explainCalled = true
         throw new Error("unexpected explain")
@@ -474,7 +532,7 @@ describe("runCli", () => {
     }))
 
     expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("Direct workflow is not yet supported")
+    expect(result.stderr).toContain("opencode")
     expect(explainCalled).toBe(false)
   })
 
@@ -1231,6 +1289,31 @@ describe("runCli", () => {
       "Blocked by incompatible superpowers installation for opencode: Version is below minimum supported version 5.0.0.",
     )
     expect(materializeCalled).toBe(false)
+  })
+
+  it("syncs OpenCode artifacts for a direct workflow config", async () => {
+    let materializeCalled = false
+
+    const result = await runCli(["sync", "--host", "opencode"], createDirectCliDeps({
+      evaluateSuperpowersCompatibility: () => incompatibleOpencodeStrict,
+      materializeArtifacts: async ({ artifacts }: { artifacts: Array<{ directory: string; fileName: string }> }) => {
+        materializeCalled = true
+
+        return {
+          exitCode: 0 as const,
+          warnings: [],
+          written: artifacts.map((artifact) => path.join("/workspace/project", artifact.directory, artifact.fileName)),
+          removed: [],
+        }
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(materializeCalled).toBe(true)
+    expect(parsed.compatibility).toBeNull()
+    expect(parsed.written.some((filePath: string) => filePath.endsWith("ai-plan.md"))).toBe(true)
   })
 
   it("passes OMS control-plane settings into OpenCode sync artifact generation", async () => {

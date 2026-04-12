@@ -4,6 +4,7 @@ import { cwd as getCwd } from "node:process"
 import { BUILT_IN_PHASES, discoverConfigPath, loadRouterConfig } from "./config.js"
 import {
   buildControlPlaneExplainTrace,
+  buildControlPlaneRouteExplainTrace,
   buildOpenCodeNextAction,
   buildOpenCodeStatusState,
   prepareControlPlaneStateWrite,
@@ -20,7 +21,7 @@ import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex
 import { hasArtifactOwnershipMarker, materializeArtifacts } from "./materialize.js"
 import { buildArtifacts, listRenderedOpenCodeControlPlaneCommands } from "./opencode.js"
 import { buildQwenArtifacts } from "./qwen.js"
-import { explainAll, explainPhase, resolvePhase, type BuiltInPhase } from "./router.js"
+import { explainAll, explainPhase, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
 import {
   evaluateSuperpowersCompatibility,
   type SuperpowersCompatibilityMode,
@@ -262,27 +263,47 @@ function attachExplainTrace(
   payload: unknown,
   input: { cwd: string; resolved: ResolvedControlPlane },
 ) {
-  const buildTrace = (phase: BuiltInPhase) => buildControlPlaneExplainTrace({
-    cwd: input.cwd,
-    resolved: input.resolved,
-    phase,
-  })
+  const buildTrace = (item: Record<string, unknown>) => {
+    if (typeof item.phase === "string" && BUILT_IN_PHASES.includes(item.phase as BuiltInPhase)) {
+      return buildControlPlaneExplainTrace({
+        cwd: input.cwd,
+        resolved: input.resolved,
+        phase: item.phase as BuiltInPhase,
+      })
+    }
+
+    if (typeof item.intent === "string") {
+      return buildControlPlaneRouteExplainTrace({
+        cwd: input.cwd,
+        resolved: input.resolved,
+        routeId: item.intent,
+      })
+    }
+
+    return null
+  }
 
   if (Array.isArray(payload)) {
     return payload.map((item) => {
-      if (!isRecord(item) || typeof item.phase !== "string" || !BUILT_IN_PHASES.includes(item.phase as BuiltInPhase)) {
+      if (!isRecord(item)) {
         return item
       }
 
-      return withExplainTrace(item, buildTrace(item.phase as BuiltInPhase))
+      const trace = buildTrace(item)
+      if (!trace) {
+        return item
+      }
+
+      return withExplainTrace(item, trace)
     })
   }
 
-  if (!isRecord(payload) || typeof payload.phase !== "string" || !BUILT_IN_PHASES.includes(payload.phase as BuiltInPhase)) {
+  if (!isRecord(payload)) {
     return payload
   }
 
-  return withExplainTrace(payload, buildTrace(payload.phase as BuiltInPhase))
+  const trace = buildTrace(payload)
+  return trace ? withExplainTrace(payload, trace) : payload
 }
 
 function withLaneExplainability(payload: Record<string, unknown>, laneExplainability: LaneExplainability) {
@@ -370,14 +391,62 @@ function joinStderr(parts: Array<string | undefined>) {
   return parts.filter((part): part is string => Boolean(part && part.length > 0)).join("\n")
 }
 
-function assertSuperpowersWorkflow(
+function isDirectOpenCodeWorkflow(
+  config: { workflow: ResolvedControlPlane["config"]["workflow"] },
+  host: CliHost | SupportedSuperpowersHost,
+) {
+  return config.workflow.kind === "direct" && host === "opencode"
+}
+
+function assertWorkflowSupport(
   config: { workflow: ResolvedControlPlane["config"]["workflow"] },
   command: string,
   host: CliHost | SupportedSuperpowersHost,
 ) {
-  if (config.workflow.kind === "direct") {
-    throw new Error(`Direct workflow is not yet supported for ${command} --host ${host}`)
+  if (config.workflow.kind !== "direct") {
+    return
   }
+
+  if (host !== "opencode") {
+    throw new Error("Direct workflow is currently only supported for --host opencode")
+  }
+
+  if (command === "status" || command === "doctor" || command === "explain" || command === "sync") {
+    return
+  }
+
+  throw new Error(`Direct workflow is not yet supported for ${command} --host ${host}`)
+}
+
+function explainDirectIntent(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"], intent: string) {
+  const resolved = resolveRoute(config, intent)
+
+  return {
+    intent,
+    profileId: resolved.profileId,
+    effectiveLane: resolved.effectiveLane,
+    routeSource: resolved.routeSource,
+    model: resolved.selection.model,
+    variant: resolved.selection.variant,
+    commandName: `ai-${intent}`,
+    agentName: `rt-${intent}`,
+  }
+}
+
+function explainAllDirect(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"]) {
+  if (config.workflow.kind !== "direct") {
+    return []
+  }
+
+  return Object.keys(config.workflow.intents).map((intent) => explainDirectIntent(config, intent))
+}
+
+function maybeResolveCompatibility(
+  config: { workflow: ResolvedControlPlane["config"]["workflow"] },
+  host: CliHost,
+  resolve: () => Promise<SuperpowersCompatibilityResult | null>,
+) {
+  return isDirectOpenCodeWorkflow(config, host) ? Promise.resolve(null) : resolve()
 }
 
 function toRouterConfig(
@@ -918,8 +987,12 @@ async function buildControlPlaneStatus(
   deps: CliDeps,
 ) {
   const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
-  assertSuperpowersWorkflow(resolved.config, "status", host)
-  const compatibility = await resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps)
+  assertWorkflowSupport(resolved.config, "status", host)
+  const compatibility = await maybeResolveCompatibility(
+    resolved.config,
+    host,
+    () => resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps),
+  )
   const artifacts = await inspectArtifacts(
     cwd,
     await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps),
@@ -979,8 +1052,12 @@ async function buildControlPlaneDoctor(
   deps: CliDeps,
 ) {
   const resolved = await deps.resolveControlPlane({ command: "doctor", cwd, explicitPath, runtimeLane })
-  assertSuperpowersWorkflow(resolved.config, "doctor", host)
-  const compatibility = await resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps)
+  assertWorkflowSupport(resolved.config, "doctor", host)
+  const compatibility = await maybeResolveCompatibility(
+    resolved.config,
+    host,
+    () => resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps),
+  )
   const artifacts = await inspectArtifacts(
     cwd,
     await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps),
@@ -1111,7 +1188,51 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       const resolved = host === "opencode" || (host === "codex" && runtimeLane)
         ? await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
         : null
-      assertSuperpowersWorkflow(resolved?.config ?? loaded.config, "explain", host as SupportedSuperpowersHost)
+      const explainConfig = resolved?.config ?? loaded.config
+      assertWorkflowSupport(explainConfig, "explain", host as SupportedSuperpowersHost)
+
+      if (explainConfig.workflow.kind === "direct") {
+        const directConfig = resolved ? toRouterConfig(resolved.config, resolved.laneState) : loaded.config
+
+        if (flags.get("--all") === true) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify(formatExplainOutput(
+              resolved
+                ? attachLaneExplainability(
+                  attachExplainTrace(explainAllDirect(directConfig), { cwd, resolved }),
+                  resolved,
+                )
+                : explainAllDirect(directConfig),
+              null,
+            ), null, 2),
+            stderr: "",
+          }
+        }
+
+        const intent = getStringFlag(flags, "--intent")
+        if (!intent) {
+          return { exitCode: 1, stdout: "", stderr: "Missing --intent or --all" }
+        }
+
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify(
+            formatExplainOutput(
+              resolved
+                ? attachLaneExplainability(
+                  attachExplainTrace(explainDirectIntent(directConfig, intent), { cwd, resolved }),
+                  resolved,
+                )
+                : explainDirectIntent(directConfig, intent),
+              null,
+            ),
+            null,
+            2,
+          ),
+          stderr: "",
+        }
+      }
 
       if (flags.get("--all") === true) {
         const compatibility = await resolveCompatibilityForHost(
@@ -1186,7 +1307,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       }
 
       const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath })
-      assertSuperpowersWorkflow(resolved.config, "use", cliHost)
+      assertWorkflowSupport(resolved.config, "use", cliHost)
       const nextPreset = resolvePresetKey(resolved, selector)
       const prepared = await deps.prepareControlPlaneStateWrite({
         command: "use",
@@ -1354,12 +1475,16 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         }
       }
 
-      assertSuperpowersWorkflow(resolved.config, "sync", cliHost)
+      assertWorkflowSupport(resolved.config, "sync", cliHost)
 
-      const compatibility = await resolveCompatibilityForCliHost(
+      const compatibility = await maybeResolveCompatibility(
+        resolved.config,
         cliHost,
-        resolved.config.settings.superpowersCompatibility.mode,
-        deps,
+        () => resolveCompatibilityForCliHost(
+          cliHost,
+          resolved.config.settings.superpowersCompatibility.mode,
+          deps,
+        ),
       )
 
       if (compatibility?.shouldBlock) {
