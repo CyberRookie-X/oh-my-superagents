@@ -153,11 +153,12 @@ function renderQwenDirectCommandFile(input: { description: string; intent: strin
   return [
     "---",
     `description: ${yamlScalar(input.description)}`,
-    `agent: ${input.agentName}`,
     "---",
     "",
     MARKER,
     `<!-- ${CONTROL_PLANE_MARKER_PREFIX} stage=2; host=qwen; artifact=command; logical-command=intent; rendered-name=${input.renderedName} -->`,
+    "",
+    `Use the \`${input.agentName}\` direct-mode agent for this intent.`,
     "",
     "## Router Context",
     `- intent: ${input.intent}`,

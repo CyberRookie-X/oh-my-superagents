@@ -104,7 +104,8 @@ describe("buildQwenArtifacts", () => {
     )
 
     const planCommand = artifacts.commands.find((item) => item.fileName === "ai-plan.md")
-    expect(planCommand?.content).toContain("agent: rt-plan")
+    expect(planCommand?.content).not.toContain("agent: rt-plan")
+    expect(planCommand?.content).toContain("Use the `rt-plan` direct-mode agent for this intent.")
     expect(planCommand?.content).toContain("- intent: plan")
   })
 
