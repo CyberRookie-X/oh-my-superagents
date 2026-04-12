@@ -82,6 +82,33 @@ describe("buildCodexArtifacts", () => {
     expect(artifacts.agents[0]?.content).not.toContain("Use the superpowers skill")
   })
 
+  it("rejects unsafe direct intent ids before generating filenames", () => {
+    expect(() =>
+      buildCodexArtifacts({
+        workflow: { kind: "direct", intents: { "foo/bar": { label: "Bad" } } },
+        profiles: { planner: { model: "openai/gpt-5" } },
+        routes: { "foo/bar": "planner" },
+        defaultRoute: "planner",
+      } as never),
+    ).toThrow("Invalid direct intent id: foo/bar")
+  })
+
+  it('sanitizes direct-mode developer instructions for TOML multiline strings', () => {
+    const artifacts = buildCodexArtifacts({
+      workflow: {
+        kind: "direct",
+        intents: {
+          plan: { label: 'Plan """ safely', description: 'Keep """ literal text intact' },
+        },
+      },
+      profiles: { planner: { model: "openai/gpt-5" } },
+      routes: { plan: "planner" },
+      defaultRoute: "planner",
+    } as never)
+
+    expect(artifacts.agents[0]?.content.match(/"""/g)).toHaveLength(2)
+  })
+
   it("maps max effort to xhigh reasoning", () => {
     const artifacts = buildCodexArtifacts({
       profiles: { review: { model: "gpt-5.4", effort: "max" } },
