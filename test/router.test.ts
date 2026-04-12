@@ -113,6 +113,34 @@ describe("resolveRoute", () => {
     expect(typeof routerLibrary.resolveRoute).toBe("function")
     expect(routerLibrary.resolveRoute(directConfig as never, "plan").profileId).toBe("planner")
   })
+
+  it("rejects an unknown direct-mode route id instead of falling back", () => {
+    const directConfig = {
+      workflow: {
+        kind: "direct" as const,
+        intents: {
+          plan: { label: "Plan" },
+          build: { label: "Build" },
+        },
+      },
+      profiles: {
+        planner: { model: "openai/gpt-5" },
+        builder: { model: "gpt-5.4" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { plan: "planner" },
+          defaultRoute: "builder",
+        },
+      },
+      routes: {},
+      defaultRoute: "builder",
+      effectiveLane: "frontend",
+    }
+
+    expect(() => routerLibrary.resolveRoute(directConfig as never, "pla")).toThrowError("Unknown intent: pla")
+  })
 })
 
 describe("explainPhase", () => {

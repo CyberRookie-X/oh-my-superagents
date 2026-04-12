@@ -8,18 +8,11 @@ import {
   SUPERPOWERS_COMPATIBILITY_MODES,
   type SuperpowersCompatibilityMode,
 } from "./superpowers-compatibility.js"
+import { SUPERPOWERS_ROUTE_CATALOG } from "./workflow-superpowers.js"
 
-export const BUILT_IN_PHASES = [
-  "brainstorming",
-  "writing-plans",
-  "subagent-driven-development",
-  "requesting-code-review",
-  "verification-before-completion",
-  "frontend-design",
-  "webapp-testing",
-] as const
+export { SUPERPOWERS_ROUTE_CATALOG as BUILT_IN_PHASES } from "./workflow-superpowers.js"
 
-const BUILT_IN_PHASE_SET = new Set<string>(BUILT_IN_PHASES)
+const BUILT_IN_PHASE_SET = new Set<string>(SUPERPOWERS_ROUTE_CATALOG)
 
 export const CONTROL_PLANE_COMMAND_KEYS = ["status", "use", "disable", "sync", "doctor"] as const
 

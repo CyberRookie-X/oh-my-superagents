@@ -40,6 +40,11 @@ type RouteContext = {
 
 export function resolveRoute(config: RouterConfig, routeId: string, routeContext: RouteContext = {}): ResolvedRoute {
   const workflowKind = config.workflow?.kind ?? "superpowers"
+
+  if (config.workflow?.kind === "direct" && !(routeId in config.workflow.intents)) {
+    throw new Error(`Unknown intent: ${routeId}`)
+  }
+
   const effectiveLane = routeContext.effectiveLane ?? config.effectiveLane
   const lane = effectiveLane ? config.lanes?.[effectiveLane] : undefined
 

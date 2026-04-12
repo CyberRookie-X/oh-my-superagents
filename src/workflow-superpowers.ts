@@ -1,6 +1,12 @@
-import { BUILT_IN_PHASES } from "./config.js"
-
-export const SUPERPOWERS_ROUTE_CATALOG = BUILT_IN_PHASES
+export const SUPERPOWERS_ROUTE_CATALOG = [
+  "brainstorming",
+  "writing-plans",
+  "subagent-driven-development",
+  "requesting-code-review",
+  "verification-before-completion",
+  "frontend-design",
+  "webapp-testing",
+] as const
 
 export type BuiltInPhase = (typeof SUPERPOWERS_ROUTE_CATALOG)[number]
 
