@@ -102,6 +102,10 @@ describe("buildQwenArtifacts", () => {
     expect(artifacts.agents.map((item) => item.fileName)).toEqual(
       expect.arrayContaining(["rt-plan.md", "rt-build.md"]),
     )
+
+    const planCommand = artifacts.commands.find((item) => item.fileName === "ai-plan.md")
+    expect(planCommand?.content).toContain("agent: rt-plan")
+    expect(planCommand?.content).toContain("- intent: plan")
   })
 
   it("skips upstream skill discovery and fail-closed behavior in direct mode", async () => {

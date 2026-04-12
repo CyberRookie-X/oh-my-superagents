@@ -149,10 +149,11 @@ function renderQwenDirectAgentFile(input: RenderQwenDirectAgentInput) {
   ].join("\n")
 }
 
-function renderQwenDirectCommandFile(input: { description: string; intent: string; renderedName: string }) {
+function renderQwenDirectCommandFile(input: { description: string; intent: string; agentName: string; renderedName: string }) {
   return [
     "---",
     `description: ${yamlScalar(input.description)}`,
+    `agent: ${input.agentName}`,
     "---",
     "",
     MARKER,
@@ -247,6 +248,7 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
         content: renderQwenDirectCommandFile({
           description: `${intentConfig.label} command for Qwen direct mode.`,
           intent,
+          agentName,
           renderedName: commandName,
         }),
       })
