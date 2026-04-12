@@ -186,6 +186,42 @@ describe("buildCodexBootstrapFiles", () => {
     expect(pluginManifest?.content).toContain("$oms-doctor")
   })
 
+  it("generates direct-mode Codex skills for intents", () => {
+    const result = buildCodexBootstrapFiles({
+      packageVersion: "0.1.0",
+      includeConfig: false,
+      routerConfig: {
+        workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+        profiles: { planner: { model: "openai/gpt-5" } },
+        routes: { plan: "planner" },
+        defaultRoute: "planner",
+      } as never,
+      controlPlaneSettings: createDefaultControlPlaneConfig().settings,
+    })
+
+    expect(result.files.some((file) => file.path.includes("skills/ai-plan/SKILL.md"))).toBe(true)
+  })
+
+  it("does not mention upstream superpowers skills in direct-mode Codex skill prompts", () => {
+    const result = buildCodexBootstrapFiles({
+      packageVersion: "0.1.0",
+      includeConfig: false,
+      routerConfig: {
+        workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+        profiles: { planner: { model: "openai/gpt-5" } },
+        routes: { plan: "planner" },
+        defaultRoute: "planner",
+      } as never,
+      controlPlaneSettings: createDefaultControlPlaneConfig().settings,
+    })
+
+    const planSkill = result.files.find((file) => file.path.includes("skills/ai-plan/SKILL.md"))
+    expect(planSkill).toBeDefined()
+
+    const prompt = planSkill?.content.split("-->\n")[1] ?? planSkill?.content ?? ""
+    expect(prompt).not.toContain("superpowers")
+  })
+
   it("includes the starter config only when requested", () => {
     const result = buildCodexBootstrapFiles({
       packageVersion: "0.1.0",
@@ -652,6 +688,54 @@ describe("runCodexBootstrap", () => {
     expect(result.syncResult.removed).toContain(
       "/workspace/project/plugins/oh-my-superagents-codex/skills/oms-status/SKILL.md",
     )
+  })
+
+  it("reruns direct-mode Codex bootstrap without colliding on generated intent skills", async () => {
+    const fs = createMemoryFs()
+    const directRouterConfig = {
+      workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+      profiles: { planner: { model: "openai/gpt-5" } },
+      routes: { plan: "planner" },
+      defaultRoute: "planner",
+    } as const
+
+    await fs.writeFile(
+      "/workspace/project/oh-my-superagents.config.jsonc",
+      JSON.stringify({
+        workflow: directRouterConfig.workflow,
+        settings: createDefaultControlPlaneConfig().settings,
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            profiles: directRouterConfig.profiles,
+            routes: directRouterConfig.routes,
+            defaultRoute: directRouterConfig.defaultRoute,
+          },
+        },
+      }),
+    )
+
+    const run = () =>
+      runCodexBootstrap({
+        cwd: "/workspace/project",
+        discoverConfigPath: async () => "/workspace/project/oh-my-superagents.config.jsonc",
+        loadConfig: async () => ({
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          config: directRouterConfig as never,
+        }),
+        resolveCompatibility: async () => compatibleCodexWarn,
+        buildCodexArtifacts: () => ({ agents: [] }),
+        materializeArtifacts,
+        fs,
+      })
+
+    const first = await run()
+    const second = await run()
+
+    expect(first.syncResult.exitCode).toBe(0)
+    expect(second.syncResult.exitCode).toBe(0)
+    expect(second.syncResult.warnings).toEqual([])
   })
 
   it("fails before mutation when the existing marketplace JSON is malformed", async () => {

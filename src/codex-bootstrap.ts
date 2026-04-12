@@ -94,12 +94,6 @@ export function buildStarterCodexConfig() {
   }
 }
 
-function assertSupportedBootstrapWorkflow(config: Pick<RouterConfig, "workflow">) {
-  if (config.workflow.kind === "direct") {
-    throw new Error("Direct workflow is not yet supported for bootstrap --host codex")
-  }
-}
-
 function buildMarketplaceJson() {
   const plugin = {
     name: "oh-my-superagents-codex",
@@ -284,6 +278,49 @@ function buildControlPlaneSkillFiles(
   })
 }
 
+function buildDirectModeSkill(input: {
+  skillName: string
+  agentName: string
+  intent: string
+  label: string
+  description?: string
+}) {
+  const intentDescription = input.description ? `${input.label}: ${input.description}` : input.label
+
+  return `---
+name: ${input.skillName}
+description: Route ${input.intent} requests through ${input.agentName}.
+---
+
+<!-- generated-by: oh-my-superagents; do-not-edit: true -->
+Use the Codex direct-mode agent \`${input.agentName}\` for the \`${input.intent}\` intent.
+Handle requests that match this intent: ${intentDescription}.
+Forward any extra user instructions in $ARGUMENTS.
+Stay focused on this intent unless the user explicitly asks to switch.
+`
+}
+
+function buildDirectModeSkillFiles(routerConfig?: RouterConfig) {
+  if (routerConfig?.workflow.kind !== "direct") {
+    return []
+  }
+
+  return Object.entries(routerConfig.workflow.intents).map(([intent, intentConfig]) => {
+    assertSafeCodexSkillSegment(intent, `direct intent ${intent}`)
+
+    return {
+      path: `plugins/oh-my-superagents-codex/skills/ai-${intent}/SKILL.md`,
+      content: buildDirectModeSkill({
+        skillName: `ai-${intent}`,
+        agentName: `rt-${intent}`,
+        intent,
+        label: intentConfig.label,
+        description: intentConfig.description,
+      }),
+    }
+  })
+}
+
 function buildTemporaryDisableSkill(): CodexBootstrapFile {
   return {
     path: "plugins/oh-my-superagents-codex/skills/oms-no-superpowers/SKILL.md",
@@ -314,11 +351,13 @@ export function buildCodexBootstrapFiles(input: {
   includeConfig: boolean
   configArtifactPath?: string
   existingMarketplaceContent?: string
+  routerConfig?: RouterConfig
   controlPlaneSettings?: CodexBootstrapControlPlaneSettings
 }): CodexBootstrapBuildResult {
   const configArtifactPath = input.configArtifactPath ?? buildStarterCodexConfig().path
   const controlPlaneSettings = input.controlPlaneSettings ?? createDefaultControlPlaneConfig().settings
   const controlPlaneSkillFiles = buildControlPlaneSkillFiles(controlPlaneSettings, configArtifactPath)
+  const directModeSkillFiles = buildDirectModeSkillFiles(input.routerConfig)
   const files: CodexBootstrapFile[] = [
     {
       path: ".agents/plugins/marketplace.json",
@@ -329,6 +368,7 @@ export function buildCodexBootstrapFiles(input: {
       content: buildPluginManifest(input.packageVersion, controlPlaneSettings),
     },
     ...controlPlaneSkillFiles,
+    ...directModeSkillFiles,
     buildTemporaryDisableSkill(),
   ]
 
@@ -347,7 +387,7 @@ function toGeneratedArtifact(codexFile: CodexBootstrapFile): GeneratedArtifact {
     kind: "command",
     directory: path.dirname(codexFile.path),
     fileName: path.basename(codexFile.path),
-    ownerPrefix: "unused-for-stage1-metadata",
+    ownerPrefix: "",
     content: codexFile.content,
   }
 }
@@ -428,8 +468,6 @@ export async function runCodexBootstrap(input: {
       ).config.settings
     : createDefaultControlPlaneConfig().settings
 
-  assertSupportedBootstrapWorkflow(loaded.config)
-
   const compatibility = await input.resolveCompatibility(
     "superpowersCompatibility" in loaded.config && loaded.config.superpowersCompatibility
       ? loaded.config.superpowersCompatibility.mode
@@ -458,6 +496,7 @@ export async function runCodexBootstrap(input: {
     includeConfig: !existingConfigPath,
     configArtifactPath: configPath,
     existingMarketplaceContent,
+    routerConfig: loaded.config,
     controlPlaneSettings,
   })
 
