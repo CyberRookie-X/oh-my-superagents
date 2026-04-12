@@ -789,6 +789,91 @@ describe("buildRoutingProposal", () => {
     expect(document.settings?.activePreset).toBe("review")
     expect(document.settings?.defaultLane).toBe("ops")
   })
+
+  it("falls back to the effective activePreset when local settings omit activePreset", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: ["frontend"],
+      inventory: {
+        models: {
+          builder: { model: "openai/gpt-5", specialties: ["frontend", "build"] },
+        },
+      },
+    })
+
+    const document = applyRoutingProposalToConfig(proposal, {
+      settings: {
+        enabled: true,
+        defaultLane: "ops",
+        commandPrefix: "oms",
+        laneSelection: { mode: "suggest" },
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      profiles: {},
+      lanes: {
+        ops: {
+          label: "Ops",
+          routes: {},
+          defaultRoute: "builder",
+        },
+      },
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          usesLanes: ["ops"],
+          routes: {},
+          defaultRoute: "builder",
+        },
+      },
+    }, {
+      effectiveConfig: {
+        workflow: { kind: "direct", intents: { build: { label: "Build" }, review: { label: "Review" } } },
+        settings: {
+          activePreset: "review",
+          enabled: true,
+          defaultLane: "ops",
+          laneSelection: { mode: "suggest" },
+          commandPrefix: "oms",
+          commands: {
+            status: { name: "status", aliases: ["st"] },
+            use: { name: "use", aliases: ["u"] },
+            disable: { name: "off", aliases: ["o"] },
+            sync: { name: "sync", aliases: ["sy"] },
+            doctor: { name: "doctor", aliases: ["dr"] },
+          },
+          superpowersCompatibility: { mode: "warn" },
+        },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            usesLanes: ["ops"],
+            routes: {},
+            defaultRoute: "builder",
+          },
+          review: {
+            label: "Review",
+            short: "rev",
+            usesLanes: ["ops"],
+            defaultLane: "ops",
+            routes: {},
+            defaultRoute: "builder",
+          },
+        },
+      },
+    })
+
+    expect(document.settings?.activePreset).toBe("review")
+    expect(document.settings?.defaultLane).toBe("ops")
+  })
 })
 
 function asRouterConfig(proposal: ReturnType<typeof buildRoutingProposal>) {

@@ -206,7 +206,11 @@ export function applyRoutingProposalToConfig(
         ...(options.effectiveConfig?.presets ?? writtenPresets),
         default: writtenPresets.default,
       }
-  const settings = normalizeSettings(baseConfig.settings, effectivePresets)
+  const settings = normalizeSettings(
+    baseConfig.settings,
+    effectivePresets,
+    options.effectiveConfig?.settings.activePreset,
+  )
 
   return {
     ...baseConfig,
@@ -346,13 +350,17 @@ function mergeDefaultPreset(
 function normalizeSettings(
   settings: LayeredRoutingSections["settings"],
   presets: Record<string, ControlPlanePreset>,
+  effectiveActivePreset?: string,
 ): LayeredRoutingSections["settings"] {
   if (!settings) {
     return settings
   }
 
   const configuredActivePreset = settings.activePreset
-  const activePreset = configuredActivePreset && presets[configuredActivePreset] ? configuredActivePreset : "default"
+  const inheritedActivePreset = effectiveActivePreset && presets[effectiveActivePreset] ? effectiveActivePreset : undefined
+  const activePreset = configuredActivePreset && presets[configuredActivePreset]
+    ? configuredActivePreset
+    : inheritedActivePreset ?? "default"
   const nextSettings = activePreset === settings.activePreset
     ? settings
     : { ...settings, activePreset }

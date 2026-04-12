@@ -247,7 +247,7 @@ async function buildAuthorRoutingPreview(
     inventory,
   })
   const hasExistingConfig = await deps.artifactExists(targetPath)
-  const effectiveConfig = write
+  const effectiveConfig = (write || hasExistingConfig)
     ? (await deps.resolveControlPlane({ command: "status", cwd, explicitPath })).config
     : undefined
 
