@@ -501,6 +501,7 @@ describe("runCodexBootstrap", () => {
       loadConfig: async () => ({
         path: "/workspace/project/oh-my-superagents.config.jsonc",
         config: {
+          workflow: customControlPlaneConfig.workflow,
           profiles: activePreset.profiles,
           routes: activePreset.routes,
           defaultRoute: activePreset.defaultRoute,
@@ -575,6 +576,7 @@ describe("runCodexBootstrap", () => {
       loadConfig: async () => ({
         path: "/workspace/project/oh-my-superagents.config.jsonc",
         config: {
+          workflow: customControlPlaneConfig.workflow,
           profiles: activePreset.profiles,
           routes: activePreset.routes,
           defaultRoute: activePreset.defaultRoute,

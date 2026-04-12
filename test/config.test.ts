@@ -64,6 +64,41 @@ describe("loadControlPlaneConfig", () => {
     })
   })
 
+  it("preserves workflow when migrating legacy router config", async () => {
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "workflow": {
+          "kind": "direct",
+          "intents": {
+            "plan": { "label": "Plan" }
+          }
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        },
+        "routes": {
+          "plan": "build"
+        },
+        "defaultRoute": "build"
+      }`,
+    })
+
+    expect(result.config.workflow.kind).toBe("direct")
+    if (result.config.workflow.kind !== "direct") {
+      throw new Error("Expected direct workflow")
+    }
+
+    expect(result.config.workflow.intents.plan.label).toBe("Plan")
+    expect(result.config.presets.default.routes).toEqual({
+      plan: "build",
+    })
+    expect(result.config.presets.default.defaultRoute).toBe("build")
+  })
+
   it("defaults to the superpowers workflow when workflow is omitted", async () => {
     const result = await loadControlPlaneConfig({
       cwd: "/workspace/project",
@@ -751,6 +786,7 @@ describe("loadControlPlaneConfig", () => {
 
     expect(schema.properties?.workflow?.$ref).toBe("#/$defs/workflow")
     expect(layeredShape?.properties?.workflow?.$ref).toBe("#/$defs/workflow")
+    expect(legacyShape?.properties?.workflow?.$ref).toBe("#/$defs/workflow")
     expect(layeredShape?.properties?.settings?.properties?.commandPrefix?.pattern).toBe("^[a-z0-9-]+$")
     expect(
       layeredShape?.properties?.settings?.properties?.commands?.properties?.status?.properties?.name?.pattern,

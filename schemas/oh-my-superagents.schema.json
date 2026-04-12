@@ -267,6 +267,9 @@
       "required": ["profiles", "defaultRoute"],
       "additionalProperties": false,
       "properties": {
+        "workflow": {
+          "$ref": "#/$defs/workflow"
+        },
         "profiles": {
           "type": "object",
           "propertyNames": {

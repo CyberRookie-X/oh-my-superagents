@@ -84,6 +84,7 @@ const WorkflowSchema = z.discriminatedUnion("kind", [SuperpowersWorkflowSchema, 
 
 const LegacyRouterConfigSchema = z
   .object({
+    workflow: WorkflowSchema.optional(),
     profiles: z.record(z.string().min(1), ProfileSchema),
     routes: z.record(z.string().min(1), z.string().min(1)).optional(),
     defaultRoute: z.string().min(1),
@@ -358,6 +359,7 @@ function migrateLegacyConfig(rawConfig: unknown): LayeredControlPlaneConfigInput
   const parsed: LegacyRouterConfigInput = LegacyRouterConfigSchema.parse(rawConfig)
 
   return {
+    workflow: parsed.workflow,
     settings: parsed.superpowersCompatibility
       ? { superpowersCompatibility: parsed.superpowersCompatibility }
       : undefined,
