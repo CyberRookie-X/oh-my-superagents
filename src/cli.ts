@@ -3,8 +3,20 @@ import path from "node:path"
 import { cwd as getCwd } from "node:process"
 import { parse, type ParseError } from "jsonc-parser"
 import { z } from "zod"
-import { buildRoutingProposal, inspectRoutingAuthoringInputs, type ModelInventory } from "./author-routing.js"
-import { BUILT_IN_PHASES, discoverConfigPath, getProjectConfigPath, loadRouterConfig } from "./config.js"
+import {
+  applyRoutingProposalToConfig,
+  buildRoutingProposal,
+  inspectRoutingAuthoringInputs,
+  renderRoutingConfigDocument,
+  type ModelInventory,
+} from "./author-routing.js"
+import {
+  BUILT_IN_PHASES,
+  discoverConfigPath,
+  getProjectConfigPath,
+  loadRouterConfig,
+  readControlPlaneSourceDocument,
+} from "./config.js"
 import {
   buildControlPlaneExplainTrace,
   buildControlPlaneRouteExplainTrace,
@@ -217,6 +229,7 @@ async function buildAuthorRoutingPreview(
   explicitPath: string | undefined,
   mode: "superpowers" | "direct",
   modelsPath: string,
+  write: boolean,
   deps: CliDeps,
 ) {
   const inventory = await loadModelInventory(modelsPath, deps)
@@ -232,6 +245,16 @@ async function buildAuthorRoutingPreview(
   })
   const targetPath = explicitPath ?? getProjectConfigPath(cwd)
   const hasExistingConfig = await deps.artifactExists(targetPath)
+  const nextDocument = applyRoutingProposalToConfig(
+    proposal,
+    hasExistingConfig ? (await readControlPlaneSourceDocument(targetPath, deps.readArtifactFile)).config : undefined,
+  )
+  const renderedDocument = renderRoutingConfigDocument(nextDocument)
+
+  if (write) {
+    await deps.mkdir(path.dirname(targetPath), { recursive: true })
+    await deps.writeFile(targetPath, renderedDocument)
+  }
 
   return {
     mode,
@@ -252,8 +275,9 @@ async function buildAuthorRoutingPreview(
         lanes: proposal.lanes,
         presets: proposal.presets,
       },
+      rendered: renderedDocument,
     },
-    written: false as const,
+    written: write,
   }
 }
 
@@ -1262,9 +1286,11 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         return { exitCode: 1, stdout: "", stderr: "Missing required --models" }
       }
 
+      const write = flags.get("--write") === true
+
       return {
         exitCode: 0,
-        stdout: JSON.stringify(await buildAuthorRoutingPreview(cwd, explicitPath, mode, modelsPath, deps), null, 2),
+        stdout: JSON.stringify(await buildAuthorRoutingPreview(cwd, explicitPath, mode, modelsPath, write, deps), null, 2),
         stderr: "",
       }
     }

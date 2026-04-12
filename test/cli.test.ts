@@ -1596,6 +1596,50 @@ describe("runCli", () => {
     expect(output.preview.operation).toBe("create")
   })
 
+  it("writes the proposed routing config only when --write is provided", async () => {
+    let writtenPath = ""
+    let writtenContent = ""
+
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+      "--write",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+      ].includes(filePath),
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.json")
+        ? JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        : JSON.stringify({ dependencies: { react: "18.0.0" } }),
+      writeFile: async (filePath, content) => {
+        writtenPath = filePath
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+
+    const output = JSON.parse(result.stdout)
+
+    expect(output.written).toBe(true)
+    expect(writtenPath).toContain("oh-my-superagents.config.jsonc")
+    expect(writtenContent).toContain('"profiles"')
+    expect(writtenContent).toContain('"settings"')
+  })
+
   it("fails clearly for malformed model inventory entries", async () => {
     const result = await runCli([
       "author",

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { buildRoutingProposal, inspectRoutingAuthoringInputs } from "../src/author-routing.js"
+import {
+  applyRoutingProposalToConfig,
+  buildRoutingProposal,
+  inspectRoutingAuthoringInputs,
+} from "../src/author-routing.js"
 import { resolveRoute } from "../src/router.js"
 
 describe("inspectRoutingAuthoringInputs", () => {
@@ -199,6 +203,100 @@ describe("buildRoutingProposal", () => {
     expect(proposal.workflow).toEqual({ kind: "superpowers" })
     expect(proposal.presets.default.routes).toEqual({})
     expect(resolveRoute(asRouterConfig(proposal), "brainstorming").profileId).toBe("review-heavy")
+  })
+
+  it("creates a new layered config document from a routing proposal", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: ["frontend"],
+      inventory: {
+        models: {
+          builder: { model: "openai/gpt-5", specialties: ["frontend", "build"] },
+        },
+      },
+    })
+
+    const document = applyRoutingProposalToConfig(proposal)
+
+    expect(document.workflow).toEqual(proposal.workflow)
+    expect(document.settings?.activePreset).toBe("default")
+    expect(document.profiles).toEqual(proposal.profiles)
+    expect(document.lanes).toEqual(proposal.lanes)
+    expect(document.presets).toEqual(proposal.presets)
+  })
+
+  it("merges proposed routing sections conservatively into an existing config", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: ["frontend"],
+      inventory: {
+        models: {
+          builder: { model: "openai/gpt-5", specialties: ["frontend", "build"] },
+        },
+      },
+    })
+
+    const document = applyRoutingProposalToConfig(proposal, {
+      workflow: { kind: "superpowers" },
+      settings: {
+        activePreset: "default",
+        enabled: true,
+        commandPrefix: "oms",
+        laneSelection: { mode: "suggest" },
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      profiles: {
+        existing: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+      },
+      lanes: {
+        ops: {
+          label: "Ops",
+          routes: {},
+          defaultRoute: "existing",
+        },
+      },
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          description: "Keep this description",
+          usesLanes: ["ops"],
+          routes: { brainstorming: "existing" },
+          defaultRoute: "existing",
+        },
+      },
+    })
+
+    expect(document.workflow).toEqual(proposal.workflow)
+    expect(document.settings?.commandPrefix).toBe("oms")
+    expect(document.profiles).toEqual({
+      existing: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+      builder: { model: "openai/gpt-5" },
+    })
+    expect(document.lanes).toEqual({
+      ops: {
+        label: "Ops",
+        routes: {},
+        defaultRoute: "existing",
+      },
+      frontend: proposal.lanes.frontend,
+    })
+    expect(document.presets.default).toEqual({
+      label: "Default",
+      short: "def",
+      description: "Keep this description",
+      usesLanes: ["ops", "frontend"],
+      routes: { brainstorming: "existing" },
+      defaultLane: "frontend",
+      defaultRoute: "builder",
+    })
   })
 })
 

@@ -1,11 +1,13 @@
 import path from "node:path"
 import {
+  createDefaultControlPlaneConfig,
   defaultExists,
   defaultReadFile,
   type ControlPlaneLane,
   type ControlPlanePreset,
   type ControlPlaneProfile,
   type DirectIntentConfig,
+  type LayeredControlPlaneConfigInput,
   type WorkflowConfig,
 } from "./config.js"
 
@@ -46,6 +48,8 @@ export type RoutingProposal = {
     default: ControlPlanePreset
   }
 }
+
+type LayeredRoutingSections = Pick<LayeredControlPlaneConfigInput, "workflow" | "settings" | "profiles" | "lanes" | "presets">
 
 const FRONTEND_LANE = "frontend"
 const BACKEND_LANE = "backend"
@@ -173,6 +177,34 @@ export function buildRoutingProposal({
   }
 }
 
+export function applyRoutingProposalToConfig(
+  proposal: RoutingProposal,
+  existingConfig?: LayeredRoutingSections,
+): LayeredRoutingSections {
+  const baseConfig = existingConfig ?? createDefaultAuthorRoutingDocument()
+
+  return {
+    ...baseConfig,
+    workflow: proposal.workflow,
+    profiles: {
+      ...(baseConfig.profiles ?? {}),
+      ...proposal.profiles,
+    },
+    lanes: {
+      ...(baseConfig.lanes ?? {}),
+      ...proposal.lanes,
+    },
+    presets: {
+      ...(baseConfig.presets ?? {}),
+      default: mergeDefaultPreset(baseConfig.presets?.default, proposal.presets.default),
+    },
+  }
+}
+
+export function renderRoutingConfigDocument(config: LayeredRoutingSections) {
+  return `${JSON.stringify(config, null, 2)}\n`
+}
+
 async function readPackageJson(
   filePath: string,
   readFile: (filePath: string) => Promise<string>,
@@ -251,6 +283,41 @@ function createDirectIntents(buildSupported: boolean, reviewSupported: boolean):
   }
 }
 
+function createDefaultAuthorRoutingDocument(): LayeredRoutingSections {
+  const defaults = createDefaultControlPlaneConfig()
+
+  return {
+    settings: {
+      enabled: defaults.settings.enabled,
+      activePreset: defaults.settings.activePreset,
+      laneSelection: { ...defaults.settings.laneSelection },
+      commandPrefix: defaults.settings.commandPrefix,
+      commands: Object.fromEntries(
+        Object.entries(defaults.settings.commands).map(([key, command]) => [key, { ...command, aliases: [...command.aliases] }]),
+      ),
+      superpowersCompatibility: { ...defaults.settings.superpowersCompatibility },
+    },
+    profiles: {},
+    lanes: {},
+    presets: {},
+  }
+}
+
+function mergeDefaultPreset(
+  existingPreset: ControlPlanePreset | undefined,
+  proposedPreset: ControlPlanePreset,
+): ControlPlanePreset {
+  return {
+    ...existingPreset,
+    ...proposedPreset,
+    usesLanes: dedupeItems([...(existingPreset?.usesLanes ?? []), ...(proposedPreset.usesLanes ?? [])]),
+    routes: {
+      ...(existingPreset?.routes ?? {}),
+      ...proposedPreset.routes,
+    },
+  }
+}
+
 function titleCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
@@ -269,4 +336,20 @@ function uniqueItems(values: string[]) {
   }
 
   return uniqueValues.filter((value): value is (typeof KNOWN_LANES)[number] => KNOWN_LANES.includes(value as never))
+}
+
+function dedupeItems(values: string[]) {
+  const uniqueValues: string[] = []
+  const seen = new Set<string>()
+
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue
+    }
+
+    seen.add(value)
+    uniqueValues.push(value)
+  }
+
+  return uniqueValues
 }
