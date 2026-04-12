@@ -162,7 +162,7 @@ function renderQwenDirectCommandFile(input: { description: string; intent: strin
     "",
     "## Router Context",
     `- intent: ${input.intent}`,
-    "- arguments: $ARGUMENTS",
+    "- arguments: {{args}}",
     "",
   ].join("\n")
 }

@@ -107,6 +107,7 @@ describe("buildQwenArtifacts", () => {
     expect(planCommand?.content).not.toContain("agent: rt-plan")
     expect(planCommand?.content).toContain("Use the `rt-plan` direct-mode agent for this intent.")
     expect(planCommand?.content).toContain("- intent: plan")
+    expect(planCommand?.content).toContain("- arguments: {{args}}")
   })
 
   it("skips upstream skill discovery and fail-closed behavior in direct mode", async () => {
