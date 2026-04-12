@@ -158,6 +158,48 @@ describe("buildRoutingProposal", () => {
 
     expect(resolveRoute(asRouterConfig(proposal), "review").profileId).toBe("review-heavy")
   })
+
+  it("omits build for lane-backed review-only direct proposals", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: ["frontend"],
+      inventory: {
+        models: {
+          "frontend-review": {
+            model: "anthropic/claude-sonnet-4-5-20250929",
+            specialties: ["frontend", "review"],
+          },
+        },
+      },
+    })
+
+    expect(proposal.lanes.frontend.defaultRoute).toBe("frontend-review")
+    expect(proposal.workflow).toEqual({
+      kind: "direct",
+      intents: {
+        review: { label: "Review" },
+      },
+    })
+  })
+
+  it("keeps superpowers review-only proposals loadable without illegal review route keys", () => {
+    const proposal = buildRoutingProposal({
+      mode: "superpowers",
+      suggestedLanes: [],
+      inventory: {
+        models: {
+          "review-heavy": {
+            model: "anthropic/claude-sonnet-4-5-20250929",
+            specialties: ["review"],
+          },
+        },
+      },
+    })
+
+    expect(proposal.workflow).toEqual({ kind: "superpowers" })
+    expect(proposal.presets.default.routes).toEqual({})
+    expect(resolveRoute(asRouterConfig(proposal), "brainstorming").profileId).toBe("review-heavy")
+  })
 })
 
 function asRouterConfig(proposal: ReturnType<typeof buildRoutingProposal>) {

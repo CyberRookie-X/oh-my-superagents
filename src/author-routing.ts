@@ -103,7 +103,7 @@ export function buildRoutingProposal({
         throw new Error(`Could not determine a default route for lane: ${lane}`)
       }
 
-      const reviewRoute = pickLaneIntentProfileId(inventoryEntries, lanes, lane, REVIEW_INTENT)
+      const reviewRoute = mode === "direct" ? pickLaneIntentProfileId(inventoryEntries, lanes, lane, REVIEW_INTENT) : undefined
       const routes: Record<string, string> = {}
 
       profiles[defaultRoute] = toProfile(inventory.models[defaultRoute])
@@ -126,7 +126,9 @@ export function buildRoutingProposal({
 
   const defaultLane = lanes[0]
   const zeroLaneBuildRoute = lanes.length === 0 ? pickGenericIntentProfileId(inventoryEntries, lanes, BUILD_INTENT) : undefined
-  const zeroLaneReviewRoute = lanes.length === 0 ? pickGenericIntentProfileId(inventoryEntries, lanes, REVIEW_INTENT) : undefined
+  const zeroLaneReviewRoute = mode === "direct" && lanes.length === 0
+    ? pickGenericIntentProfileId(inventoryEntries, lanes, REVIEW_INTENT)
+    : undefined
   const defaultRoute = defaultLane
     ? proposedLanes[defaultLane].defaultRoute
     : zeroLaneBuildRoute ?? zeroLaneReviewRoute ?? inventoryEntries[0][0]
@@ -137,14 +139,21 @@ export function buildRoutingProposal({
   }
 
   const hasLaneReviewRoute = Object.values(proposedLanes).some((lane) => Boolean(lane.routes.review))
+  const hasLaneBuildSupport = lanes.some((lane) => Boolean(pickLaneBuildProfileId(inventoryEntries, lanes, lane)))
   const presetRoutes: Record<string, string> = {}
 
-  if (zeroLaneReviewRoute) {
+  if (mode === "direct" && zeroLaneReviewRoute) {
     presetRoutes.review = zeroLaneReviewRoute
   }
 
   const workflow = mode === "direct"
-    ? { kind: "direct" as const, intents: createDirectIntents(Boolean(defaultLane || zeroLaneBuildRoute), Boolean(hasLaneReviewRoute || zeroLaneReviewRoute)) }
+    ? {
+        kind: "direct" as const,
+        intents: createDirectIntents(
+          lanes.length === 0 ? Boolean(zeroLaneBuildRoute) : hasLaneBuildSupport,
+          Boolean(hasLaneReviewRoute || zeroLaneReviewRoute),
+        ),
+      }
     : { kind: "superpowers" as const }
 
   return {
@@ -199,11 +208,14 @@ async function hasAnyPath(
 
 function pickLaneDefaultProfileId(inventoryEntries: InventoryEntry[], lanes: string[], lane: string) {
   return (
-    pickMatchingProfileId(inventoryEntries, lane, BUILD_INTENT) ??
+    pickLaneBuildProfileId(inventoryEntries, lanes, lane) ??
     pickMatchingProfileId(inventoryEntries, lane) ??
-    pickGenericIntentProfileId(inventoryEntries, lanes, BUILD_INTENT) ??
     inventoryEntries[0]?.[0]
   )
+}
+
+function pickLaneBuildProfileId(inventoryEntries: InventoryEntry[], lanes: string[], lane: string) {
+  return pickMatchingProfileId(inventoryEntries, lane, BUILD_INTENT) ?? pickGenericIntentProfileId(inventoryEntries, lanes, BUILD_INTENT)
 }
 
 function pickLaneIntentProfileId(inventoryEntries: InventoryEntry[], lanes: string[], lane: string, intent: string) {
