@@ -217,6 +217,78 @@ describe("buildArtifacts", () => {
     expect(agent?.content).not.toContain("Load the upstream superpowers skill")
   })
 
+  it("renders lane-scoped execute commands and agents for subagent-driven-development", () => {
+    const artifacts = buildArtifactsWithControlPlane(
+      {
+        workflow: { kind: "superpowers" },
+        profiles: {
+          frontendBuild: { model: "openai/gpt-5" },
+          backendBuild: { model: "gpt-5.4" },
+        },
+        lanes: {
+          frontend: { label: "Frontend", routes: {}, defaultRoute: "frontendBuild" },
+          backend: { label: "Backend", routes: {}, defaultRoute: "backendBuild" },
+        },
+        routes: {},
+        defaultRoute: "backendBuild",
+        effectiveLane: "backend",
+      } as never,
+      {
+        ...createDefaultControlPlaneConfig().settings,
+        subagentExecution: { mode: "suggest" },
+      },
+    )
+
+    expect(artifacts.commands.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["sp-execute.md", "sp-execute-frontend.md", "sp-execute-backend.md"]),
+    )
+    expect(artifacts.agents.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["spr-build.md", "spr-build--frontend.md", "spr-build--backend.md"]),
+    )
+
+    const frontendCommand = artifacts.commands.find((item) => item.fileName === "sp-execute-frontend.md")
+    const frontendAgent = artifacts.agents.find((item) => item.fileName === "spr-build--frontend.md")
+    const backendAgent = artifacts.agents.find((item) => item.fileName === "spr-build--backend.md")
+
+    expect(frontendCommand?.content).toContain("agent: 'spr-build--frontend'")
+    expect(frontendCommand?.content).toContain("superpowers/subagent-driven-development")
+    expect(frontendCommand?.content).toContain("lane: frontend")
+    expect(frontendCommand?.ownerPrefix).toBe("sp-execute-")
+
+    expect(frontendAgent?.content).toContain("model: 'openai/gpt-5'")
+    expect(frontendAgent?.ownerPrefix).toBe("spr-build--")
+    expect(backendAgent?.content).toContain("model: 'gpt-5.4'")
+  })
+
+  it("adds suggest-mode split guidance to the main execute command", () => {
+    const artifacts = buildArtifactsWithControlPlane(
+      {
+        workflow: { kind: "superpowers" },
+        profiles: {
+          frontendBuild: { model: "openai/gpt-5" },
+          backendBuild: { model: "gpt-5.4" },
+        },
+        lanes: {
+          frontend: { label: "Frontend", routes: {}, defaultRoute: "frontendBuild" },
+          backend: { label: "Backend", routes: {}, defaultRoute: "backendBuild" },
+        },
+        routes: {},
+        defaultRoute: "backendBuild",
+      } as never,
+      {
+        ...createDefaultControlPlaneConfig().settings,
+        subagentExecution: { mode: "suggest" },
+      },
+    )
+
+    const execute = artifacts.commands.find((item) => item.fileName === "sp-execute.md")
+
+    expect(execute?.content).toContain("If the task spans multiple lanes")
+    expect(execute?.content).toContain("wait for user confirmation")
+    expect(execute?.content).toContain("sp-execute-frontend")
+    expect(execute?.content).toContain("sp-execute-backend")
+  })
+
   it("fails when a direct-mode command collides with an OMS control-plane command path", () => {
     const defaults = createDefaultControlPlaneConfig().settings
 

@@ -6,6 +6,7 @@ import {
   type ControlPlaneConfig,
   type RouterConfig,
 } from "./config.js"
+import { listLaneExecutionUnits, renderLaneSplitGuidance } from "./lane-execution.js"
 import { PHASE_TO_AGENT, PHASE_TO_COMMAND, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
 
 export const MARKER_TEXT = "generated-by: oh-my-superagents; do-not-edit: true"
@@ -23,7 +24,10 @@ export type GeneratedArtifact = {
   content: string
 }
 
-type OpenCodeControlPlaneSettings = Pick<ControlPlaneConfig["settings"], "commandPrefix" | "commands">
+type OpenCodeControlPlaneSettings = Pick<
+  ControlPlaneConfig["settings"],
+  "activePreset" | "commandPrefix" | "commands" | "subagentExecution"
+>
 
 const CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string> = {
   status: "Show OMS status for OpenCode.",
@@ -102,6 +106,8 @@ export function renderCommandFile(input: {
   agentName: string
   skillName: string
   phase: BuiltInPhase
+  effectiveLane?: string
+  splitGuidance?: string
 }) {
   return [
     "---",
@@ -114,8 +120,10 @@ export function renderCommandFile(input: {
     "",
     `Load and follow the upstream skill \`${input.skillName}\` exactly.`,
     "",
+    ...(input.splitGuidance ? ["## Lane Split Guidance", input.splitGuidance, ""] : []),
     "## Router Context",
     `- phase: ${input.phase}`,
+    ...(input.effectiveLane ? [`- lane: ${input.effectiveLane}`] : []),
     "- arguments: $ARGUMENTS",
     "",
   ].join("\n")
@@ -293,6 +301,13 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
   const agents = new Map<string, GeneratedArtifact>()
   const agentSelections = new Map<string, string>()
   const workflow = config.workflow
+  const laneExecutionUnits =
+    workflow?.kind === "superpowers" && controlPlaneSettings && config.lanes && Object.keys(config.lanes).length > 0
+      ? listLaneExecutionUnits({
+          activePresetKey: controlPlaneSettings.activePreset,
+          activePreset: { usesLanes: Object.keys(config.lanes) },
+        })
+      : []
 
   if (workflow?.kind === "direct") {
     for (const intent of Object.keys(workflow.intents)) {
@@ -336,6 +351,10 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
       const agentName = PHASE_TO_AGENT[phase]
       const commandName = PHASE_TO_COMMAND[phase].slice(1)
       const skillName = `superpowers/${phase}`
+      const permissionTask =
+        phase === "subagent-driven-development"
+          ? { "*": "deny", "spr-review": "allow", "spr-verify": "allow" }
+          : undefined
 
       if (!agents.has(agentName)) {
         agentSelections.set(
@@ -358,10 +377,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
             model: resolved.selection.model,
             variant: resolved.selection.variant,
             temperature: resolved.selection.temperature,
-            permissionTask:
-              agentName === "spr-build"
-                ? { "*": "deny", "spr-review": "allow", "spr-verify": "allow" }
-                : undefined,
+            permissionTask,
           }),
         })
       } else {
@@ -385,8 +401,53 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
           agentName,
           skillName,
           phase,
+          splitGuidance:
+            phase === "subagent-driven-development" && laneExecutionUnits.length > 0
+              ? `If the task spans multiple lanes, ${renderLaneSplitGuidance({
+                  mode: controlPlaneSettings?.subagentExecution.mode ?? "suggest",
+                  units: laneExecutionUnits,
+                }).replace(/^./, (value) => value.toLowerCase())}`
+              : undefined,
         }),
       })
+
+      if (phase !== "subagent-driven-development") {
+        continue
+      }
+
+      for (const unit of laneExecutionUnits) {
+        const laneResolved = resolvePhase(config, phase, { effectiveLane: unit.lane })
+        const laneAgentName = unit.agentFileName.replace(/\.md$/, "")
+
+        agents.set(laneAgentName, {
+          kind: "agent",
+          directory: ".opencode/agents",
+          fileName: unit.agentFileName,
+          ownerPrefix: "spr-build--",
+          content: renderAgentFile({
+            agentName: laneAgentName,
+            description: `${laneAgentName} helper for ${phase}`,
+            model: laneResolved.selection.model,
+            variant: laneResolved.selection.variant,
+            temperature: laneResolved.selection.temperature,
+            permissionTask,
+          }),
+        })
+
+        commands.push({
+          kind: "command",
+          directory: ".opencode/commands",
+          fileName: unit.commandFileName,
+          ownerPrefix: "sp-execute-",
+          content: renderCommandFile({
+            description: `Route ${phase} through ${laneAgentName}`,
+            agentName: laneAgentName,
+            skillName,
+            phase,
+            effectiveLane: unit.lane,
+          }),
+        })
+      }
     }
   }
 
