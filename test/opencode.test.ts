@@ -260,6 +260,33 @@ describe("buildArtifacts", () => {
     expect(backendAgent?.content).toContain("model: 'gpt-5.4'")
   })
 
+  it("allows the main execute agent to dispatch lane-scoped execute agents", () => {
+    const artifacts = buildArtifactsWithControlPlane(
+      {
+        workflow: { kind: "superpowers" },
+        profiles: {
+          frontendBuild: { model: "openai/gpt-5" },
+          backendBuild: { model: "gpt-5.4" },
+        },
+        lanes: {
+          frontend: { label: "Frontend", routes: {}, defaultRoute: "frontendBuild" },
+          backend: { label: "Backend", routes: {}, defaultRoute: "backendBuild" },
+        },
+        routes: {},
+        defaultRoute: "backendBuild",
+      } as never,
+      {
+        ...createDefaultControlPlaneConfig().settings,
+        subagentExecution: { mode: "suggest" },
+      },
+    )
+
+    const mainExecuteAgent = artifacts.agents.find((item) => item.fileName === "spr-build.md")
+
+    expect(mainExecuteAgent?.content).toContain('"spr-build--frontend": allow')
+    expect(mainExecuteAgent?.content).toContain('"spr-build--backend": allow')
+  })
+
   it("adds suggest-mode split guidance to the main execute command", () => {
     const artifacts = buildArtifactsWithControlPlane(
       {

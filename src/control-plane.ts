@@ -628,6 +628,13 @@ function validateControlPlaneConfig(config: ControlPlaneConfig, runtimeLane?: st
     validatePresetGraph(config, presetKey, preset)
   }
 
+  if (config.workflow.kind === "superpowers") {
+    listLaneExecutionUnits({
+      activePresetKey: config.settings.activePreset,
+      activePreset,
+    })
+  }
+
   return {
     activePreset: {
       key: config.settings.activePreset,

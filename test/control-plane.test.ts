@@ -211,6 +211,40 @@ describe("resolveControlPlane", () => {
     ).rejects.toThrow(/unique|duplicate|alias|command/i)
   })
 
+  it("rejects colliding lane execution slugs during control-plane validation", async () => {
+    await expect(
+      resolveControlPlane({
+        command: "status",
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "settings": {
+            "activePreset": "default"
+          },
+          "profiles": {
+            "build": { "model": "openai/gpt-5" }
+          },
+          "lanes": {
+            "café": { "label": "Cafe", "routes": {}, "defaultRoute": "build" },
+            "cafe\u0301": { "label": "Cafe combining", "routes": {}, "defaultRoute": "build" }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "usesLanes": ["café", "cafe\u0301"],
+              "defaultLane": "café",
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/lane slug collision|both map/i)
+  })
+
   it("uses layered config before validation", async () => {
     const files = {
       "/home/tester/.config/oh-my-superagents/config.jsonc": `{

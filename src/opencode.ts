@@ -29,6 +29,12 @@ type OpenCodeControlPlaneSettings = Pick<
   "activePreset" | "commandPrefix" | "commands" | "subagentExecution"
 >
 
+const SUBAGENT_EXECUTION_BASE_PERMISSION_TASK: PermissionTask = {
+  "*": "deny",
+  "spr-review": "allow",
+  "spr-verify": "allow",
+}
+
 const CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string> = {
   status: "Show OMS status for OpenCode.",
   use: "Switch OMS to the selected preset for OpenCode.",
@@ -353,7 +359,12 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
       const skillName = `superpowers/${phase}`
       const permissionTask: PermissionTask | undefined =
         phase === "subagent-driven-development"
-          ? { "*": "deny", "spr-review": "allow", "spr-verify": "allow" }
+          ? {
+              ...SUBAGENT_EXECUTION_BASE_PERMISSION_TASK,
+              ...Object.fromEntries(
+                laneExecutionUnits.map((unit) => [unit.agentFileName.replace(/\.md$/, ""), "allow" as const]),
+              ),
+            }
           : undefined
 
       if (!agents.has(agentName)) {
@@ -430,7 +441,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
             model: laneResolved.selection.model,
             variant: laneResolved.selection.variant,
             temperature: laneResolved.selection.temperature,
-            permissionTask,
+            permissionTask: SUBAGENT_EXECUTION_BASE_PERMISSION_TASK,
           }),
         })
 
