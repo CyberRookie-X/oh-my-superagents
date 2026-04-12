@@ -47,25 +47,39 @@ export function renderLaneSplitGuidance(input: {
   const renderedCommands = input.units.map((unit) => `\`sp-execute-${unit.laneSlug}\``).join(", ")
 
   if (input.mode === "manual") {
-    return `Ask the user to split multi-lane work explicitly before dispatching lane helpers. Available lane helpers: ${renderedCommands}.`
+    return `Only use lane-specific split execution when the user explicitly requests it. Available lane helpers: ${renderedCommands}.`
   }
 
   if (input.mode === "auto") {
-    return `Split the work across the matching lane helpers automatically when the task clearly spans multiple lanes. Available lane helpers: ${renderedCommands}.`
+    return `Apply the split plan automatically across the matching lane helpers when the task clearly spans multiple lanes. Available lane helpers: ${renderedCommands}.`
   }
 
-  return `Suggest splitting multi-lane work before execution and point the user to the matching lane helpers. Available lane helpers: ${renderedCommands}.`
+  return `Propose a split plan across the matching lane helpers and wait for user confirmation before execution. Available lane helpers: ${renderedCommands}.`
 }
 
 function toLaneSlug(lane: string) {
-  const laneSlug = lane
+  const normalizedLane = lane.normalize("NFC")
+  const laneSlug = normalizedLane
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
 
   if (laneSlug.length === 0) {
-    throw new Error(`Lane ${lane} does not produce a host-safe slug`)
+    return `lane-${hashLane(normalizedLane)}`
   }
 
   return laneSlug
+}
+
+function hashLane(lane: string) {
+  let hash = 2166136261
+
+  for (const character of lane) {
+    hash ^= character.codePointAt(0) ?? 0
+    hash = Math.imul(hash, 16777619)
+  }
+
+  return (hash >>> 0).toString(36)
 }

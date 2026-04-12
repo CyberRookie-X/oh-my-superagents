@@ -45,6 +45,51 @@ describe("listLaneExecutionUnits", () => {
       }),
     ).toThrow(/slug collision|lane/i)
   })
+
+  it("normalizes Unicode-equivalent lane ids before slugging", () => {
+    expect(() =>
+      listLaneExecutionUnits({
+        activePresetKey: "default",
+        activePreset: {
+          label: "Default",
+          short: "def",
+          usesLanes: ["caf\u00e9", "cafe\u0301"],
+          routes: {},
+          defaultRoute: "build",
+        },
+      }),
+    ).toThrow(/caf.|slug collision|lane/i)
+  })
+
+  it("uses a deterministic fallback slug for pure non-ascii lanes", () => {
+    const [firstUnit] = listLaneExecutionUnits({
+      activePresetKey: "default",
+      activePreset: {
+        label: "Default",
+        short: "def",
+        usesLanes: ["前端"],
+        routes: {},
+        defaultRoute: "build",
+      },
+    })
+
+    const [secondUnit] = listLaneExecutionUnits({
+      activePresetKey: "default",
+      activePreset: {
+        label: "Default",
+        short: "def",
+        usesLanes: ["前端"],
+        routes: {},
+        defaultRoute: "build",
+      },
+    })
+
+    expect(firstUnit?.lane).toBe("前端")
+    expect(firstUnit?.laneSlug).toMatch(/^lane-[a-z0-9]+$/)
+    expect(secondUnit?.laneSlug).toBe(firstUnit?.laneSlug)
+    expect(firstUnit?.commandFileName).toBe(`sp-execute-${firstUnit?.laneSlug}.md`)
+    expect(firstUnit?.agentFileName).toBe(`spr-build--${firstUnit?.laneSlug}.md`)
+  })
 })
 
 describe("renderLaneSplitGuidance", () => {
@@ -64,10 +109,21 @@ describe("renderLaneSplitGuidance", () => {
   ]
 
   it("renders mode-aware split guidance for adapters", () => {
-    expect(renderLaneSplitGuidance({ mode: "manual", units })).toContain("Ask the user to split")
-    expect(renderLaneSplitGuidance({ mode: "suggest", units })).toContain("Suggest splitting")
-    expect(renderLaneSplitGuidance({ mode: "auto", units })).toContain("Split the work across")
-    expect(renderLaneSplitGuidance({ mode: "suggest", units })).toContain("`sp-execute-frontend`")
-    expect(renderLaneSplitGuidance({ mode: "suggest", units })).toContain("`sp-execute-backend`")
+    const manual = renderLaneSplitGuidance({ mode: "manual", units })
+    const suggest = renderLaneSplitGuidance({ mode: "suggest", units })
+    const auto = renderLaneSplitGuidance({ mode: "auto", units })
+
+    expect(manual).toContain("Only use lane-specific split execution when the user explicitly requests it")
+    expect(manual).not.toContain("Suggest")
+    expect(manual).not.toContain("confirm")
+    expect(manual).not.toContain("automatically")
+
+    expect(suggest).toContain("Propose a split plan")
+    expect(suggest).toContain("wait for user confirmation")
+    expect(suggest).toContain("`sp-execute-frontend`")
+    expect(suggest).toContain("`sp-execute-backend`")
+
+    expect(auto).toContain("Apply the split plan automatically")
+    expect(auto).not.toContain("wait for user confirmation")
   })
 })
