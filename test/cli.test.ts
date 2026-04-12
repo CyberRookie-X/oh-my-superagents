@@ -3307,6 +3307,7 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(output.state.code).toBe("disabled")
     expect(output.nextAction).toBeUndefined()
+    expect(output.subagentExecution).toBeUndefined()
   })
 
   it("returns OMS doctor details with rendered command names, aliases, artifact presence, and compatibility", async () => {
@@ -3729,6 +3730,7 @@ describe("runCli", () => {
     expect(output.routing.defaultRoutedPhases).toEqual(["build"])
     expect(output.routing.defaultRoutedPhases).not.toContain("brainstorming")
     expect(output.routing.unusedProfiles).toEqual(["unused"])
+    expect(output.subagentExecution).toBeUndefined()
   })
 
   it("counts lane-only profiles as used in OpenCode doctor output", async () => {

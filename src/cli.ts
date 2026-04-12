@@ -1300,7 +1300,7 @@ async function buildControlPlaneStatus(
       return { state, ...(nextAction ? { nextAction } : {}), artifactSummary }
     })()
     : undefined
-  const subagentExecution = host === "opencode"
+  const subagentExecution = host === "opencode" && resolved.config.workflow.kind === "superpowers"
     ? summarizeSubagentExecutionDiagnostics(resolved)
     : undefined
 
@@ -1353,7 +1353,7 @@ async function buildControlPlaneDoctor(
       stale: artifacts.stale,
     })
     : undefined
-  const subagentExecution = host === "opencode"
+  const subagentExecution = host === "opencode" && resolved.config.workflow.kind === "superpowers"
     ? summarizeSubagentExecutionDiagnostics(resolved)
     : undefined
 
