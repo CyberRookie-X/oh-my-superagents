@@ -1713,6 +1713,227 @@ describe("runCli", () => {
     expect(writtenContent).toContain('"kind": "direct"')
   })
 
+  it("fails closed on invalid existing config during --write", async () => {
+    let wrote = false
+
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+      "--write",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+        "/workspace/project/oh-my-superagents.config.jsonc",
+      ].includes(filePath),
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.json")
+        ? JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        : "{ invalid",
+      resolveControlPlane: async () => {
+        throw new Error("Invalid JSONC in /workspace/project/oh-my-superagents.config.jsonc")
+      },
+      writeFile: async () => {
+        wrote = true
+      },
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Invalid JSONC")
+    expect(wrote).toBe(false)
+  })
+
+  it("bases same-mode direct writes on the effective layered workflow, not only the target file", async () => {
+    let writtenContent = ""
+
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+      "--write",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+        "/workspace/project/oh-my-superagents.config.jsonc",
+        "/home/tester/.config/oh-my-superagents/config.jsonc",
+      ].includes(filePath),
+      discoverConfigPath: async () => "/workspace/project/oh-my-superagents.config.jsonc",
+      loadConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        config: {
+          workflow: { kind: "direct", intents: { build: { label: "Build" }, review: { label: "Review" } } },
+          profiles: {
+            builder: { model: "openai/gpt-5" },
+            reviewer: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+          routes: {},
+          defaultRoute: "builder",
+          effectiveLane: "ops",
+          superpowersCompatibility: { mode: "warn" },
+        },
+      }),
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: [
+            "/home/tester/.config/oh-my-superagents/config.jsonc",
+            "/workspace/project/oh-my-superagents.config.jsonc",
+          ],
+        },
+        config: {
+          ...directControlPlaneConfig,
+          settings: {
+            ...directControlPlaneConfig.settings,
+            activePreset: "review",
+            defaultLane: "ops",
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+          presets: {
+            default: {
+              ...directControlPlaneConfig.presets.default,
+              usesLanes: ["ops"],
+              defaultLane: "ops",
+              defaultRoute: "reviewer",
+            },
+            review: {
+              label: "Review",
+              short: "rev",
+              usesLanes: ["ops"],
+              defaultLane: "ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+        },
+        activePreset: {
+          key: "review",
+          preset: {
+            label: "Review",
+            short: "rev",
+            usesLanes: ["ops"],
+            defaultLane: "ops",
+            routes: { review: "reviewer" },
+            defaultRoute: "reviewer",
+          },
+        },
+        laneState: {
+          ...defaultLaneState,
+          allowedLanes: ["ops"],
+          defaultLane: "ops",
+          effectiveLane: "ops",
+          presetDefaultLane: "ops",
+          mode: "suggest",
+        },
+      }),
+      readArtifactFile: async (filePath: string) => {
+        if (filePath.endsWith("models.json")) {
+          return JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        }
+
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: {
+              activePreset: "review",
+              enabled: true,
+              defaultLane: "ops",
+            },
+            lanes: {
+              ops: {
+                label: "Ops",
+                routes: { review: "reviewer" },
+                defaultRoute: "reviewer",
+              },
+            },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                usesLanes: ["ops"],
+                defaultLane: "ops",
+                routes: {},
+                defaultRoute: "reviewer",
+              },
+            },
+            profiles: {
+              builder: { model: "openai/gpt-5" },
+            },
+          })
+        }
+
+        return JSON.stringify({
+          workflow: { kind: "direct", intents: { build: { label: "Build" }, review: { label: "Review" } } },
+          settings: { activePreset: "review", enabled: true, defaultLane: "ops" },
+          presets: {
+            review: {
+              label: "Review",
+              short: "rev",
+              usesLanes: ["ops"],
+              defaultLane: "ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+          profiles: {
+            reviewer: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+        })
+      },
+      writeFile: async (_filePath, content) => {
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenContent).toContain('"activePreset": "review"')
+    expect(writtenContent).toContain('"defaultLane": "ops"')
+    expect(writtenContent).toContain('"ops"')
+  })
+
   it("fails clearly for malformed model inventory entries", async () => {
     const result = await runCli([
       "author",

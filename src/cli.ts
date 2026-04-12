@@ -247,18 +247,14 @@ async function buildAuthorRoutingPreview(
     inventory,
   })
   const hasExistingConfig = await deps.artifactExists(targetPath)
-  let effectiveWorkflowKind: "superpowers" | "direct" | undefined
-
-  try {
-    effectiveWorkflowKind = (await deps.loadConfig({ cwd, explicitPath })).config.workflow.kind
-  } catch {
-    effectiveWorkflowKind = undefined
-  }
+  const effectiveConfig = write
+    ? (await deps.resolveControlPlane({ command: "status", cwd, explicitPath })).config
+    : undefined
 
   const nextDocument = applyRoutingProposalToConfig(
     proposal,
     hasExistingConfig ? (await readControlPlaneSourceDocument(targetPath, deps.readArtifactFile)).config : undefined,
-    { effectiveWorkflowKind },
+    { effectiveConfig },
   )
   const renderedDocument = renderRoutingConfigDocument(nextDocument)
 

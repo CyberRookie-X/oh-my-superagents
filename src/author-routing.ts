@@ -1,5 +1,6 @@
 import path from "node:path"
 import {
+  type ControlPlaneConfig,
   createDefaultControlPlaneConfig,
   defaultExists,
   defaultReadFile,
@@ -53,6 +54,7 @@ type LayeredRoutingSections = Pick<LayeredControlPlaneConfigInput, "workflow" | 
 
 type ApplyRoutingProposalOptions = {
   effectiveWorkflowKind?: WorkflowConfig["kind"]
+  effectiveConfig?: Pick<ControlPlaneConfig, "workflow" | "settings" | "presets">
 }
 
 const FRONTEND_LANE = "frontend"
@@ -187,15 +189,24 @@ export function applyRoutingProposalToConfig(
   options: ApplyRoutingProposalOptions = {},
 ): LayeredRoutingSections {
   const baseConfig = existingConfig ?? createDefaultAuthorRoutingDocument()
-  const baseWorkflowKind = options.effectiveWorkflowKind ?? baseConfig.workflow?.kind ?? "superpowers"
+  const baseWorkflowKind = options.effectiveConfig?.workflow.kind
+    ?? options.effectiveWorkflowKind
+    ?? baseConfig.workflow?.kind
+    ?? "superpowers"
   const modeChanged = baseWorkflowKind !== proposal.workflow.kind
-  const presets = modeChanged
+  const writtenPresets = modeChanged
     ? { default: proposal.presets.default }
     : {
         ...(baseConfig.presets ?? {}),
         default: mergeDefaultPreset(baseConfig.presets?.default, proposal.presets.default),
       }
-  const settings = normalizeSettings(baseConfig.settings, presets)
+  const effectivePresets = modeChanged
+    ? { default: writtenPresets.default }
+    : {
+        ...(options.effectiveConfig?.presets ?? writtenPresets),
+        default: writtenPresets.default,
+      }
+  const settings = normalizeSettings(baseConfig.settings, effectivePresets)
 
   return {
     ...baseConfig,
@@ -211,7 +222,7 @@ export function applyRoutingProposalToConfig(
           ...(baseConfig.lanes ?? {}),
           ...proposal.lanes,
         },
-    presets,
+    presets: writtenPresets,
   }
 }
 
