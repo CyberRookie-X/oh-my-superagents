@@ -272,14 +272,29 @@ function buildControlPlaneCommandArtifacts(settings: OpenCodeControlPlaneSetting
   })
 }
 
+function assertNoOpenCodeCommandCollisions(existing: GeneratedArtifact[], next: GeneratedArtifact[]) {
+  const reservedPaths = new Set(
+    existing
+      .filter((artifact) => artifact.directory === ".opencode/commands")
+      .map((artifact) => `${artifact.directory}/${artifact.fileName}`),
+  )
+
+  for (const artifact of next) {
+    const artifactPath = `${artifact.directory}/${artifact.fileName}`
+    if (reservedPaths.has(artifactPath)) {
+      throw new Error(`OMS command file collides with existing OpenCode command: ${artifact.fileName}`)
+    }
+  }
+}
+
 export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: OpenCodeControlPlaneSettings) {
   const commands: GeneratedArtifact[] = []
   const agents = new Map<string, GeneratedArtifact>()
   const agentSelections = new Map<string, string>()
-  const workflowKind = config.workflow?.kind ?? "superpowers"
+  const workflow = config.workflow
 
-  if (workflowKind === "direct") {
-    for (const intent of Object.keys(config.workflow.intents)) {
+  if (workflow?.kind === "direct") {
+    for (const intent of Object.keys(workflow.intents)) {
       const resolved = resolveRoute(config, intent)
       const agentName = `rt-${intent}`
 
@@ -371,7 +386,9 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
   }
 
   if (controlPlaneSettings) {
-    commands.push(...buildControlPlaneCommandArtifacts(controlPlaneSettings))
+    const controlPlaneArtifacts = buildControlPlaneCommandArtifacts(controlPlaneSettings)
+    assertNoOpenCodeCommandCollisions(commands, controlPlaneArtifacts)
+    commands.push(...controlPlaneArtifacts)
     commands.push(buildTemporaryDisableHelperArtifact())
   }
 

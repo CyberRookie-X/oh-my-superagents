@@ -368,6 +368,40 @@ describe("materializeArtifacts", () => {
     expect(removedPaths).toEqual(result.removed)
   })
 
+  it("removes stale OpenCode superpowers artifacts when syncing direct-mode artifacts", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.opencode/commands/sp-plan.md": "---\n---\n\n<!-- generated-by: oh-my-superagents; do-not-edit: true -->\n",
+      "/workspace/project/.opencode/agents/spr-plan.md": "---\n---\n\n<!-- generated-by: oh-my-superagents; do-not-edit: true -->\n",
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "command",
+          directory: ".opencode/commands",
+          fileName: "ai-plan.md",
+          ownerPrefix: "ai-",
+          content: "---\n---\n\n<!-- generated-by: oh-my-superagents; do-not-edit: true -->\n",
+        },
+        {
+          kind: "agent",
+          directory: ".opencode/agents",
+          fileName: "rt-plan.md",
+          ownerPrefix: "rt-",
+          content: "---\n---\n\n<!-- generated-by: oh-my-superagents; do-not-edit: true -->\n",
+        },
+      ],
+      fs,
+    })
+
+    expect(result.removed).toEqual([
+      "/workspace/project/.opencode/commands/sp-plan.md",
+      "/workspace/project/.opencode/agents/spr-plan.md",
+    ])
+    expect(removedPaths).toEqual(result.removed)
+  })
+
   it("removes stale OMS OpenCode command files with old custom prefixes", async () => {
     const { fs, removedPaths } = createMemoryFs({
       "/workspace/project/.opencode/commands/legacy-state.md": renderOwnedOpenCodeOmsCommand("status", "legacy-state"),

@@ -37,6 +37,8 @@ export type MaterializeArtifactsResult = {
 const CODEX_SKILL_FILE_NAME = "SKILL.md"
 const CONTROL_PLANE_LOGICAL_COMMANDS = new Set<ControlPlaneCommandKey>(CONTROL_PLANE_COMMAND_KEYS)
 const AUXILIARY_HELPER_NAME = "temporary-disable"
+const OPENCODE_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["sp-", "ai-"])
+const OPENCODE_ROUTER_OWNED_AGENT_PREFIXES = new Set(["spr-", "rt-"])
 
 function getTargetDirectory(cwd: string, directory: string) {
   return path.join(cwd, directory)
@@ -82,6 +84,18 @@ export function hasArtifactOwnershipMarker(content: string) {
 function isPrefixOwned(fileName: string, content: string, prefixes: Set<string>) {
   const hasPrefix = Array.from(prefixes).some((prefix) => fileName.startsWith(prefix))
   return hasPrefix && hasArtifactOwnershipMarker(content)
+}
+
+function isOpenCodeRouterOwnedFile(directory: string, fileName: string, content: string) {
+  if (directory.endsWith(`${path.sep}.opencode${path.sep}commands`)) {
+    return isPrefixOwned(fileName, content, OPENCODE_ROUTER_OWNED_COMMAND_PREFIXES)
+  }
+
+  if (directory.endsWith(`${path.sep}.opencode${path.sep}agents`)) {
+    return isPrefixOwned(fileName, content, OPENCODE_ROUTER_OWNED_AGENT_PREFIXES)
+  }
+
+  return false
 }
 
 function parseControlPlaneOwnership(content: string) {
@@ -352,6 +366,7 @@ export async function materializeArtifacts(
           qwenOmsCommandDirectories.has(directory)
           && isQwenOmsControlPlaneFile(fullPath, content)
         )
+        || isOpenCodeRouterOwnedFile(directory, entry, content)
         || isPrefixOwned(entry, content, prefixes)
 
       if (!isOwnedByDirectoryContract) {

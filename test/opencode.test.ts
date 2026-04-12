@@ -197,6 +197,43 @@ describe("buildArtifacts", () => {
     expect(agent?.content).not.toContain("Load the upstream superpowers skill")
   })
 
+  it("fails when a direct-mode command collides with an OMS control-plane command path", () => {
+    const defaults = createDefaultControlPlaneConfig().settings
+
+    expect(() =>
+      buildArtifactsWithControlPlane(
+        {
+          workflow: {
+            kind: "direct",
+            intents: { plan: { label: "Plan" } },
+          },
+          profiles: { planner: { model: "openai/gpt-5" } },
+          lanes: {
+            frontend: {
+              label: "Frontend",
+              routes: { plan: "planner" },
+              defaultRoute: "planner",
+            },
+          },
+          routes: {},
+          defaultRoute: "planner",
+          effectiveLane: "frontend",
+        } as never,
+        {
+          ...defaults,
+          commandPrefix: "ai",
+          commands: {
+            ...defaults.commands,
+            use: {
+              name: "plan",
+              aliases: [],
+            },
+          },
+        },
+      ),
+    ).toThrow(/collision|ai-plan/i)
+  })
+
   it("renders one .opencode/commands file per primary OMS command", () => {
     const settings = createDefaultControlPlaneConfig().settings
     const artifacts = buildArtifactsWithControlPlane(createRouterConfig(), settings)
