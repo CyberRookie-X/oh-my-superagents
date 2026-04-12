@@ -108,7 +108,7 @@ function isOpenCodeRuntimeMetadataFile(filePath: string) {
   return filePath.endsWith(`${path.sep}${RUNTIME_AGENT_METADATA_DIRECTORY.replace(/\//g, path.sep)}${path.sep}${RUNTIME_AGENT_METADATA_FILE}`)
 }
 
-function isOpenCodeRuntimeMetadataContent(content: string) {
+export function isOpenCodeRuntimeMetadataContent(content: string) {
   try {
     const parsed = JSON.parse(content) as unknown
     if (!isRecord(parsed) || !isRecord(parsed.agents)) {

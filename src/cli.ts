@@ -34,7 +34,7 @@ import {
 } from "./control-plane.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
-import { hasArtifactOwnershipMarker, materializeArtifacts } from "./materialize.js"
+import { hasArtifactOwnershipMarker, isOpenCodeRuntimeMetadataContent, materializeArtifacts } from "./materialize.js"
 import {
   buildArtifacts,
   listRenderedOpenCodeControlPlaneCommands,
@@ -1044,8 +1044,13 @@ async function discoverOwnedArtifacts(
           continue
         }
 
-        if (!isOpenCodeRuntimeMetadata) {
-          const content = await deps.readArtifactFile(filePath)
+        const content = await deps.readArtifactFile(filePath)
+
+        if (isOpenCodeRuntimeMetadata) {
+          if (!isOpenCodeRuntimeMetadataContent(content)) {
+            continue
+          }
+        } else {
           if (!hasArtifactOwnershipMarker(content)) {
             continue
           }

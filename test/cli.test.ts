@@ -3198,6 +3198,44 @@ describe("runCli", () => {
     )
   })
 
+  it("does not treat invalid OpenCode runtime metadata JSON as owned in status output", async () => {
+    const built = buildOpenCodeArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: {
+        strategy: controlPlaneConfig.presets.default.profiles.strategy,
+        build: controlPlaneConfig.presets.default.profiles.build,
+      },
+      routes: controlPlaneConfig.presets.default.routes,
+      defaultRoute: controlPlaneConfig.presets.default.defaultRoute,
+      superpowersCompatibility: controlPlaneConfig.settings.superpowersCompatibility,
+    } as never, controlPlaneConfig.settings)
+    const artifactFiles = Object.fromEntries([
+      ...built.agents.map((artifact) => [
+        path.join("/workspace/project", artifact.directory, artifact.fileName),
+        artifact.content,
+      ]),
+      ...built.commands.map((artifact) => [
+        path.join("/workspace/project", artifact.directory, artifact.fileName),
+        artifact.fileName === "runtime-agent-metadata.json"
+          ? JSON.stringify({ hello: "user" }, null, 2)
+          : artifact.content,
+      ]),
+    ])
+
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      buildArtifacts: buildOpenCodeArtifacts,
+      ...createArtifactFs(artifactFiles),
+    }))
+
+    const output = JSON.parse(result.stdout)
+    const runtimeMetadataPath = "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json"
+
+    expect(result.exitCode).toBe(0)
+    expect(output.state.code).toBe("artifacts_out_of_sync")
+    expect(output.artifactSummary.missing).toContain(runtimeMetadataPath)
+    expect(output.artifactSummary.present).not.toContain(runtimeMetadataPath)
+  })
+
   it("adds doctor guidance when OpenCode superpowers is not detected", async () => {
     const result = await runCli(["status", "--host", "opencode"], createCliDeps({
       evaluateSuperpowersCompatibility: () => notDetectedOpencode,
