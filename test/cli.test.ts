@@ -534,10 +534,10 @@ describe("runCli", () => {
     )
   })
 
-  it("keeps direct workflow explain scoped to OpenCode", async () => {
+  it("keeps direct workflow explain unsupported on Qwen", async () => {
     let explainCalled = false
 
-    const result = await runCli(["explain", "--host", "codex", "--intent", "plan"], createDirectCliDeps({
+    const result = await runCli(["explain", "--host", "qwen", "--intent", "plan"], createDirectCliDeps({
       explainPhaseForHost: () => {
         explainCalled = true
         throw new Error("unexpected explain")
@@ -545,8 +545,21 @@ describe("runCli", () => {
     }))
 
     expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("opencode")
+    expect(result.stderr).toContain("opencode or --host codex")
     expect(explainCalled).toBe(false)
+  })
+
+  it("explains a direct workflow intent on Codex", async () => {
+    const result = await runCli(["explain", "--host", "codex", "--intent", "plan"], createDirectCliDeps())
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.intent).toBe("plan")
+    expect(output.profileId).toBe("planner")
+    expect(output.model).toBe("openai/gpt-5")
+    expect(output.commandName).toBe("ai-plan")
+    expect(output.agentName).toBe("rt-plan")
   })
 
   it("adds source tracing to explain output for opencode", async () => {
@@ -4389,6 +4402,54 @@ describe("runCli", () => {
     expect(materializedPaths).toEqual([
       ".qwen/agents/oms-review.md",
       ".qwen/commands/oms-sync.md",
+    ])
+  })
+
+  it("syncs direct workflow artifacts for Qwen without requiring upstream skills", async () => {
+    let materializeCalled = false
+
+    const result = await runCli(["sync", "--host", "qwen"], createDirectCliDeps({
+      evaluateSuperpowersCompatibility: () => incompatibleOpencodeStrict,
+      buildQwenArtifacts: async () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".qwen/agents",
+            fileName: "rt-plan.md",
+            ownerPrefix: "rt-",
+            content: "",
+          },
+        ],
+        commands: [
+          {
+            kind: "command" as const,
+            directory: ".qwen/commands",
+            fileName: "ai-plan.md",
+            ownerPrefix: "ai-",
+            content: "",
+          },
+        ],
+      }),
+      materializeArtifacts: async ({ artifacts }: { artifacts: Array<{ directory: string; fileName: string }> }) => {
+        materializeCalled = true
+
+        return {
+          exitCode: 0 as const,
+          warnings: [],
+          written: artifacts.map((artifact) => path.join("/workspace/project", artifact.directory, artifact.fileName)),
+          removed: [],
+        }
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(materializeCalled).toBe(true)
+    expect(parsed.compatibility).toBeNull()
+    expect(parsed.written).toEqual([
+      "/workspace/project/.qwen/agents/rt-plan.md",
+      "/workspace/project/.qwen/commands/ai-plan.md",
     ])
   })
 

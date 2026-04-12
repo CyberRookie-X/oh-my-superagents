@@ -671,11 +671,15 @@ function joinStderr(parts: Array<string | undefined>) {
   return parts.filter((part): part is string => Boolean(part && part.length > 0)).join("\n")
 }
 
-function isDirectOpenCodeWorkflow(
+function isDirectWorkflowHostSupported(
   config: { workflow: ResolvedControlPlane["config"]["workflow"] },
   host: CliHost | SupportedSuperpowersHost,
 ) {
-  return config.workflow.kind === "direct" && host === "opencode"
+  if (config.workflow.kind !== "direct") {
+    return false
+  }
+
+  return host === "opencode" || host === "codex" || host === "qwen"
 }
 
 function assertWorkflowSupport(
@@ -687,11 +691,11 @@ function assertWorkflowSupport(
     return
   }
 
-  if (host !== "opencode") {
-    throw new Error("Direct workflow is currently only supported for --host opencode")
+  if (command === "status" || command === "doctor" || command === "sync") {
+    return
   }
 
-  if (command === "status" || command === "doctor" || command === "explain" || command === "sync") {
+  if (command === "explain" && host !== "qwen") {
     return
   }
 
@@ -726,7 +730,7 @@ function maybeResolveCompatibility(
   host: CliHost,
   resolve: () => Promise<SuperpowersCompatibilityResult | null>,
 ) {
-  return isDirectOpenCodeWorkflow(config, host) ? Promise.resolve(null) : resolve()
+  return isDirectWorkflowHostSupported(config, host) ? Promise.resolve(null) : resolve()
 }
 
 function toRouterConfig(
@@ -1544,7 +1548,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
     if (command === "explain") {
       const loaded = await deps.loadConfig({ cwd, explicitPath })
-      const resolved = host === "opencode" || (host === "codex" && runtimeLane)
+      const shouldResolveExplainControlPlane = host === "opencode"
+        || (host === "codex" && (runtimeLane !== undefined || loaded.config.workflow.kind === "direct"))
+      const resolved = shouldResolveExplainControlPlane
         ? await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
         : null
       const explainConfig = resolved?.config ?? loaded.config
