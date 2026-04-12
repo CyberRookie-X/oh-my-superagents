@@ -247,16 +247,19 @@ async function buildAuthorRoutingPreview(
     inventory,
   })
   const hasExistingConfig = await deps.artifactExists(targetPath)
+  const previousRenderedDocument = hasExistingConfig ? await deps.readArtifactFile(targetPath) : ""
   const effectiveConfig = (write || hasExistingConfig)
     ? (await deps.resolveControlPlane({ command: "status", cwd, explicitPath })).config
+    : undefined
+  const existingConfig = hasExistingConfig
+    ? (await readControlPlaneSourceDocument(targetPath, async () => previousRenderedDocument)).config
     : undefined
 
   const nextDocument = applyRoutingProposalToConfig(
     proposal,
-    hasExistingConfig ? (await readControlPlaneSourceDocument(targetPath, deps.readArtifactFile)).config : undefined,
+    existingConfig,
     { effectiveConfig },
   )
-  const previousRenderedDocument = hasExistingConfig ? await deps.readArtifactFile(targetPath) : ""
   const renderedDocument = renderRoutingConfigDocument(nextDocument)
   const operation = hasExistingConfig ? "update" : "create"
   const summaryText = formatAuthorRoutingSummary({
@@ -304,6 +307,21 @@ async function buildAuthorRoutingPreview(
     diffText,
     written: write,
   }
+}
+
+function formatAuthorRoutingOutput(result: Awaited<ReturnType<typeof buildAuthorRoutingPreview>>) {
+  return [
+    "Summary",
+    result.summaryText,
+    "",
+    "Diff",
+    result.diffText,
+    "",
+    "Result",
+    `Target: ${result.preview.path}`,
+    `Operation: ${result.preview.operation}`,
+    `Written: ${result.written ? "yes" : "no"}`,
+  ].join("\n")
 }
 
 function formatAuthorRoutingSummary(input: {
@@ -1430,7 +1448,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
       return {
         exitCode: 0,
-        stdout: JSON.stringify(await buildAuthorRoutingPreview(cwd, explicitPath, mode, modelsPath, write, deps), null, 2),
+        stdout: formatAuthorRoutingOutput(await buildAuthorRoutingPreview(cwd, explicitPath, mode, modelsPath, write, deps)),
         stderr: "",
       }
     }
