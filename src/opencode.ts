@@ -5,7 +5,7 @@ import {
   type ControlPlaneConfig,
   type RouterConfig,
 } from "./config.js"
-import { PHASE_TO_AGENT, PHASE_TO_COMMAND, resolvePhase, type BuiltInPhase } from "./router.js"
+import { PHASE_TO_AGENT, PHASE_TO_COMMAND, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
 
 export const MARKER_TEXT = "generated-by: oh-my-superagents; do-not-edit: true"
 export const MARKER = `<!-- ${MARKER_TEXT} -->`
@@ -120,6 +120,54 @@ export function renderCommandFile(input: {
   ].join("\n")
 }
 
+function renderDirectAgentFile(input: {
+  agentName: string
+  description: string
+  model: string
+  variant?: string
+  temperature?: number
+  intent: string
+}) {
+  return [
+    "---",
+    `description: ${yamlScalar(input.description)}`,
+    "mode: subagent",
+    "hidden: true",
+    `model: ${yamlScalar(input.model)}`,
+    ...(input.variant ? [`variant: ${yamlScalar(input.variant)}`] : []),
+    ...(input.temperature !== undefined ? [`temperature: ${input.temperature}`] : []),
+    "---",
+    "",
+    MARKER,
+    "",
+    `You are the ${input.agentName} routing agent for the ${input.intent} intent.`,
+    "Use the forwarded router context arguments as the task context.",
+    "Follow the requested intent directly without any upstream skill handoff.",
+    "",
+  ].join("\n")
+}
+
+function renderDirectCommandFile(input: {
+  description: string
+  agentName: string
+  intent: string
+}) {
+  return [
+    "---",
+    `description: ${yamlScalar(input.description)}`,
+    `agent: ${yamlScalar(input.agentName)}`,
+    "subtask: true",
+    "---",
+    "",
+    MARKER,
+    "",
+    "## Router Context",
+    `- intent: ${input.intent}`,
+    "- arguments: $ARGUMENTS",
+    "",
+  ].join("\n")
+}
+
 export function renderControlPlaneCommandFile(input: {
   description: string
   logicalCommand: ControlPlaneCommandKey
@@ -228,63 +276,98 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
   const commands: GeneratedArtifact[] = []
   const agents = new Map<string, GeneratedArtifact>()
   const agentSelections = new Map<string, string>()
+  const workflowKind = config.workflow?.kind ?? "superpowers"
 
-  for (const phase of BUILT_IN_PHASES) {
-    const resolved = resolvePhase(config, phase)
-    const agentName = PHASE_TO_AGENT[phase]
-    const commandName = PHASE_TO_COMMAND[phase].slice(1)
-    const skillName = `superpowers/${phase}`
-
-    if (!agents.has(agentName)) {
-      agentSelections.set(
-        agentName,
-        JSON.stringify({
-          model: resolved.selection.model,
-          variant: resolved.selection.variant,
-          temperature: resolved.selection.temperature,
-        }),
-      )
+  if (workflowKind === "direct") {
+    for (const intent of Object.keys(config.workflow.intents)) {
+      const resolved = resolveRoute(config, intent)
+      const agentName = `rt-${intent}`
 
       agents.set(agentName, {
         kind: "agent",
         directory: ".opencode/agents",
         fileName: `${agentName}.md`,
-        ownerPrefix: "spr-",
-        content: renderAgentFile({
+        ownerPrefix: "rt-",
+        content: renderDirectAgentFile({
           agentName,
-          description: `${agentName} helper for ${phase}`,
+          description: `${agentName} routing agent for ${intent}`,
           model: resolved.selection.model,
           variant: resolved.selection.variant,
           temperature: resolved.selection.temperature,
-          permissionTask:
-            agentName === "spr-build"
-              ? { "*": "deny", "spr-review": "allow", "spr-verify": "allow" }
-              : undefined,
+          intent,
         }),
       })
-    } else {
-      const nextSelection = JSON.stringify({
-        model: resolved.selection.model,
-        variant: resolved.selection.variant,
-        temperature: resolved.selection.temperature,
-      })
-      if (agentSelections.get(agentName) !== nextSelection) {
-        throw new Error(`Shared agent conflict for ${agentName}`)
-      }
-    }
 
-    commands.push({
-      kind: "command",
-      directory: ".opencode/commands",
-      fileName: `${commandName}.md`,
-      ownerPrefix: "sp-",
-      content: renderCommandFile({
-        description: `Route ${phase} through ${agentName}`,
-        agentName,
-        skillName,
-        phase,
-      }),
-    })
+      commands.push({
+        kind: "command",
+        directory: ".opencode/commands",
+        fileName: `ai-${intent}.md`,
+        ownerPrefix: "ai-",
+        content: renderDirectCommandFile({
+          description: `Route ${intent} through ${agentName}`,
+          agentName,
+          intent,
+        }),
+      })
+    }
+  } else {
+    for (const phase of BUILT_IN_PHASES) {
+      const resolved = resolvePhase(config, phase)
+      const agentName = PHASE_TO_AGENT[phase]
+      const commandName = PHASE_TO_COMMAND[phase].slice(1)
+      const skillName = `superpowers/${phase}`
+
+      if (!agents.has(agentName)) {
+        agentSelections.set(
+          agentName,
+          JSON.stringify({
+            model: resolved.selection.model,
+            variant: resolved.selection.variant,
+            temperature: resolved.selection.temperature,
+          }),
+        )
+
+        agents.set(agentName, {
+          kind: "agent",
+          directory: ".opencode/agents",
+          fileName: `${agentName}.md`,
+          ownerPrefix: "spr-",
+          content: renderAgentFile({
+            agentName,
+            description: `${agentName} helper for ${phase}`,
+            model: resolved.selection.model,
+            variant: resolved.selection.variant,
+            temperature: resolved.selection.temperature,
+            permissionTask:
+              agentName === "spr-build"
+                ? { "*": "deny", "spr-review": "allow", "spr-verify": "allow" }
+                : undefined,
+          }),
+        })
+      } else {
+        const nextSelection = JSON.stringify({
+          model: resolved.selection.model,
+          variant: resolved.selection.variant,
+          temperature: resolved.selection.temperature,
+        })
+        if (agentSelections.get(agentName) !== nextSelection) {
+          throw new Error(`Shared agent conflict for ${agentName}`)
+        }
+      }
+
+      commands.push({
+        kind: "command",
+        directory: ".opencode/commands",
+        fileName: `${commandName}.md`,
+        ownerPrefix: "sp-",
+        content: renderCommandFile({
+          description: `Route ${phase} through ${agentName}`,
+          agentName,
+          skillName,
+          phase,
+        }),
+      })
+    }
   }
 
   if (controlPlaneSettings) {

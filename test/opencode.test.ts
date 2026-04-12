@@ -140,6 +140,63 @@ describe("buildArtifacts", () => {
     expect(strategyAgent?.content).toContain("google/gemini-2.5-pro")
   })
 
+  it("renders direct-mode OpenCode commands for workflow intents", () => {
+    const artifacts = buildArtifacts({
+      workflow: {
+        kind: "direct",
+        intents: {
+          plan: { label: "Plan" },
+          build: { label: "Build" },
+        },
+      },
+      profiles: {
+        planner: { model: "openai/gpt-5" },
+        builder: { model: "gpt-5.4" },
+      },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { plan: "planner" },
+          defaultRoute: "builder",
+        },
+      },
+      routes: {},
+      defaultRoute: "builder",
+      effectiveLane: "frontend",
+    } as never)
+
+    expect(artifacts.commands.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["ai-plan.md", "ai-build.md"]),
+    )
+  })
+
+  it("renders direct-mode agents without upstream superpowers skill handoff", () => {
+    const artifacts = buildArtifacts({
+      workflow: {
+        kind: "direct",
+        intents: { plan: { label: "Plan" } },
+      },
+      profiles: { planner: { model: "openai/gpt-5" } },
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: { plan: "planner" },
+          defaultRoute: "planner",
+        },
+      },
+      routes: {},
+      defaultRoute: "planner",
+      effectiveLane: "frontend",
+    } as never)
+
+    const command = artifacts.commands.find((item) => item.fileName === "ai-plan.md")
+    const agent = artifacts.agents.find((item) => item.fileName === "rt-plan.md")
+
+    expect(command?.content).toContain("intent: plan")
+    expect(command?.content).not.toContain("Load and follow the upstream skill")
+    expect(agent?.content).not.toContain("Load the upstream superpowers skill")
+  })
+
   it("renders one .opencode/commands file per primary OMS command", () => {
     const settings = createDefaultControlPlaneConfig().settings
     const artifacts = buildArtifactsWithControlPlane(createRouterConfig(), settings)
