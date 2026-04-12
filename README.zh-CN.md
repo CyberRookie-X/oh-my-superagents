@@ -89,7 +89,7 @@
 - 生成 `.codex/agents/*.toml`
 - 生成 `.qwen/agents/*.md` 与 `.qwen/commands/*.md`
 - 通过 `author routing` 基于仓库信号和用户提供的模型清单生成路由配置提案
-- 提供 `status`、`use`、`disable`、`sync`、`doctor`、`explain`、`bootstrap` CLI
+- 提供 `author routing`、`status`、`use`、`disable`、`sync`、`doctor`、`explain`、`bootstrap` CLI
 - 提供最小 OpenCode plugin 入口用于启动诊断
 
 ## OpenCode Direct Mode

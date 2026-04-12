@@ -19,5 +19,7 @@ describe("library exports", () => {
   it("exports routing authoring helpers", () => {
     expect(library.buildRoutingProposal).toBeTypeOf("function")
     expect(library.inspectRoutingAuthoringInputs).toBeTypeOf("function")
+    expect(library.applyRoutingProposalToConfig).toBeUndefined()
+    expect(library.renderRoutingConfigDocument).toBeUndefined()
   })
 })

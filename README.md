@@ -76,7 +76,7 @@ Today that means:
 - Generates `.codex/agents/*.toml`
 - Generates `.qwen/agents/*.md` and `.qwen/commands/*.md`
 - Proposes routing config changes with `author routing` from repo signals plus a user-supplied model inventory
-- Exposes `status`, `use`, `disable`, `sync`, `doctor`, `explain`, and `bootstrap` CLIs
+- Exposes `author routing`, `status`, `use`, `disable`, `sync`, `doctor`, `explain`, and `bootstrap` CLIs
 - Ships a minimal OpenCode plugin entrypoint for startup diagnostics
 
 ## OpenCode Direct Mode
