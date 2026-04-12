@@ -1640,6 +1640,79 @@ describe("runCli", () => {
     expect(writtenContent).toContain('"settings"')
   })
 
+  it("evolves an existing global config when --write is used without a project config", async () => {
+    let writtenPath = ""
+    let writtenContent = ""
+
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+      "--write",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+        "/home/tester/.config/oh-my-superagents/config.jsonc",
+      ].includes(filePath),
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath.endsWith("models.json")) {
+          return JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        }
+
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            workflow: { kind: "superpowers" },
+            settings: {
+              activePreset: "default",
+              enabled: true,
+            },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: { brainstorming: "existing" },
+                defaultRoute: "existing",
+              },
+            },
+            profiles: {
+              existing: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+            },
+            lanes: {},
+          })
+        }
+
+        return JSON.stringify({ dependencies: { react: "18.0.0" } })
+      },
+      writeFile: async (filePath, content) => {
+        writtenPath = filePath
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+
+    const output = JSON.parse(result.stdout)
+
+    expect(output.preview.path).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(output.preview.operation).toBe("update")
+    expect(output.written).toBe(true)
+    expect(writtenPath).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(writtenContent).toContain('"kind": "direct"')
+  })
+
   it("fails clearly for malformed model inventory entries", async () => {
     const result = await runCli([
       "author",

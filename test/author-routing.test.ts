@@ -3,7 +3,9 @@ import {
   applyRoutingProposalToConfig,
   buildRoutingProposal,
   inspectRoutingAuthoringInputs,
+  renderRoutingConfigDocument,
 } from "../src/author-routing.js"
+import { loadRouterConfig } from "../src/config.js"
 import { resolveRoute } from "../src/router.js"
 
 describe("inspectRoutingAuthoringInputs", () => {
@@ -237,7 +239,7 @@ describe("buildRoutingProposal", () => {
     })
 
     const document = applyRoutingProposalToConfig(proposal, {
-      workflow: { kind: "superpowers" },
+      workflow: { kind: "direct", intents: { build: { label: "Build" } } },
       settings: {
         activePreset: "default",
         enabled: true,
@@ -268,7 +270,7 @@ describe("buildRoutingProposal", () => {
           short: "def",
           description: "Keep this description",
           usesLanes: ["ops"],
-          routes: { brainstorming: "existing" },
+          routes: { review: "existing" },
           defaultRoute: "existing",
         },
       },
@@ -293,10 +295,129 @@ describe("buildRoutingProposal", () => {
       short: "def",
       description: "Keep this description",
       usesLanes: ["ops", "frontend"],
-      routes: { brainstorming: "existing" },
+      routes: { review: "existing" },
       defaultLane: "frontend",
       defaultRoute: "builder",
     })
+  })
+
+  it("resets incompatible route-bearing sections when the workflow mode changes", async () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: ["frontend"],
+      inventory: {
+        models: {
+          builder: { model: "openai/gpt-5", specialties: ["frontend", "build"] },
+        },
+      },
+    })
+
+    const document = applyRoutingProposalToConfig(proposal, {
+      workflow: { kind: "superpowers" },
+      settings: {
+        activePreset: "default",
+        enabled: true,
+        commandPrefix: "oms",
+        laneSelection: { mode: "suggest" },
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      profiles: {
+        existing: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+      },
+      lanes: {
+        ops: {
+          label: "Ops",
+          routes: { brainstorming: "existing" },
+          defaultRoute: "existing",
+        },
+      },
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          routes: { brainstorming: "existing" },
+          usesLanes: ["ops"],
+          defaultLane: "ops",
+          defaultRoute: "existing",
+        },
+      },
+    })
+
+    const rendered = renderRoutingConfigDocument(document)
+    const loaded = await loadRouterConfig({
+      cwd: "/workspace/project",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async (filePath) => filePath === "/workspace/project/oh-my-superagents.config.jsonc",
+      readFile: async () => rendered,
+    })
+
+    expect(document.lanes).toEqual(proposal.lanes)
+    expect(document.presets.default.routes).toEqual(proposal.presets.default.routes)
+    expect(document.presets.default.usesLanes).toEqual(["frontend"])
+    expect(loaded.config.workflow).toEqual({
+      kind: "direct",
+      intents: {
+        build: { label: "Build" },
+      },
+    })
+  })
+
+  it("clears a stale defaultLane when the retained setting is no longer allowed", () => {
+    const proposal = buildRoutingProposal({
+      mode: "direct",
+      suggestedLanes: ["frontend"],
+      inventory: {
+        models: {
+          builder: { model: "openai/gpt-5", specialties: ["frontend", "build"] },
+        },
+      },
+    })
+
+    const document = applyRoutingProposalToConfig(proposal, {
+      workflow: { kind: "direct", intents: { build: { label: "Build" } } },
+      settings: {
+        activePreset: "default",
+        enabled: true,
+        defaultLane: "ops",
+        commandPrefix: "oms",
+        laneSelection: { mode: "suggest" },
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      profiles: {},
+      lanes: {
+        ops: {
+          label: "Ops",
+          routes: {},
+          defaultRoute: "builder",
+        },
+      },
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          usesLanes: ["ops"],
+          defaultLane: "ops",
+          routes: {},
+          defaultRoute: "builder",
+        },
+      },
+    })
+
+    expect(document.settings?.defaultLane).toBeNull()
   })
 })
 

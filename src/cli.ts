@@ -233,6 +233,9 @@ async function buildAuthorRoutingPreview(
   deps: CliDeps,
 ) {
   const inventory = await loadModelInventory(modelsPath, deps)
+  const targetPath = explicitPath
+    ?? (write ? await deps.discoverConfigPath({ cwd, exists: deps.artifactExists }) : undefined)
+    ?? getProjectConfigPath(cwd)
   const authoringInputs = await inspectRoutingAuthoringInputs({
     cwd,
     exists: deps.artifactExists,
@@ -243,7 +246,6 @@ async function buildAuthorRoutingPreview(
     suggestedLanes: authoringInputs.suggestedLanes,
     inventory,
   })
-  const targetPath = explicitPath ?? getProjectConfigPath(cwd)
   const hasExistingConfig = await deps.artifactExists(targetPath)
   const nextDocument = applyRoutingProposalToConfig(
     proposal,
