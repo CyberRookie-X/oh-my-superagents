@@ -258,6 +258,51 @@ describe("resolveControlPlane", () => {
     expect(result.activePreset.preset.defaultRoute).toBe("review")
   })
 
+  it("accepts direct preset routes during status resolution", async () => {
+    const result = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "workflow": {
+          "kind": "direct",
+          "intents": {
+            "plan": { "label": "Plan" },
+            "build": { "label": "Build" }
+          }
+        },
+        "settings": {
+          "activePreset": "default"
+        },
+        "profiles": {
+          "planner": { "model": "openai/gpt-5" },
+          "builder": { "model": "gpt-5.4" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "routes": {
+              "plan": "planner"
+            },
+            "defaultRoute": "builder"
+          }
+        }
+      }`,
+    })
+
+    expect(result.config.workflow).toEqual({
+      kind: "direct",
+      intents: {
+        plan: { label: "Plan" },
+        build: { label: "Build" },
+      },
+    })
+    expect(result.activePreset.preset.routes).toEqual({ plan: "planner" })
+  })
+
   it("resolves single-parent preset reuse before validation", async () => {
     const result = await resolveControlPlane({
       command: "status",

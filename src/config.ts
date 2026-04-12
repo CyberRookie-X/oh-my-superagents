@@ -145,6 +145,10 @@ export type SuperpowersCompatibilityConfig = {
 export type DirectIntentConfig = z.infer<typeof DirectIntentSchema>
 export type WorkflowConfig = z.infer<typeof WorkflowSchema>
 
+export function getWorkflowRouteIds(workflow?: WorkflowConfig) {
+  return workflow?.kind === "direct" ? Object.keys(workflow.intents) : [...SUPERPOWERS_ROUTE_CATALOG]
+}
+
 export type RouterConfig = {
   workflow: WorkflowConfig
   profiles: Record<string, ControlPlaneProfile>
@@ -480,10 +484,7 @@ function getEffectiveProfilesForPreset(config: ControlPlaneConfig, preset: Contr
 }
 
 function validateLaneTargets(config: ControlPlaneConfig) {
-  const validRouteIds =
-    config.workflow.kind === "direct"
-      ? new Set(Object.keys(config.workflow.intents))
-      : BUILT_IN_PHASE_SET
+  const validRouteIds = new Set(getWorkflowRouteIds(config.workflow))
 
   for (const lane of Object.values(config.lanes)) {
     for (const routeId of Object.keys(lane.routes)) {
@@ -735,10 +736,7 @@ export async function loadRouterConfig(input: LoadRouterConfigInput): Promise<Lo
     superpowersCompatibility: loaded.config.settings.superpowersCompatibility,
   }
 
-  const validRouteIds =
-    config.workflow.kind === "direct"
-      ? new Set(Object.keys(config.workflow.intents))
-      : BUILT_IN_PHASE_SET
+  const validRouteIds = new Set(getWorkflowRouteIds(config.workflow))
 
   for (const routeId of Object.keys(config.routes)) {
     if (!validRouteIds.has(routeId)) {

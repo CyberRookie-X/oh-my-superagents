@@ -1392,6 +1392,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
     if (command === "disable") {
       const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath })
+      assertWorkflowSupport(resolved.config, "disable", cliHost)
       const prepared = await deps.prepareControlPlaneStateWrite({
         command: "disable",
         cwd,

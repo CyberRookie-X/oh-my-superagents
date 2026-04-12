@@ -1887,6 +1887,25 @@ describe("runCli", () => {
     })
   })
 
+  it("rejects disable for direct-mode OpenCode without writing config or cleaning artifacts", async () => {
+    const writes: string[] = []
+    const removed: string[] = []
+
+    const result = await runCli(["disable", "--host", "opencode"], createDirectCliDeps({
+      writeFile: async (filePath: string) => {
+        writes.push(filePath)
+      },
+      unlink: async (filePath: string) => {
+        removed.push(filePath)
+      },
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Direct workflow is not yet supported for disable --host opencode")
+    expect(writes).toEqual([])
+    expect(removed).toEqual([])
+  })
+
   it("removes OMS-owned artifacts for the invoking host only during disable", async () => {
     const removedPaths: string[] = []
 
@@ -2701,6 +2720,60 @@ describe("runCli", () => {
       parentPresetKey: "default",
       resolvable: true,
     })
+  })
+
+  it("reports intent-based routing details in direct-mode OpenCode doctor output", async () => {
+    const routedConfig = {
+      ...directControlPlaneConfig,
+      profiles: {
+        ...directControlPlaneConfig.profiles,
+        unused: { model: "google/gemini-2.5-pro" },
+      },
+      workflow: {
+        kind: "direct" as const,
+        intents: {
+          plan: { label: "Plan" },
+          build: { label: "Build" },
+        },
+      },
+      presets: {
+        default: {
+          ...directControlPlaneConfig.presets.default,
+          routes: { plan: "planner" },
+          defaultRoute: "builder",
+        },
+      },
+    }
+
+    const result = await runCli(["doctor", "--host", "opencode"], createDirectCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: routedConfig,
+        activePreset: {
+          key: "default",
+          preset: routedConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend"],
+          defaultLane: "frontend",
+          effectiveLane: "frontend",
+          presetDefaultLane: "frontend",
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.routing.explicitRoutedPhases).toEqual(["plan"])
+    expect(output.routing.defaultRoutedPhases).toEqual(["build"])
+    expect(output.routing.defaultRoutedPhases).not.toContain("brainstorming")
+    expect(output.routing.unusedProfiles).toEqual(["unused"])
   })
 
   it("counts lane-only profiles as used in OpenCode doctor output", async () => {

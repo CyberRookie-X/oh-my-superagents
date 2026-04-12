@@ -11,6 +11,7 @@ import {
   createDefaultControlPlaneConfig,
   getGlobalConfigPath,
   getProjectConfigPath,
+  getWorkflowRouteIds,
   type LayeredControlPlaneConfigInput,
   loadControlPlaneConfig,
   type LoadControlPlaneConfigInput,
@@ -105,8 +106,8 @@ const STAGE_1_SUGGESTION_MESSAGE =
   "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session."
 
 export type RoutingValidationSummary = {
-  defaultRoutedPhases: BuiltInPhase[]
-  explicitRoutedPhases: BuiltInPhase[]
+  defaultRoutedPhases: string[]
+  explicitRoutedPhases: string[]
   unusedProfiles: string[]
   reuseRelationship:
     | { kind: "none"; parentPresetKey: null; resolvable: true }
@@ -325,8 +326,9 @@ export function summarizeRoutingValidation(
   }
 
   const explicitRouteSource = localPresetDefinition ?? preset
-  const explicitRoutedPhases = BUILT_IN_PHASES.filter((phase) => phase in explicitRouteSource.routes)
-  const defaultRoutedPhases = BUILT_IN_PHASES.filter((phase) => !(phase in explicitRouteSource.routes))
+  const routeIds = getWorkflowRouteIds(config.workflow)
+  const explicitRoutedPhases = routeIds.filter((routeId) => routeId in explicitRouteSource.routes)
+  const defaultRoutedPhases = routeIds.filter((routeId) => !(routeId in explicitRouteSource.routes))
   const effectiveProfiles = getEffectiveProfiles(config, preset)
   const usedProfiles = new Set<string>([
     preset.defaultRoute,
@@ -453,6 +455,7 @@ export function buildOpenCodeNextAction(input: {
 function validatePresetGraph(config: ControlPlaneConfig, presetKey: string, preset: ControlPlanePreset) {
   const allowedLanes = preset.usesLanes ?? []
   const effectiveProfiles = getEffectiveProfiles(config, preset)
+  const validRouteIds = new Set(getWorkflowRouteIds(config.workflow))
 
   if (preset.defaultLane && !allowedLanes.includes(preset.defaultLane)) {
     throw new Error(`Preset ${presetKey} defaultLane must be included in usesLanes: ${preset.defaultLane}`)
@@ -462,12 +465,12 @@ function validatePresetGraph(config: ControlPlaneConfig, presetKey: string, pres
     throw new Error(`Preset ${presetKey} has unknown defaultRoute profile: ${preset.defaultRoute}`)
   }
 
-  for (const phase of Object.keys(preset.routes)) {
-    if (!BUILT_IN_PHASES.includes(phase as (typeof BUILT_IN_PHASES)[number])) {
-      throw new Error(`Unknown phase: ${phase}`)
+  for (const routeId of Object.keys(preset.routes)) {
+    if (!validRouteIds.has(routeId)) {
+      throw new Error(config.workflow.kind === "direct" ? `Unknown intent: ${routeId}` : `Unknown phase: ${routeId}`)
     }
 
-    const target = preset.routes[phase]
+    const target = preset.routes[routeId]
     if (!effectiveProfiles[target]) {
       throw new Error(`Preset ${presetKey} has unknown profile: ${target}`)
     }
