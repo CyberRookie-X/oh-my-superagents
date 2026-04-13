@@ -43,6 +43,8 @@ const CODEX_DIRECT_SKILL_MARKER_PREFIX = "oms-direct:"
 const CODEX_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
 const OPENCODE_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["sp-", "ai-"])
 const OPENCODE_ROUTER_OWNED_AGENT_PREFIXES = new Set(["spr-", "rt-"])
+const QWEN_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["oms-", "ai-"])
+const QWEN_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -109,6 +111,18 @@ function isOpenCodeRouterOwnedFile(directory: string, fileName: string, content:
 function isCodexRouterOwnedFile(directory: string, fileName: string, content: string) {
   if (directory.endsWith(`${path.sep}.codex${path.sep}agents`)) {
     return isPrefixOwned(fileName, content, CODEX_ROUTER_OWNED_AGENT_PREFIXES)
+  }
+
+  return false
+}
+
+function isQwenRouterOwnedFile(directory: string, fileName: string, content: string) {
+  if (directory.endsWith(`${path.sep}.qwen${path.sep}commands`)) {
+    return isPrefixOwned(fileName, content, QWEN_ROUTER_OWNED_COMMAND_PREFIXES)
+  }
+
+  if (directory.endsWith(`${path.sep}.qwen${path.sep}agents`)) {
+    return isPrefixOwned(fileName, content, QWEN_ROUTER_OWNED_AGENT_PREFIXES)
   }
 
   return false
@@ -489,6 +503,7 @@ export async function materializeArtifacts(
         )
         || isOpenCodeRouterOwnedFile(directory, entry, content)
         || isCodexRouterOwnedFile(directory, entry, content)
+        || isQwenRouterOwnedFile(directory, entry, content)
         || isPrefixOwned(entry, content, prefixes)
 
       if (!isOwnedByDirectoryContract) {

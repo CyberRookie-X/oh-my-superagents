@@ -185,6 +185,31 @@ function renderOwnedQwenOmsCommand(renderedName: string, logicalCommand: string)
   ].join("\n")
 }
 
+function renderOwnedQwenAgent(name: string) {
+  return [
+    "---",
+    `name: ${name}`,
+    "description: 'Generated OMS Qwen agent'",
+    "---",
+    "",
+    OWNERSHIP_MARKER,
+    "",
+  ].join("\n")
+}
+
+function renderOwnedQwenDirectCommand(name: string) {
+  return [
+    "---",
+    "description: 'Generated OMS Qwen direct command'",
+    "---",
+    "",
+    OWNERSHIP_MARKER,
+    "",
+    `Use the \`rt-${name.replace(/^ai-/, "")}\` direct-mode agent for this intent.`,
+    "",
+  ].join("\n")
+}
+
 function renderUserCodexSkill(skillName: string) {
   return ["---", `name: ${skillName}`, "description: User-authored skill", "---", "", "Do something unrelated.", ""].join("\n")
 }
@@ -582,6 +607,40 @@ describe("materializeArtifacts", () => {
     })
 
     expect(result.removed).toEqual(["/workspace/project/.qwen/commands/legacy-state.md"])
+    expect(removedPaths).toEqual(result.removed)
+  })
+
+  it("removes stale Qwen direct artifacts when syncing superpowers workflow artifacts", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.qwen/commands/ai-plan.md": renderOwnedQwenDirectCommand("ai-plan"),
+      "/workspace/project/.qwen/agents/rt-plan.md": renderOwnedQwenAgent("rt-plan"),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "command",
+          directory: ".qwen/commands",
+          fileName: "oms-status.md",
+          ownerPrefix: "oms-",
+          content: renderOwnedQwenOmsCommand("oms-status", "status"),
+        },
+        {
+          kind: "agent",
+          directory: ".qwen/agents",
+          fileName: "oms-review.md",
+          ownerPrefix: "oms-",
+          content: renderOwnedQwenAgent("oms-review"),
+        },
+      ],
+      fs,
+    })
+
+    expect(result.removed).toEqual([
+      "/workspace/project/.qwen/commands/ai-plan.md",
+      "/workspace/project/.qwen/agents/rt-plan.md",
+    ])
     expect(removedPaths).toEqual(result.removed)
   })
 

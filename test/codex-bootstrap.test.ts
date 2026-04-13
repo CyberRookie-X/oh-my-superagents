@@ -910,4 +910,67 @@ describe("runCodexBootstrap", () => {
     expect(mkdirCalls).toEqual([])
     expect(writeCalls).toEqual([])
   })
+
+  it("does not block direct-mode bootstrap when strict compatibility is incompatible", async () => {
+    let materializeArtifactsCalled = false
+
+    const result = await runCodexBootstrap({
+      cwd: "/workspace/project",
+      discoverConfigPath: async () => "/workspace/project/oh-my-superagents.config.jsonc",
+      loadConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        config: {
+          workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+          profiles: { planner: { model: "openai/gpt-5" } },
+          routes: { plan: "planner" },
+          defaultRoute: "planner",
+          superpowersCompatibility: { mode: "strict" as const },
+        },
+      }),
+      resolveCompatibility: async () => incompatibleCodexStrict,
+      buildCodexArtifacts: () => ({ agents: [] }),
+      materializeArtifacts: async () => {
+        materializeArtifactsCalled = true
+        return { exitCode: 0 as const, warnings: [], written: [], removed: [] }
+      },
+      fs: {
+        mkdir: async () => {},
+        writeFile: async () => {},
+        readFile: async (filePath: string) => {
+          if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+            return JSON.stringify({
+              workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+              settings: createDefaultControlPlaneConfig().settings,
+              presets: {
+                default: {
+                  label: "Default",
+                  short: "def",
+                  profiles: { planner: { model: "openai/gpt-5" } },
+                  routes: { plan: "planner" },
+                  defaultRoute: "planner",
+                },
+              },
+            })
+          }
+
+          throw createNotFoundError(filePath)
+        },
+        readdir: async () => [],
+        stat: async () => ({ isFile: () => true }),
+        rename: async () => {
+          throw new Error("unexpected")
+        },
+        unlink: async () => {
+          throw new Error("unexpected")
+        },
+      },
+    })
+
+    expect(result.syncResult.exitCode).toBe(0)
+    expect(result.compatibility).toBeNull()
+    expect(result.bootstrapFiles).toEqual(expect.arrayContaining([
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    ]))
+    expect(materializeArtifactsCalled).toBe(true)
+  })
 })

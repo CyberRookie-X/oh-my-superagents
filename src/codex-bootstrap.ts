@@ -39,7 +39,7 @@ export type CodexBootstrapResult = {
   bootstrapFiles: string[]
   syncResult: MaterializeArtifactsResult
   nextSteps: string[]
-  compatibility: SuperpowersCompatibilityResult
+  compatibility: SuperpowersCompatibilityResult | null
 }
 
 type CodexBootstrapControlPlaneSettings = Pick<ControlPlaneConfig["settings"], "commandPrefix" | "commands">
@@ -479,13 +479,15 @@ export async function runCodexBootstrap(input: {
       ).config.settings
     : createDefaultControlPlaneConfig().settings
 
-  const compatibility = await input.resolveCompatibility(
-    "superpowersCompatibility" in loaded.config && loaded.config.superpowersCompatibility
-      ? loaded.config.superpowersCompatibility.mode
-      : "warn",
-  )
+  const compatibility = loaded.config.workflow.kind === "direct"
+    ? null
+    : await input.resolveCompatibility(
+        "superpowersCompatibility" in loaded.config && loaded.config.superpowersCompatibility
+          ? loaded.config.superpowersCompatibility.mode
+          : "warn",
+      )
 
-  if (compatibility.shouldBlock) {
+  if (compatibility?.shouldBlock) {
     return {
       configPath: loaded.path,
       createdConfig: false,

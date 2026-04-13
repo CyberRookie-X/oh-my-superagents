@@ -1496,7 +1496,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       return {
         exitCode: result.syncResult.exitCode,
         stdout: JSON.stringify(result, null, 2),
-        stderr: result.compatibility.shouldBlock
+        stderr: result.compatibility?.shouldBlock
           ? formatCompatibilityBlock(result.compatibility)
           : joinStderr([
             formatCompatibilityWarning(result.compatibility),
