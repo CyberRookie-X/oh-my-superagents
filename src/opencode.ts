@@ -6,6 +6,7 @@ import {
   type ControlPlaneConfig,
   type RouterConfig,
 } from "./config.js"
+import { listLaneExecutionUnits, renderLaneSplitGuidance } from "./lane-execution.js"
 import { PHASE_TO_AGENT, PHASE_TO_COMMAND, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
 
 export const MARKER_TEXT = "generated-by: oh-my-superagents; do-not-edit: true"
@@ -23,7 +24,16 @@ export type GeneratedArtifact = {
   content: string
 }
 
-type OpenCodeControlPlaneSettings = Pick<ControlPlaneConfig["settings"], "commandPrefix" | "commands">
+type OpenCodeControlPlaneSettings = Pick<
+  ControlPlaneConfig["settings"],
+  "activePreset" | "commandPrefix" | "commands" | "subagentExecution"
+>
+
+const SUBAGENT_EXECUTION_BASE_PERMISSION_TASK: PermissionTask = {
+  "*": "deny",
+  "spr-review": "allow",
+  "spr-verify": "allow",
+}
 
 const CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string> = {
   status: "Show OMS status for OpenCode.",
@@ -32,8 +42,12 @@ const CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string>
   sync: "Sync OMS artifacts for OpenCode.",
   doctor: "Inspect OMS diagnostics for OpenCode.",
 }
+const DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "sync", "doctor"])
 const TEMPORARY_DISABLE_COMMAND_FILE = "oms-no-superpowers.md"
 const TEMPORARY_DISABLE_COMMAND_OWNER_PREFIX = TEMPORARY_DISABLE_COMMAND_FILE
+export const RUNTIME_AGENT_METADATA_DIRECTORY = ".opencode/oh-my-superagents"
+export const RUNTIME_AGENT_METADATA_FILE = "runtime-agent-metadata.json"
+export const RUNTIME_AGENT_METADATA_OWNER_PREFIX = "oms-runtime-agent-metadata"
 
 const RESERVED_PHASE_COMMAND_FILES = new Set(
   Object.values(PHASE_TO_COMMAND).map((commandName) => `${commandName.slice(1)}.md`),
@@ -102,6 +116,8 @@ export function renderCommandFile(input: {
   agentName: string
   skillName: string
   phase: BuiltInPhase
+  effectiveLane?: string
+  splitGuidance?: string
 }) {
   return [
     "---",
@@ -114,8 +130,10 @@ export function renderCommandFile(input: {
     "",
     `Load and follow the upstream skill \`${input.skillName}\` exactly.`,
     "",
+    ...(input.splitGuidance ? ["## Lane Split Guidance", input.splitGuidance, ""] : []),
     "## Router Context",
     `- phase: ${input.phase}`,
+    ...(input.effectiveLane ? [`- lane: ${input.effectiveLane}`] : []),
     "- arguments: $ARGUMENTS",
     "",
   ].join("\n")
@@ -220,6 +238,18 @@ function buildTemporaryDisableHelperArtifact(): GeneratedArtifact {
   }
 }
 
+function buildRuntimeAgentMetadataArtifact(
+  agents: Map<string, { profile: string; profiles: string[]; codexFast: boolean }>,
+): GeneratedArtifact {
+  return {
+    kind: "command",
+    directory: RUNTIME_AGENT_METADATA_DIRECTORY,
+    fileName: RUNTIME_AGENT_METADATA_FILE,
+    ownerPrefix: RUNTIME_AGENT_METADATA_OWNER_PREFIX,
+    content: `${JSON.stringify({ agents: Object.fromEntries(agents) }, null, 2)}\n`,
+  }
+}
+
 export function listRenderedOpenCodeControlPlaneCommands(settings: OpenCodeControlPlaneSettings) {
   return Object.fromEntries(
     CONTROL_PLANE_COMMAND_KEYS.map((key) => {
@@ -233,11 +263,18 @@ export function listRenderedOpenCodeControlPlaneCommands(settings: OpenCodeContr
   ) as Record<ControlPlaneCommandKey, string[]>
 }
 
-function buildControlPlaneCommandArtifacts(settings: OpenCodeControlPlaneSettings): GeneratedArtifact[] {
+function buildControlPlaneCommandArtifacts(
+  settings: OpenCodeControlPlaneSettings,
+  supportedCommands: ReadonlySet<ControlPlaneCommandKey> = new Set(CONTROL_PLANE_COMMAND_KEYS),
+): GeneratedArtifact[] {
   const ownerPrefix = `${settings.commandPrefix}-`
   const seenFileNames = new Map<string, string>()
 
   return CONTROL_PLANE_COMMAND_KEYS.flatMap((commandKey) => {
+    if (!supportedCommands.has(commandKey)) {
+      return []
+    }
+
     const renderedNames = listRenderedOpenCodeControlPlaneCommands(settings)[commandKey]
 
     return renderedNames.map((renderedName) => {
@@ -292,7 +329,37 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
   const commands: GeneratedArtifact[] = []
   const agents = new Map<string, GeneratedArtifact>()
   const agentSelections = new Map<string, string>()
+  const runtimeAgentMetadata = new Map<string, { profile: string; profiles: string[]; codexFast: boolean }>()
   const workflow = config.workflow
+  const laneExecutionUnits =
+    workflow?.kind === "superpowers" && controlPlaneSettings && config.lanes && Object.keys(config.lanes).length > 0
+      ? listLaneExecutionUnits({
+          activePresetKey: controlPlaneSettings.activePreset,
+          activePreset: { usesLanes: config.availableLanes ?? Object.keys(config.lanes) },
+        })
+      : []
+
+  function registerRuntimeAgentMetadata(agentName: string, profile: string, codexFast?: boolean) {
+    const current = runtimeAgentMetadata.get(agentName)
+    const nextCodexFast = codexFast === true
+
+    if (current && current.codexFast !== nextCodexFast) {
+      throw new Error(`Shared agent conflict for ${agentName}`)
+    }
+
+    if (current) {
+      if (!current.profiles.includes(profile)) {
+        current.profiles.push(profile)
+      }
+      return
+    }
+
+    runtimeAgentMetadata.set(agentName, {
+      profile,
+      profiles: [profile],
+      codexFast: nextCodexFast,
+    })
+  }
 
   if (workflow?.kind === "direct") {
     for (const intent of Object.keys(workflow.intents)) {
@@ -302,6 +369,8 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
 
       const resolved = resolveRoute(config, intent)
       const agentName = `rt-${intent}`
+
+      registerRuntimeAgentMetadata(agentName, resolved.profileId, resolved.selection.codexFast)
 
       agents.set(agentName, {
         kind: "agent",
@@ -336,6 +405,17 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
       const agentName = PHASE_TO_AGENT[phase]
       const commandName = PHASE_TO_COMMAND[phase].slice(1)
       const skillName = `superpowers/${phase}`
+      const permissionTask: PermissionTask | undefined =
+        phase === "subagent-driven-development"
+          ? {
+              ...SUBAGENT_EXECUTION_BASE_PERMISSION_TASK,
+              ...Object.fromEntries(
+                laneExecutionUnits.map((unit) => [unit.agentFileName.replace(/\.md$/, ""), "allow" as const]),
+              ),
+            }
+          : undefined
+
+      registerRuntimeAgentMetadata(agentName, resolved.profileId, resolved.selection.codexFast)
 
       if (!agents.has(agentName)) {
         agentSelections.set(
@@ -358,10 +438,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
             model: resolved.selection.model,
             variant: resolved.selection.variant,
             temperature: resolved.selection.temperature,
-            permissionTask:
-              agentName === "spr-build"
-                ? { "*": "deny", "spr-review": "allow", "spr-verify": "allow" }
-                : undefined,
+            permissionTask,
           }),
         })
       } else {
@@ -385,13 +462,67 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
           agentName,
           skillName,
           phase,
+          splitGuidance:
+            phase === "subagent-driven-development" && laneExecutionUnits.length > 0
+              ? `If the task spans multiple lanes, ${renderLaneSplitGuidance({
+                  mode: controlPlaneSettings?.subagentExecution.mode ?? "suggest",
+                  units: laneExecutionUnits,
+                }).replace(/^./, (value) => value.toLowerCase())}`
+              : undefined,
         }),
       })
+
+      if (phase !== "subagent-driven-development") {
+        continue
+      }
+
+      for (const unit of laneExecutionUnits) {
+        const laneResolved = resolvePhase(config, phase, { effectiveLane: unit.lane })
+        const laneAgentName = unit.agentFileName.replace(/\.md$/, "")
+
+        registerRuntimeAgentMetadata(laneAgentName, laneResolved.profileId, laneResolved.selection.codexFast)
+
+        agents.set(laneAgentName, {
+          kind: "agent",
+          directory: ".opencode/agents",
+          fileName: unit.agentFileName,
+          ownerPrefix: "spr-build--",
+          content: renderAgentFile({
+            agentName: laneAgentName,
+            description: `${laneAgentName} helper for ${phase}`,
+            model: laneResolved.selection.model,
+            variant: laneResolved.selection.variant,
+            temperature: laneResolved.selection.temperature,
+            permissionTask: SUBAGENT_EXECUTION_BASE_PERMISSION_TASK,
+          }),
+        })
+
+        commands.push({
+          kind: "command",
+          directory: ".opencode/commands",
+          fileName: unit.commandFileName,
+          ownerPrefix: "sp-execute-",
+          content: renderCommandFile({
+            description: `Route ${phase} through ${laneAgentName}`,
+            agentName: laneAgentName,
+            skillName,
+            phase,
+            effectiveLane: unit.lane,
+          }),
+        })
+      }
     }
   }
 
+  commands.push(buildRuntimeAgentMetadataArtifact(runtimeAgentMetadata))
+
   if (controlPlaneSettings) {
-    const controlPlaneArtifacts = buildControlPlaneCommandArtifacts(controlPlaneSettings)
+    const controlPlaneArtifacts = buildControlPlaneCommandArtifacts(
+      controlPlaneSettings,
+      workflow?.kind === "direct"
+        ? DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS
+        : new Set(CONTROL_PLANE_COMMAND_KEYS),
+    )
     assertNoOpenCodeCommandCollisions(commands, controlPlaneArtifacts)
     commands.push(...controlPlaneArtifacts)
     commands.push(buildTemporaryDisableHelperArtifact())

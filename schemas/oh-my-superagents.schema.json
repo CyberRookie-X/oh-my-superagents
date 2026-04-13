@@ -22,6 +22,16 @@
             }
           }
         },
+        "subagentExecution": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": ["manual", "suggest", "auto"],
+              "default": "suggest"
+            }
+          }
+        },
         "commandPrefix": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
         "commands": {
           "type": "object",
@@ -142,6 +152,16 @@
               "properties": {
                 "mode": {
                   "enum": ["manual", "suggest", "auto"]
+                }
+              }
+            },
+            "subagentExecution": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": {
+                  "enum": ["manual", "suggest", "auto"],
+                  "default": "suggest"
                 }
               }
             },

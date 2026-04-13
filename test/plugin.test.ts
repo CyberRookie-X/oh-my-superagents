@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   loadRouterConfig: vi.fn(),
   detectOpenCodeSuperpowers: vi.fn(),
   evaluateSuperpowersCompatibility: vi.fn(),
+  readFile: vi.fn(),
 }))
 
 vi.mock("../src/config.js", () => ({
@@ -28,6 +29,10 @@ vi.mock("../src/superpowers-compatibility.js", async () => {
     evaluateSuperpowersCompatibility: mocks.evaluateSuperpowersCompatibility,
   }
 })
+
+vi.mock("node:fs/promises", () => ({
+  readFile: mocks.readFile,
+}))
 
 import { OhMySuperpowersPlugin } from "../src/plugin.js"
 
@@ -78,9 +83,13 @@ function createCompatibilityResult(
   }
 }
 
-function createPluginInput(logs: unknown[]) {
+function createPluginInput(
+  logs: unknown[],
+  overrides: Partial<{ directory: string; worktree: string }> = {},
+) {
   return {
     directory: "/workspace/project",
+    worktree: "/workspace/project",
     client: {
       app: {
         log: async (entry: unknown) => {
@@ -88,6 +97,7 @@ function createPluginInput(logs: unknown[]) {
         },
       },
     },
+    ...overrides,
   } as never
 }
 
@@ -129,15 +139,328 @@ async function waitForBackgroundWork() {
   })
 }
 
+function expectPluginHooks() {
+  return expect.objectContaining({
+    "chat.params": expect.any(Function),
+  })
+}
+
 describe("OhMySuperpowersPlugin", () => {
   beforeEach(() => {
     mocks.loadRouterConfig.mockReset()
     mocks.detectOpenCodeSuperpowers.mockReset()
     mocks.evaluateSuperpowersCompatibility.mockReset()
+    mocks.readFile.mockReset()
 
     mocks.loadRouterConfig.mockResolvedValue(createDefaultConfig())
     mocks.detectOpenCodeSuperpowers.mockResolvedValue(createDetectionResult())
     mocks.evaluateSuperpowersCompatibility.mockReturnValue(createCompatibilityResult())
+    mocks.readFile.mockResolvedValue('{"agents":{}}')
+  })
+
+  it("patches chat params when the current OpenCode agent has codexFast enabled", async () => {
+    mocks.readFile.mockResolvedValueOnce(
+      JSON.stringify({
+        agents: {
+          "spr-build": {
+            profile: "build",
+            profiles: ["build"],
+            codexFast: true,
+          },
+        },
+      }),
+    )
+
+    const hooks = await OhMySuperpowersPlugin(createPluginInput([]))
+    const output = {
+      temperature: 0,
+      topP: 1,
+      topK: 40,
+      maxOutputTokens: undefined,
+      options: {},
+    }
+
+    await hooks["chat.params"]?.(
+      {
+        sessionID: "s1",
+        agent: "spr-build",
+        model: {} as never,
+        provider: { source: "config", info: {} as never, options: {} },
+        message: {} as never,
+      },
+      output,
+    )
+
+    expect(output.options.serviceTier).toBe("fast")
+  })
+
+  it("patches chat params from worktree-root runtime metadata when the session directory is a subdirectory", async () => {
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      expect(filePath).toBe("/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json")
+
+      return JSON.stringify({
+        agents: {
+          "spr-build": {
+            profile: "build",
+            profiles: ["build"],
+            codexFast: true,
+          },
+        },
+      })
+    })
+
+    const hooks = await OhMySuperpowersPlugin(createPluginInput([], {
+      directory: "/workspace/project/packages/app",
+      worktree: "/workspace/project",
+    }))
+    const output = {
+      temperature: 0,
+      topP: 1,
+      topK: 40,
+      maxOutputTokens: undefined,
+      options: {},
+    }
+
+    await hooks["chat.params"]?.(
+      {
+        sessionID: "s1",
+        agent: "spr-build",
+        model: {} as never,
+        provider: { source: "config", info: {} as never, options: {} },
+        message: {} as never,
+      },
+      output,
+    )
+
+    expect(output.options.serviceTier).toBe("fast")
+  })
+
+  it("prefers package-local config and runtime metadata in a nested session", async () => {
+    const logs: unknown[] = []
+
+    mocks.loadRouterConfig.mockImplementation(async ({ cwd }: { cwd: string }) => {
+      expect(cwd).toBe("/workspace/project/packages/app")
+      return {
+        path: "/workspace/project/packages/app/oh-my-superagents.config.jsonc",
+        config: createDefaultConfig().config,
+      }
+    })
+    mocks.detectOpenCodeSuperpowers.mockImplementation(async ({ cwd }: { cwd: string }) => {
+      expect(cwd).toBe("/workspace/project/packages/app")
+      return createDetectionResult()
+    })
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (filePath === "/workspace/project/packages/app/oh-my-superagents.config.jsonc") {
+        return JSON.stringify({ local: true })
+      }
+
+      if (filePath === "/workspace/project/packages/app/.opencode/oh-my-superagents/runtime-agent-metadata.json") {
+        return JSON.stringify({
+          agents: {
+            "spr-build": {
+              profile: "build",
+              profiles: ["build"],
+              codexFast: true,
+            },
+          },
+        })
+      }
+
+      throw new Error(`unexpected read: ${filePath}`)
+    })
+
+    const hooks = await OhMySuperpowersPlugin(createPluginInput(logs, {
+      directory: "/workspace/project/packages/app",
+      worktree: "/workspace/project",
+    }))
+    await waitForBackgroundWork()
+
+    const output = {
+      temperature: 0,
+      topP: 1,
+      topK: 40,
+      maxOutputTokens: undefined,
+      options: {},
+    }
+
+    await hooks["chat.params"]?.(
+      {
+        sessionID: "s1",
+        agent: "spr-build",
+        model: {} as never,
+        provider: { source: "config", info: {} as never, options: {} },
+        message: {} as never,
+      },
+      output,
+    )
+
+    expect(output.options.serviceTier).toBe("fast")
+  })
+
+  it("falls back to worktree-root config and runtime metadata when the subdirectory has neither", async () => {
+    mocks.loadRouterConfig.mockImplementation(async ({ cwd }: { cwd: string }) => {
+      expect(cwd).toBe("/workspace/project")
+      return createDefaultConfig()
+    })
+    mocks.detectOpenCodeSuperpowers.mockImplementation(async ({ cwd }: { cwd: string }) => {
+      expect(cwd).toBe("/workspace/project")
+      return createDetectionResult()
+    })
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (filePath === "/workspace/project/packages/app/oh-my-superagents.config.jsonc") {
+        throw new Error("missing local config")
+      }
+
+      if (filePath === "/workspace/project/packages/app/.opencode/oh-my-superagents/runtime-agent-metadata.json") {
+        throw new Error("missing local metadata")
+      }
+
+      if (filePath === "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json") {
+        return JSON.stringify({
+          agents: {
+            "spr-build": {
+              profile: "build",
+              profiles: ["build"],
+              codexFast: true,
+            },
+          },
+        })
+      }
+
+      throw new Error(`unexpected read: ${filePath}`)
+    })
+
+    const hooks = await OhMySuperpowersPlugin(createPluginInput([], {
+      directory: "/workspace/project/packages/app",
+      worktree: "/workspace/project",
+    }))
+    await waitForBackgroundWork()
+
+    const output = {
+      temperature: 0,
+      topP: 1,
+      topK: 40,
+      maxOutputTokens: undefined,
+      options: {},
+    }
+
+    await hooks["chat.params"]?.(
+      {
+        sessionID: "s1",
+        agent: "spr-build",
+        model: {} as never,
+        provider: { source: "config", info: {} as never, options: {} },
+        message: {} as never,
+      },
+      output,
+    )
+
+    expect(output.options.serviceTier).toBe("fast")
+  })
+
+  it("does not let metadata-only local files shadow a valid worktree-root config", async () => {
+    mocks.loadRouterConfig.mockImplementation(async ({ cwd }: { cwd: string }) => {
+      expect(cwd).toBe("/workspace/project")
+      return createDefaultConfig()
+    })
+    mocks.detectOpenCodeSuperpowers.mockImplementation(async ({ cwd }: { cwd: string }) => {
+      expect(cwd).toBe("/workspace/project")
+      return createDetectionResult()
+    })
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (filePath === "/workspace/project/packages/app/oh-my-superagents.config.jsonc") {
+        throw new Error("missing local config")
+      }
+
+      if (filePath === "/workspace/project/packages/app/.opencode/oh-my-superagents/runtime-agent-metadata.json") {
+        return JSON.stringify({
+          agents: {
+            "spr-build": {
+              profile: "build",
+              profiles: ["build"],
+              codexFast: false,
+            },
+          },
+        })
+      }
+
+      if (filePath === "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json") {
+        return JSON.stringify({
+          agents: {
+            "spr-build": {
+              profile: "build",
+              profiles: ["build"],
+              codexFast: true,
+            },
+          },
+        })
+      }
+
+      throw new Error(`unexpected read: ${filePath}`)
+    })
+
+    const hooks = await OhMySuperpowersPlugin(createPluginInput([], {
+      directory: "/workspace/project/packages/app",
+      worktree: "/workspace/project",
+    }))
+    await waitForBackgroundWork()
+
+    const output = {
+      temperature: 0,
+      topP: 1,
+      topK: 40,
+      maxOutputTokens: undefined,
+      options: {},
+    }
+
+    await hooks["chat.params"]?.(
+      {
+        sessionID: "s1",
+        agent: "spr-build",
+        model: {} as never,
+        provider: { source: "config", info: {} as never, options: {} },
+        message: {} as never,
+      },
+      output,
+    )
+
+    expect(output.options.serviceTier).toBe("fast")
+  })
+
+  it("does not patch chat params when the current agent is not codexFast-enabled", async () => {
+    mocks.readFile.mockResolvedValueOnce(
+      JSON.stringify({
+        agents: {
+          "spr-build": {
+            profile: "build",
+            profiles: ["build"],
+            codexFast: false,
+          },
+        },
+      }),
+    )
+
+    const hooks = await OhMySuperpowersPlugin(createPluginInput([]))
+    const output = {
+      temperature: 0,
+      topP: 1,
+      topK: 40,
+      maxOutputTokens: undefined,
+      options: {},
+    }
+
+    await hooks["chat.params"]?.(
+      {
+        sessionID: "s1",
+        agent: "spr-build",
+        model: {} as never,
+        provider: { source: "config", info: {} as never, options: {} },
+        message: {} as never,
+      },
+      output,
+    )
+
+    expect(output.options.serviceTier).toBeUndefined()
   })
 
   it("logs explicit first-run guidance when config is missing", async () => {
@@ -219,7 +542,7 @@ describe("OhMySuperpowersPlugin", () => {
       }),
     )
 
-    await expect(OhMySuperpowersPlugin(createPluginInput(logs))).resolves.toEqual({})
+    await expect(OhMySuperpowersPlugin(createPluginInput(logs))).resolves.toEqual(expectPluginHooks())
     await waitForLogMessage(logs, "Could not detect")
 
     expect(logs).toEqual(
@@ -250,7 +573,7 @@ describe("OhMySuperpowersPlugin", () => {
       }),
     )
 
-    await expect(OhMySuperpowersPlugin(createPluginInput(logs))).resolves.toEqual({})
+    await expect(OhMySuperpowersPlugin(createPluginInput(logs))).resolves.toEqual(expectPluginHooks())
     await waitForLogMessage(logs, "Current state: upstream_incompatible")
 
     expect(logs).toEqual(
@@ -271,7 +594,7 @@ describe("OhMySuperpowersPlugin", () => {
 
     mocks.detectOpenCodeSuperpowers.mockRejectedValueOnce(new Error("detector exploded"))
 
-    await expect(OhMySuperpowersPlugin(createPluginInput(logs))).resolves.toEqual({})
+    await expect(OhMySuperpowersPlugin(createPluginInput(logs))).resolves.toEqual(expectPluginHooks())
     await waitForLogMessage(logs, "detector")
     await waitForLogMessage(logs, "detector exploded")
     await waitForLogMessage(logs, "not_detected")
@@ -299,7 +622,7 @@ describe("OhMySuperpowersPlugin", () => {
       },
     } as never)
 
-    await expect(pluginPromise).resolves.toEqual({})
+    await expect(pluginPromise).resolves.toEqual(expectPluginHooks())
     await waitForLogMessage(logs, "detector failed")
 
     expect(
@@ -319,7 +642,7 @@ describe("OhMySuperpowersPlugin", () => {
       throw new Error("evaluator exploded")
     })
 
-    await expect(OhMySuperpowersPlugin(createPluginInput(logs))).resolves.toEqual({})
+    await expect(OhMySuperpowersPlugin(createPluginInput(logs))).resolves.toEqual(expectPluginHooks())
     await waitForLogMessage(logs, "evaluator")
     await waitForLogMessage(logs, "evaluator exploded")
     await waitForLogMessage(logs, "not_detected")
@@ -335,7 +658,7 @@ describe("OhMySuperpowersPlugin", () => {
       }),
     )
 
-    await expect(OhMySuperpowersPlugin(createPluginInput(logs))).resolves.toEqual({})
+    await expect(OhMySuperpowersPlugin(createPluginInput(logs))).resolves.toEqual(expectPluginHooks())
 
     expect(logs).toEqual(
       expect.arrayContaining([

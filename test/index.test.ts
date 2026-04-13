@@ -15,4 +15,11 @@ describe("library exports", () => {
     expect(library.SUPERPOWERS_ROUTE_CATALOG).toContain("brainstorming")
     expect(library.resolveRoute).toBeTypeOf("function")
   })
+
+  it("exports routing authoring helpers", () => {
+    expect(library.buildRoutingProposal).toBeTypeOf("function")
+    expect(library.inspectRoutingAuthoringInputs).toBeTypeOf("function")
+    expect(library.applyRoutingProposalToConfig).toBeUndefined()
+    expect(library.renderRoutingConfigDocument).toBeUndefined()
+  })
 })

@@ -9,7 +9,7 @@ import {
   type RouterConfig,
 } from "./config.js"
 import { CONTROL_PLANE_MARKER_PREFIX, MARKER, type GeneratedArtifact } from "./opencode.js"
-import { resolvePhase, type BuiltInPhase, type ResolvedRoute } from "./router.js"
+import { resolvePhase, resolveRoute, type BuiltInPhase, type ResolvedRoute } from "./router.js"
 
 const PHASE_TO_QWEN_AGENT = {
   brainstorming: "oms-brainstorm",
@@ -31,6 +31,9 @@ const PHASE_TO_SKILL = {
   "webapp-testing": "webapp-testing",
 } as const satisfies Record<BuiltInPhase, string>
 
+const SAFE_NAME_PATTERN = /^[a-z0-9-]+$/
+const DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "sync", "doctor"])
+
 export type QwenSkillName = (typeof PHASE_TO_SKILL)[BuiltInPhase]
 
 export type DiscoverQwenUpstreamSkillsInput = {
@@ -49,6 +52,14 @@ type RenderQwenAgentInput = {
   model: string
   skillName: string
   skillPath: string
+}
+
+type RenderQwenDirectAgentInput = {
+  name: string
+  description: string
+  model: string
+  intent: string
+  intentDescription: string
 }
 
 export type BuildQwenArtifactsOptions = BuildQwenArtifactsInput & {
@@ -124,6 +135,41 @@ export function renderQwenAgentFile(input: RenderQwenAgentInput) {
   ].join("\n")
 }
 
+function renderQwenDirectAgentFile(input: RenderQwenDirectAgentInput) {
+  return [
+    "---",
+    `name: ${input.name}`,
+    `description: ${yamlScalar(input.description)}`,
+    `model: ${input.model}`,
+    "---",
+    "",
+    MARKER,
+    "",
+    `You are the ${input.name} routing agent for the \`${input.intent}\` intent.`,
+    `Handle requests that match this intent: ${input.intentDescription}.`,
+    "Follow the requested intent directly without any upstream skill handoff.",
+    "",
+  ].join("\n")
+}
+
+function renderQwenDirectCommandFile(input: { description: string; intent: string; agentName: string; renderedName: string }) {
+  return [
+    "---",
+    `description: ${yamlScalar(input.description)}`,
+    "---",
+    "",
+    MARKER,
+    `<!-- ${CONTROL_PLANE_MARKER_PREFIX} stage=2; host=qwen; artifact=command; logical-command=intent; rendered-name=${input.renderedName} -->`,
+    "",
+    `Use the \`${input.agentName}\` direct-mode agent for this intent.`,
+    "",
+    "## Router Context",
+    `- intent: ${input.intent}`,
+    "- arguments: {{args}}",
+    "",
+  ].join("\n")
+}
+
 function renderQwenControlPlaneCommandFile(input: {
   description: string
   logicalCommand: ControlPlaneCommandKey
@@ -142,11 +188,18 @@ function renderQwenControlPlaneCommandFile(input: {
   ].join("\n")
 }
 
-function buildQwenCommandArtifacts(settings: QwenControlPlaneSettings): GeneratedArtifact[] {
+function buildQwenCommandArtifacts(
+  settings: QwenControlPlaneSettings,
+  supportedCommands: ReadonlySet<ControlPlaneCommandKey> = new Set(CONTROL_PLANE_COMMAND_KEYS),
+): GeneratedArtifact[] {
   const ownerPrefix = `${settings.commandPrefix}-`
   const seenFileNames = new Map<string, string>()
 
   return CONTROL_PLANE_COMMAND_KEYS.flatMap((commandKey) => {
+    if (!supportedCommands.has(commandKey)) {
+      return []
+    }
+
     const command = settings.commands[commandKey]
     const renderedNames = [command.name, ...command.aliases]
 
@@ -175,8 +228,76 @@ function buildQwenCommandArtifacts(settings: QwenControlPlaneSettings): Generate
   })
 }
 
+function appendQwenCommandArtifact(commands: GeneratedArtifact[], command: GeneratedArtifact) {
+  const existingCommand = commands.find((item) => item.fileName === command.fileName)
+
+  if (existingCommand) {
+    throw new Error(`Duplicate Qwen command file rendering: ${command.fileName}`)
+  }
+
+  commands.push(command)
+}
+
 export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenArtifactsOptions) {
-  const commands = input.controlPlaneSettings ? buildQwenCommandArtifacts(input.controlPlaneSettings) : []
+  const commands = input.controlPlaneSettings
+    ? buildQwenCommandArtifacts(
+        input.controlPlaneSettings,
+        config.workflow?.kind === "direct"
+          ? DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS
+          : new Set(CONTROL_PLANE_COMMAND_KEYS),
+      )
+    : []
+
+  if (config.workflow?.kind === "direct") {
+    const agents: GeneratedArtifact[] = []
+
+    for (const [intent, intentConfig] of Object.entries(config.workflow.intents)) {
+      if (!SAFE_NAME_PATTERN.test(intent)) {
+        throw new Error(`Invalid direct intent id: ${intent}`)
+      }
+
+      const agentName = `rt-${intent}`
+      const commandName = `ai-${intent}`
+      const intentDescription = intentConfig.description
+        ? `${intentConfig.label}: ${intentConfig.description}`
+        : intentConfig.label
+
+      appendQwenCommandArtifact(commands, {
+        kind: "command",
+        directory: ".qwen/commands",
+        fileName: `${commandName}.md`,
+        ownerPrefix: "ai-",
+        content: renderQwenDirectCommandFile({
+          description: `${intentConfig.label} command for Qwen direct mode.`,
+          intent,
+          agentName,
+          renderedName: commandName,
+        }),
+      })
+
+      if (input.includeAgents === false) {
+        continue
+      }
+
+      const resolved = resolveRoute(config, intent)
+
+      agents.push({
+        kind: "agent",
+        directory: ".qwen/agents",
+        fileName: `${agentName}.md`,
+        ownerPrefix: "rt-",
+        content: renderQwenDirectAgentFile({
+          name: agentName,
+          description: `${agentName} routing agent for ${intent}`,
+          model: resolved.selection.model,
+          intent,
+          intentDescription,
+        }),
+      })
+    }
+
+    return { agents, commands }
+  }
 
   if (input.includeAgents === false) {
     return { agents: [], commands }
@@ -184,7 +305,7 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
 
   const upstreamSkills = await discoverQwenUpstreamSkills(input)
   const renderAgentFile = input.renderAgentFile ?? renderQwenAgentFile
-  const resolveRoute = input.resolveRoute ?? ((nextConfig, routeKey) => resolvePhase(nextConfig, routeKey))
+  const resolveMappedRoute = input.resolveRoute ?? ((nextConfig, routeKey) => resolvePhase(nextConfig, routeKey))
   const missingSkills = Object.entries(upstreamSkills)
     .filter(([, skillPath]) => !skillPath)
     .map(([skillName]) => skillName)
@@ -199,7 +320,7 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
 
   for (const phase of BUILT_IN_PHASES) {
     const skillName = PHASE_TO_SKILL[phase]
-    const resolved = resolveRoute(config, skillName)
+    const resolved = resolveMappedRoute(config, skillName)
 
     agents.push({
       kind: "agent",

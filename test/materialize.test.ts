@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { materializeArtifacts } from "../src/materialize.js"
+import {
+  RUNTIME_AGENT_METADATA_DIRECTORY,
+  RUNTIME_AGENT_METADATA_FILE,
+  RUNTIME_AGENT_METADATA_OWNER_PREFIX,
+} from "../src/opencode.js"
 
 const OWNERSHIP_MARKER = "<!-- generated-by: oh-my-superagents; do-not-edit: true -->"
 
@@ -152,6 +157,20 @@ function renderOwnedCodexTemporaryDisableHelperSkill(skillName: string) {
   ].join("\n")
 }
 
+function renderOwnedCodexDirectSkill(skillName: string, intent: string) {
+  return [
+    `# ${OWNERSHIP_MARKER.slice(5, -4)}`,
+    "---",
+    `name: ${skillName}`,
+    "description: Generated OMS direct skill",
+    "---",
+    "",
+    `<!-- oms-direct: stage=1; host=codex; artifact=skill; intent=${intent}; rendered-name=${skillName} -->`,
+    `Use the Codex direct-mode agent \`rt-${intent}\` for the \`${intent}\` intent.`,
+    "",
+  ].join("\n")
+}
+
 function renderOwnedQwenOmsCommand(renderedName: string, logicalCommand: string) {
   return [
     "---",
@@ -166,8 +185,45 @@ function renderOwnedQwenOmsCommand(renderedName: string, logicalCommand: string)
   ].join("\n")
 }
 
+function renderOwnedQwenAgent(name: string) {
+  return [
+    "---",
+    `name: ${name}`,
+    "description: 'Generated OMS Qwen agent'",
+    "---",
+    "",
+    OWNERSHIP_MARKER,
+    "",
+  ].join("\n")
+}
+
+function renderOwnedQwenDirectCommand(name: string) {
+  return [
+    "---",
+    "description: 'Generated OMS Qwen direct command'",
+    "---",
+    "",
+    OWNERSHIP_MARKER,
+    "",
+    `Use the \`rt-${name.replace(/^ai-/, "")}\` direct-mode agent for this intent.`,
+    "",
+  ].join("\n")
+}
+
 function renderUserCodexSkill(skillName: string) {
   return ["---", `name: ${skillName}`, "description: User-authored skill", "---", "", "Do something unrelated.", ""].join("\n")
+}
+
+function renderOwnedOpenCodeRuntimeMetadata() {
+  return JSON.stringify({
+    agents: {
+      "spr-build": {
+        profile: "build",
+        profiles: ["build"],
+        codexFast: true,
+      },
+    },
+  }, null, 2)
 }
 
 describe("materializeArtifacts", () => {
@@ -293,6 +349,66 @@ describe("materializeArtifacts", () => {
     expect(result.removed).toEqual([])
   })
 
+  it("treats existing OpenCode runtime metadata as OMS-owned on repeated sync without a marker", async () => {
+    const runtimeArtifact = {
+      kind: "command" as const,
+      directory: RUNTIME_AGENT_METADATA_DIRECTORY,
+      fileName: RUNTIME_AGENT_METADATA_FILE,
+      ownerPrefix: RUNTIME_AGENT_METADATA_OWNER_PREFIX,
+      content: renderOwnedOpenCodeRuntimeMetadata(),
+    }
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [runtimeArtifact],
+      fs: createMemoryFs({
+        "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json": runtimeArtifact.content,
+      }).fs,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.warnings).toEqual([])
+  })
+
+  it("removes stale OpenCode runtime metadata when the current artifact set no longer includes it", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json": renderOwnedOpenCodeRuntimeMetadata(),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [],
+      fs,
+    })
+
+    expect(result.removed).toEqual([
+      "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json",
+    ])
+    expect(removedPaths).toEqual(result.removed)
+  })
+
+  it("rejects user-created JSON at the runtime metadata path when it does not match the OMS contract", async () => {
+    const runtimeArtifact = {
+      kind: "command" as const,
+      directory: RUNTIME_AGENT_METADATA_DIRECTORY,
+      fileName: RUNTIME_AGENT_METADATA_FILE,
+      ownerPrefix: RUNTIME_AGENT_METADATA_OWNER_PREFIX,
+      content: renderOwnedOpenCodeRuntimeMetadata(),
+    }
+
+    const runtimeFilePath = "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json"
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [runtimeArtifact],
+      fs: createMemoryFs({
+        [runtimeFilePath]: JSON.stringify({ hello: "user" }, null, 2),
+      }).fs,
+    })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.warnings).toEqual([`Collision at ${runtimeFilePath}`])
+  })
+
   it("rejects path traversal in artifact filenames", async () => {
     const result = await materializeArtifacts({
       cwd: "/workspace/project",
@@ -343,6 +459,29 @@ describe("materializeArtifacts", () => {
     })
 
     expect(result.exitCode).toBe(0)
+  })
+
+  it("removes stale Codex direct agents when syncing superpowers agents", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.codex/agents/rt-plan.toml": "# generated-by: oh-my-superagents; do-not-edit: true\nname = \"rt-plan\"\n",
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "agent",
+          directory: ".codex/agents",
+          fileName: "oms-review.toml",
+          ownerPrefix: "oms-",
+          content: "# generated-by: oh-my-superagents; do-not-edit: true\nname = \"oms-review\"\n",
+        },
+      ],
+      fs,
+    })
+
+    expect(result.removed).toEqual(["/workspace/project/.codex/agents/rt-plan.toml"])
+    expect(removedPaths).toEqual(result.removed)
   })
 
   it("removes stale OMS OpenCode command files after prefix and name changes", async () => {
@@ -471,6 +610,40 @@ describe("materializeArtifacts", () => {
     expect(removedPaths).toEqual(result.removed)
   })
 
+  it("removes stale Qwen direct artifacts when syncing superpowers workflow artifacts", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.qwen/commands/ai-plan.md": renderOwnedQwenDirectCommand("ai-plan"),
+      "/workspace/project/.qwen/agents/rt-plan.md": renderOwnedQwenAgent("rt-plan"),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "command",
+          directory: ".qwen/commands",
+          fileName: "oms-status.md",
+          ownerPrefix: "oms-",
+          content: renderOwnedQwenOmsCommand("oms-status", "status"),
+        },
+        {
+          kind: "agent",
+          directory: ".qwen/agents",
+          fileName: "oms-review.md",
+          ownerPrefix: "oms-",
+          content: renderOwnedQwenAgent("oms-review"),
+        },
+      ],
+      fs,
+    })
+
+    expect(result.removed).toEqual([
+      "/workspace/project/.qwen/commands/ai-plan.md",
+      "/workspace/project/.qwen/agents/rt-plan.md",
+    ])
+    expect(removedPaths).toEqual(result.removed)
+  })
+
   it("preserves OMS-looking OpenCode wrapper content under a non-OMS filename", async () => {
     const { fs, removedPaths } = createMemoryFs({
       "/workspace/project/.opencode/commands/custom-status.md": renderOmsLookingOpenCodeWrapperWithoutOmsName(),
@@ -593,6 +766,73 @@ describe("materializeArtifacts", () => {
 
     expect(collisionResult.exitCode).toBe(1)
     expect(collisionResult.warnings).toEqual([`Collision at ${helperFilePath}`])
+  })
+
+  it("treats Codex direct-mode skills as a distinct owned contract", async () => {
+    const skillDirectory = "plugins/oh-my-superagents-codex/skills/ai-plan"
+    const skillFilePath = "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md"
+
+    const ownedFs = createMemoryFs({
+      [skillFilePath]: renderOwnedCodexDirectSkill("ai-plan", "plan"),
+    })
+
+    const directArtifact = {
+      kind: "command" as const,
+      directory: skillDirectory,
+      fileName: "SKILL.md",
+      ownerPrefix: "unused-for-stage1-metadata",
+      content: renderOwnedCodexDirectSkill("ai-plan", "plan"),
+    }
+
+    const ownedResult = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [directArtifact],
+      fs: ownedFs.fs,
+    })
+
+    expect(ownedResult.exitCode).toBe(0)
+    expect(ownedResult.warnings).toEqual([])
+
+    const controlPlaneFs = createMemoryFs({
+      [skillFilePath]: renderOwnedCodexOmsSkill("ai-plan", "status"),
+    })
+
+    const collisionResult = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [directArtifact],
+      fs: controlPlaneFs.fs,
+    })
+
+    expect(collisionResult.exitCode).toBe(1)
+    expect(collisionResult.warnings).toEqual([`Collision at ${skillFilePath}`])
+  })
+
+  it("removes stale Codex direct-mode skill files after intent changes", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md": renderOwnedCodexDirectSkill(
+        "ai-plan",
+        "plan",
+      ),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "command",
+          directory: "plugins/oh-my-superagents-codex/skills/ai-build",
+          fileName: "SKILL.md",
+          ownerPrefix: "unused-for-stage1-metadata",
+          content: renderOwnedCodexDirectSkill("ai-build", "build"),
+        },
+      ],
+      fs,
+    })
+
+    expect(result.removed).toEqual([
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    ])
+    expect(removedPaths).toEqual(result.removed)
   })
 
   it("preserves non-OMS Codex skill files that do not satisfy the OMS ownership contract", async () => {

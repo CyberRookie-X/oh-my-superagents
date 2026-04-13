@@ -45,6 +45,12 @@ const LaneSelectionSchema = z
   })
   .strict()
 
+const SubagentExecutionSchema = z
+  .object({
+    mode: z.enum(["manual", "suggest", "auto"]).default("suggest"),
+  })
+  .strict()
+
 const LaneSchema = z
   .object({
     label: z.string().min(1),
@@ -109,6 +115,7 @@ const LayeredSettingsSchema = z
     activePreset: z.string().min(1).optional(),
     defaultLane: z.union([z.string().min(1), z.null()]).optional(),
     laneSelection: LaneSelectionSchema.optional(),
+    subagentExecution: SubagentExecutionSchema.optional(),
     commandPrefix: z.string().min(1).optional(),
     commands: CommandsOverrideSchema.optional(),
     superpowersCompatibility: CompatibilitySchema.optional(),
@@ -166,6 +173,7 @@ export type RouterConfig = {
   workflow: WorkflowConfig
   profiles: Record<string, ControlPlaneProfile>
   lanes?: Record<string, ControlPlaneLane>
+  availableLanes?: string[]
   routes: Record<string, string>
   defaultRoute: string
   effectiveLane?: string
@@ -184,6 +192,7 @@ export type ControlPlaneCommandConfig = {
 }
 export type ControlPlaneProfile = z.infer<typeof ProfileSchema>
 export type ControlPlaneLaneSelection = z.infer<typeof LaneSelectionSchema>
+export type ControlPlaneSubagentExecution = z.infer<typeof SubagentExecutionSchema>
 export type ControlPlaneLane = z.infer<typeof LaneSchema>
 export type ControlPlanePreset = z.infer<typeof ControlPlanePresetSchema>
 export type ControlPlaneConfig = {
@@ -193,6 +202,7 @@ export type ControlPlaneConfig = {
     activePreset: string
     defaultLane?: string
     laneSelection: ControlPlaneLaneSelection
+    subagentExecution: ControlPlaneSubagentExecution
     commandPrefix: string
     commands: Record<ControlPlaneCommandKey, ControlPlaneCommandConfig>
     superpowersCompatibility: SuperpowersCompatibilityConfig
@@ -343,6 +353,7 @@ export function createDefaultControlPlaneConfig(): ControlPlaneConfig {
       enabled: true,
       activePreset: "default",
       laneSelection: { mode: "suggest" },
+      subagentExecution: { mode: "suggest" },
       commandPrefix: "oms",
       commands: synthesizeCommands(undefined),
       superpowersCompatibility: { mode: "warn" },
@@ -467,6 +478,7 @@ function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneCon
       activePreset: merged.settings?.activePreset ?? "default",
       defaultLane: merged.settings?.defaultLane ?? undefined,
       laneSelection: merged.settings?.laneSelection ?? { mode: "suggest" },
+      subagentExecution: merged.settings?.subagentExecution ?? { mode: "suggest" },
       commandPrefix: merged.settings?.commandPrefix ?? "oms",
       commands: synthesizeCommands(merged.settings?.commands),
       superpowersCompatibility: merged.settings?.superpowersCompatibility ?? { mode: "warn" },
@@ -744,6 +756,7 @@ export async function loadRouterConfig(input: LoadRouterConfigInput): Promise<Lo
       ...(activePreset.profiles ?? {}),
     },
     lanes: loaded.config.lanes,
+    availableLanes: activePreset.usesLanes,
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
     effectiveLane: loaded.config.settings.defaultLane ?? activePreset.defaultLane,

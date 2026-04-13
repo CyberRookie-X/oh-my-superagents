@@ -4,6 +4,7 @@ import { runCli } from "../src/cli.js"
 import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-plane.js"
 import { explainCodexPhase } from "../src/codex.js"
 import { buildArtifacts as buildOpenCodeArtifacts, MARKER_TEXT } from "../src/opencode.js"
+import { buildQwenArtifacts } from "../src/qwen.js"
 import { explainPhase } from "../src/router.js"
 
 const baseConfig = {
@@ -457,6 +458,19 @@ function createCliDeps(overrides: Record<string, unknown> = {}) {
   } as any
 }
 
+function getAuthorRoutingSection(stdout: string, startHeading: string, endHeading: string) {
+  const startToken = `${startHeading}\n`
+  const endToken = `\n\n${endHeading}\n`
+  const startIndex = stdout.indexOf(startToken)
+  const endIndex = stdout.indexOf(endToken)
+
+  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
+    throw new Error(`Could not extract ${startHeading} section from author routing output`)
+  }
+
+  return stdout.slice(startIndex + startToken.length, endIndex)
+}
+
 describe("runCli", () => {
   it("preserves explain --all array output and attaches compatibility to each item", async () => {
     const result = await runCli(["explain", "--host", "opencode", "--all"], createCliDeps())
@@ -521,10 +535,10 @@ describe("runCli", () => {
     )
   })
 
-  it("keeps direct workflow explain scoped to OpenCode", async () => {
+  it("keeps direct workflow explain unsupported on Qwen", async () => {
     let explainCalled = false
 
-    const result = await runCli(["explain", "--host", "codex", "--intent", "plan"], createDirectCliDeps({
+    const result = await runCli(["explain", "--host", "qwen", "--intent", "plan"], createDirectCliDeps({
       explainPhaseForHost: () => {
         explainCalled = true
         throw new Error("unexpected explain")
@@ -532,8 +546,21 @@ describe("runCli", () => {
     }))
 
     expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("opencode")
+    expect(result.stderr).toContain("opencode or --host codex")
     expect(explainCalled).toBe(false)
+  })
+
+  it("explains a direct workflow intent on Codex", async () => {
+    const result = await runCli(["explain", "--host", "codex", "--intent", "plan"], createDirectCliDeps())
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.intent).toBe("plan")
+    expect(output.profileId).toBe("planner")
+    expect(output.model).toBe("openai/gpt-5")
+    expect(output.commandName).toBe("ai-plan")
+    expect(output.agentName).toBe("rt-plan")
   })
 
   it("adds source tracing to explain output for opencode", async () => {
@@ -1485,6 +1512,789 @@ describe("runCli", () => {
     expect(result.stderr).toContain("Missing required --host")
   })
 
+  it("prints a routing proposal summary without writing by default", async () => {
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+      ].includes(filePath),
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.json")
+        ? JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        : JSON.stringify({ dependencies: { react: "18.0.0" } }),
+      writeFile: async () => {
+        throw new Error("writeFile should not be called in preview mode")
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    const output = JSON.parse(result.stdout)
+
+    expect(output.mode).toBe("direct")
+    expect(output.summary.lanes).toContain("frontend")
+    expect(output.summary.profiles).toContain("builder")
+    expect(output.summary.presets).toContain("default")
+    expect(output.preview.path).toContain("oh-my-superagents.config.jsonc")
+    expect(output.written).toBe(false)
+    expect(result.stderr).toContain("Summary")
+    expect(result.stderr).toContain("Routing authoring preview")
+    expect(result.stderr).toContain("Detected lanes: frontend")
+    expect(result.stderr).toContain("Profiles: builder")
+    expect(result.stderr).toContain("Diff")
+    expect(result.stderr).toContain("+   \"workflow\": {")
+    expect(result.stderr).toContain("+   \"profiles\": {")
+    expect(result.stderr).toContain("Result")
+    expect(result.stderr).toContain("Written: no")
+    expect(result.stderr).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
+  })
+
+  it("accepts a JSONC model inventory for routing preview", async () => {
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.jsonc",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.jsonc",
+      ].includes(filePath),
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.jsonc")
+        ? `{
+            // preview inventory
+            "models": {
+              "builder": {
+                "model": "openai/gpt-5",
+                "specialties": ["frontend", "build"]
+              }
+            }
+          }`
+        : JSON.stringify({ dependencies: { react: "18.0.0" } }),
+    }))
+
+    expect(result.exitCode).toBe(0)
+    const output = JSON.parse(result.stdout)
+    expect(output.summary.profiles).toContain("builder")
+  })
+
+  it("targets the project config path when only a global config exists", async () => {
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+        "/home/tester/.config/oh-my-superagents/config.jsonc",
+      ].includes(filePath),
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.json")
+        ? JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        : JSON.stringify({ dependencies: { react: "18.0.0" } }),
+    }))
+
+    expect(result.exitCode).toBe(0)
+    const output = JSON.parse(result.stdout)
+    expect(output.preview.path).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(output.preview.operation).toBe("create")
+  })
+
+  it("writes the proposed routing config only when --write is provided", async () => {
+    let writtenPath = ""
+    let writtenContent = ""
+
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+      "--write",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+      ].includes(filePath),
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.json")
+        ? JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        : JSON.stringify({ dependencies: { react: "18.0.0" } }),
+      writeFile: async (filePath, content) => {
+        writtenPath = filePath
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    const output = JSON.parse(result.stdout)
+    expect(writtenPath).toContain("oh-my-superagents.config.jsonc")
+    expect(writtenContent).toContain('"profiles"')
+    expect(writtenContent).toContain('"settings"')
+    expect(output.written).toBe(true)
+    expect(result.stderr).toContain("Summary")
+    expect(result.stderr).toContain("Routing authoring write")
+    expect(result.stderr).toContain("Profiles: builder")
+    expect(result.stderr).toContain("Diff")
+    expect(result.stderr).toContain("+   \"workflow\": {")
+    expect(result.stderr).toContain("+     \"builder\": {")
+    expect(result.stderr).toContain("Result")
+    expect(result.stderr).toContain("Written: yes")
+  })
+
+  it("derives update diffs from the existing rendered config and keeps retained routes visible", async () => {
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+        "/workspace/project/oh-my-superagents.config.jsonc",
+      ].includes(filePath),
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...directControlPlaneConfig,
+          settings: {
+            ...directControlPlaneConfig.settings,
+            activePreset: "default",
+          },
+          profiles: {
+            existing: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+            builder: { model: "openai/gpt-5" },
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "existing" },
+              defaultRoute: "existing",
+            },
+            frontend: {
+              label: "Frontend",
+              routes: {},
+              defaultRoute: "builder",
+            },
+          },
+          presets: {
+            default: {
+              label: "Default",
+              short: "def",
+              usesLanes: ["ops", "frontend"],
+              routes: { review: "existing" },
+              defaultLane: "frontend",
+              defaultRoute: "builder",
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            label: "Default",
+            short: "def",
+            usesLanes: ["ops", "frontend"],
+            routes: { review: "existing" },
+            defaultLane: "frontend",
+            defaultRoute: "builder",
+          },
+        },
+        laneState: defaultLaneState,
+      }),
+      readArtifactFile: async (filePath: string) => {
+        if (filePath.endsWith("models.json")) {
+          return JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        }
+
+        return JSON.stringify({
+          workflow: { kind: "direct", intents: { build: { label: "Build" }, review: { label: "Review" } } },
+          settings: { activePreset: "default", enabled: true },
+          profiles: {
+            existing: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "existing" },
+              defaultRoute: "existing",
+            },
+          },
+          presets: {
+            default: {
+              label: "Default",
+              short: "def",
+              usesLanes: ["ops"],
+              routes: { review: "existing" },
+              defaultRoute: "existing",
+            },
+          },
+        }, null, 2)
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+
+    const diffText = getAuthorRoutingSection(result.stderr, "Diff", "Result")
+
+    expect(diffText).toContain('-         "ops"')
+    expect(diffText).toContain('+         "frontend"')
+    expect(diffText).toContain('      "review": "existing"')
+    expect(diffText).not.toContain('-         "review": "existing"')
+  })
+
+  it("evolves an existing global config when --write is used without a project config", async () => {
+    let writtenPath = ""
+    let writtenContent = ""
+
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+      "--write",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+        "/home/tester/.config/oh-my-superagents/config.jsonc",
+      ].includes(filePath),
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath.endsWith("models.json")) {
+          return JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        }
+
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            workflow: { kind: "superpowers" },
+            settings: {
+              activePreset: "default",
+              enabled: true,
+            },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: { brainstorming: "existing" },
+                defaultRoute: "existing",
+              },
+            },
+            profiles: {
+              existing: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+            },
+            lanes: {},
+          })
+        }
+
+        return JSON.stringify({ dependencies: { react: "18.0.0" } })
+      },
+      writeFile: async (filePath, content) => {
+        writtenPath = filePath
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    const output = JSON.parse(result.stdout)
+    expect(writtenPath).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(writtenContent).toContain('"kind": "direct"')
+    expect(output.preview.path).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(output.preview.operation).toBe("update")
+    expect(output.written).toBe(true)
+    expect(result.stderr).toContain("Target: /home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(result.stderr).toContain("Operation: update")
+    expect(result.stderr).toContain("Written: yes")
+  })
+
+  it("fails closed on invalid existing config during --write", async () => {
+    let wrote = false
+
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+      "--write",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+        "/workspace/project/oh-my-superagents.config.jsonc",
+      ].includes(filePath),
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.json")
+        ? JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        : "{ invalid",
+      resolveControlPlane: async () => {
+        throw new Error("Invalid JSONC in /workspace/project/oh-my-superagents.config.jsonc")
+      },
+      writeFile: async () => {
+        wrote = true
+      },
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Invalid JSONC")
+    expect(wrote).toBe(false)
+  })
+
+  it("bases same-mode direct writes on the effective layered workflow, not only the target file", async () => {
+    let writtenContent = ""
+
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+      "--write",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+        "/workspace/project/oh-my-superagents.config.jsonc",
+        "/home/tester/.config/oh-my-superagents/config.jsonc",
+      ].includes(filePath),
+      discoverConfigPath: async () => "/workspace/project/oh-my-superagents.config.jsonc",
+      loadConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        config: {
+          workflow: { kind: "direct", intents: { build: { label: "Build" }, review: { label: "Review" } } },
+          profiles: {
+            builder: { model: "openai/gpt-5" },
+            reviewer: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+          routes: {},
+          defaultRoute: "builder",
+          effectiveLane: "ops",
+          superpowersCompatibility: { mode: "warn" },
+        },
+      }),
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: [
+            "/home/tester/.config/oh-my-superagents/config.jsonc",
+            "/workspace/project/oh-my-superagents.config.jsonc",
+          ],
+        },
+        config: {
+          ...directControlPlaneConfig,
+          settings: {
+            ...directControlPlaneConfig.settings,
+            activePreset: "review",
+            defaultLane: "ops",
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+          presets: {
+            default: {
+              ...directControlPlaneConfig.presets.default,
+              usesLanes: ["ops"],
+              defaultLane: "ops",
+              defaultRoute: "reviewer",
+            },
+            review: {
+              label: "Review",
+              short: "rev",
+              usesLanes: ["ops"],
+              defaultLane: "ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+        },
+        activePreset: {
+          key: "review",
+          preset: {
+            label: "Review",
+            short: "rev",
+            usesLanes: ["ops"],
+            defaultLane: "ops",
+            routes: { review: "reviewer" },
+            defaultRoute: "reviewer",
+          },
+        },
+        laneState: {
+          ...defaultLaneState,
+          allowedLanes: ["ops"],
+          defaultLane: "ops",
+          effectiveLane: "ops",
+          presetDefaultLane: "ops",
+          mode: "suggest",
+        },
+      }),
+      readArtifactFile: async (filePath: string) => {
+        if (filePath.endsWith("models.json")) {
+          return JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        }
+
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: {
+              activePreset: "review",
+              enabled: true,
+              defaultLane: "ops",
+            },
+            lanes: {
+              ops: {
+                label: "Ops",
+                routes: { review: "reviewer" },
+                defaultRoute: "reviewer",
+              },
+            },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                usesLanes: ["ops"],
+                defaultLane: "ops",
+                routes: {},
+                defaultRoute: "reviewer",
+              },
+            },
+            profiles: {
+              builder: { model: "openai/gpt-5" },
+            },
+          })
+        }
+
+        return JSON.stringify({
+          workflow: { kind: "direct", intents: { build: { label: "Build" }, review: { label: "Review" } } },
+          settings: { activePreset: "review", enabled: true, defaultLane: "ops" },
+          presets: {
+            review: {
+              label: "Review",
+              short: "rev",
+              usesLanes: ["ops"],
+              defaultLane: "ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+          profiles: {
+            reviewer: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+        })
+      },
+      writeFile: async (_filePath, content) => {
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenContent).toContain('"activePreset": "review"')
+    expect(writtenContent).toContain('"defaultLane": "ops"')
+    expect(writtenContent).toContain('"ops"')
+  })
+
+  it("keeps preview and write aligned for layered inherited direct config", async () => {
+    let writtenContent = ""
+
+    const overrides = {
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+        "/workspace/project/oh-my-superagents.config.jsonc",
+        "/home/tester/.config/oh-my-superagents/config.jsonc",
+      ].includes(filePath),
+      discoverConfigPath: async () => "/workspace/project/oh-my-superagents.config.jsonc",
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: [
+            "/home/tester/.config/oh-my-superagents/config.jsonc",
+            "/workspace/project/oh-my-superagents.config.jsonc",
+          ],
+        },
+        config: {
+          ...directControlPlaneConfig,
+          settings: {
+            ...directControlPlaneConfig.settings,
+            activePreset: "review",
+            defaultLane: "ops",
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+          presets: {
+            default: {
+              ...directControlPlaneConfig.presets.default,
+              usesLanes: ["ops"],
+              defaultLane: "ops",
+              defaultRoute: "reviewer",
+            },
+            review: {
+              label: "Review",
+              short: "rev",
+              usesLanes: ["ops"],
+              defaultLane: "ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+        },
+        activePreset: {
+          key: "review",
+          preset: {
+            label: "Review",
+            short: "rev",
+            usesLanes: ["ops"],
+            defaultLane: "ops",
+            routes: { review: "reviewer" },
+            defaultRoute: "reviewer",
+          },
+        },
+        laneState: {
+          ...defaultLaneState,
+          allowedLanes: ["ops"],
+          defaultLane: "ops",
+          effectiveLane: "ops",
+          presetDefaultLane: "ops",
+          mode: "suggest",
+        },
+      }),
+      readArtifactFile: async (filePath: string) => {
+        if (filePath.endsWith("models.json")) {
+          return JSON.stringify({
+            models: {
+              builder: {
+                model: "openai/gpt-5",
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        }
+
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: {
+              enabled: true,
+              defaultLane: "ops",
+            },
+            lanes: {
+              ops: {
+                label: "Ops",
+                routes: { review: "reviewer" },
+                defaultRoute: "reviewer",
+              },
+            },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                usesLanes: ["ops"],
+                defaultLane: "ops",
+                routes: {},
+                defaultRoute: "reviewer",
+              },
+            },
+            profiles: {
+              builder: { model: "openai/gpt-5" },
+            },
+          })
+        }
+
+        return JSON.stringify({
+          workflow: { kind: "direct", intents: { build: { label: "Build" }, review: { label: "Review" } } },
+          settings: { activePreset: "review", enabled: true, defaultLane: "ops" },
+          presets: {
+            review: {
+              label: "Review",
+              short: "rev",
+              usesLanes: ["ops"],
+              defaultLane: "ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+          profiles: {
+            reviewer: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+          },
+          lanes: {
+            ops: {
+              label: "Ops",
+              routes: { review: "reviewer" },
+              defaultRoute: "reviewer",
+            },
+          },
+        })
+      },
+    }
+
+    const previewResult = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+    ], createCliDeps(overrides))
+
+    const writeResult = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+      "--write",
+    ], createCliDeps({
+      ...overrides,
+      writeFile: async (_filePath: string, content: string) => {
+        writtenContent = content
+      },
+    }))
+
+    expect(previewResult.exitCode).toBe(0)
+    expect(writeResult.exitCode).toBe(0)
+
+    const preview = JSON.parse(previewResult.stdout)
+
+    expect(preview.preview.rendered).toBe(writtenContent)
+    expect(getAuthorRoutingSection(previewResult.stderr, "Diff", "Result")).toBe(
+      getAuthorRoutingSection(writeResult.stderr, "Diff", "Result"),
+    )
+  })
+
+  it("fails clearly for malformed model inventory entries", async () => {
+    const result = await runCli([
+      "author",
+      "routing",
+      "--mode",
+      "direct",
+      "--models",
+      "/workspace/project/models.json",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => [
+        "/workspace/project/package.json",
+        "/workspace/project/src/components/App.tsx",
+        "/workspace/project/models.json",
+      ].includes(filePath),
+      readArtifactFile: async (filePath: string) => filePath.endsWith("models.json")
+        ? JSON.stringify({
+            models: {
+              builder: {
+                specialties: ["frontend", "build"],
+              },
+            },
+          })
+        : JSON.stringify({ dependencies: { react: "18.0.0" } }),
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Invalid model inventory")
+    expect(result.stderr).toContain("models.builder.model")
+  })
+
   it("prefers a preset key over a matching preset short in use", async () => {
     let persistedContent = ""
 
@@ -1647,6 +2457,74 @@ describe("runCli", () => {
     expect(output.routeImpact.changedPhases).toContain("writing-plans")
     expect(output.activePreset.key).toBe("review")
     expect(output.nextAction).toBeUndefined()
+  })
+
+  it("scopes OpenCode use artifact generation to the target preset lanes", async () => {
+    let capturedAvailableLanes: string[] | undefined
+
+    const laneScopedConfig = {
+      ...controlPlaneConfig,
+      lanes: {
+        frontend: {
+          label: "Frontend",
+          routes: {},
+          defaultRoute: "build",
+        },
+        backend: {
+          label: "Backend",
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          usesLanes: ["frontend", "backend"],
+          defaultLane: "backend",
+        },
+        review: {
+          ...controlPlaneConfig.presets.review,
+          usesLanes: undefined,
+          defaultLane: undefined,
+        },
+      },
+    }
+
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: laneScopedConfig,
+        activePreset: {
+          key: "default",
+          preset: laneScopedConfig.presets.default,
+        },
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({ settings: nextState }, null, 2),
+        config: {
+          ...laneScopedConfig,
+          settings: {
+            ...laneScopedConfig.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+      buildArtifacts: (config: { availableLanes?: string[] }) => {
+        capturedAvailableLanes = config.availableLanes
+        return { agents: [], commands: [] }
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(capturedAvailableLanes).toEqual([])
   })
 
   it("marks a phase as changed when only the resolved temperature changes", async () => {
@@ -2219,6 +3097,11 @@ describe("runCli", () => {
       laneSelection: {
         mode: "suggest",
       },
+      subagentExecution: {
+        mode: "suggest",
+        availableLanes: [],
+        commandsByLane: {},
+      },
       mode: "suggest",
       nonApplyingReason:
         "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session.",
@@ -2275,6 +3158,96 @@ describe("runCli", () => {
     expect(output.state.code).toBe("artifacts_out_of_sync")
     expect(output.nextAction.command).toBe("oh-my-superagents sync --host opencode")
     expect(output.artifactSummary.missing.length).toBeGreaterThan(0)
+  })
+
+  it("does not treat synced OpenCode runtime metadata as missing in status output", async () => {
+    const built = buildOpenCodeArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: {
+        strategy: controlPlaneConfig.presets.default.profiles.strategy,
+        build: controlPlaneConfig.presets.default.profiles.build,
+      },
+      routes: controlPlaneConfig.presets.default.routes,
+      defaultRoute: controlPlaneConfig.presets.default.defaultRoute,
+      superpowersCompatibility: controlPlaneConfig.settings.superpowersCompatibility,
+    } as never, controlPlaneConfig.settings)
+    const artifactFiles = Object.fromEntries([
+      ...built.agents.map((artifact) => [
+        path.join("/workspace/project", artifact.directory, artifact.fileName),
+        artifact.content,
+      ]),
+      ...built.commands.map((artifact) => [
+        path.join("/workspace/project", artifact.directory, artifact.fileName),
+        artifact.fileName === "runtime-agent-metadata.json"
+          ? JSON.stringify({
+              agents: {
+                "spr-strategy": {
+                  profile: "strategy",
+                  profiles: ["strategy"],
+                  codexFast: false,
+                },
+                "spr-build": {
+                  profile: "build",
+                  profiles: ["build"],
+                  codexFast: false,
+                },
+              },
+            }, null, 2)
+          : artifact.content,
+      ]),
+    ])
+
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      buildArtifacts: buildOpenCodeArtifacts,
+      ...createArtifactFs(artifactFiles),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.state.code).toBe("healthy")
+    expect(output.artifactSummary.missing).toEqual([])
+    expect(output.artifactSummary.present).toContain(
+      "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json",
+    )
+  })
+
+  it("does not treat invalid OpenCode runtime metadata JSON as owned in status output", async () => {
+    const built = buildOpenCodeArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: {
+        strategy: controlPlaneConfig.presets.default.profiles.strategy,
+        build: controlPlaneConfig.presets.default.profiles.build,
+      },
+      routes: controlPlaneConfig.presets.default.routes,
+      defaultRoute: controlPlaneConfig.presets.default.defaultRoute,
+      superpowersCompatibility: controlPlaneConfig.settings.superpowersCompatibility,
+    } as never, controlPlaneConfig.settings)
+    const artifactFiles = Object.fromEntries([
+      ...built.agents.map((artifact) => [
+        path.join("/workspace/project", artifact.directory, artifact.fileName),
+        artifact.content,
+      ]),
+      ...built.commands.map((artifact) => [
+        path.join("/workspace/project", artifact.directory, artifact.fileName),
+        artifact.fileName === "runtime-agent-metadata.json"
+          ? JSON.stringify({ hello: "user" }, null, 2)
+          : artifact.content,
+      ]),
+    ])
+
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      buildArtifacts: buildOpenCodeArtifacts,
+      ...createArtifactFs(artifactFiles),
+    }))
+
+    const output = JSON.parse(result.stdout)
+    const runtimeMetadataPath = "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json"
+
+    expect(result.exitCode).toBe(0)
+    expect(output.state.code).toBe("artifacts_out_of_sync")
+    expect(output.artifactSummary.missing).toContain(runtimeMetadataPath)
+    expect(output.artifactSummary.present).not.toContain(runtimeMetadataPath)
   })
 
   it("adds doctor guidance when OpenCode superpowers is not detected", async () => {
@@ -2438,6 +3411,7 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(output.state.code).toBe("disabled")
     expect(output.nextAction).toBeUndefined()
+    expect(output.subagentExecution).toBeUndefined()
   })
 
   it("returns OMS doctor details with rendered command names, aliases, artifact presence, and compatibility", async () => {
@@ -2473,6 +3447,11 @@ describe("runCli", () => {
       allowedLanes: [],
       laneSelection: {
         mode: "suggest",
+      },
+      subagentExecution: {
+        mode: "suggest",
+        availableLanes: [],
+        commandsByLane: {},
       },
       mode: "suggest",
       nonApplyingReason:
@@ -2510,6 +3489,57 @@ describe("runCli", () => {
           resolvable: true,
         },
       },
+      codexFastRuntime: {
+        manifestPath: "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json",
+        hasEnabledAgents: false,
+      },
+    })
+  })
+
+  it("reports OpenCode codexFast runtime metadata diagnostics in doctor output", async () => {
+    const codexFastConfig = {
+      ...controlPlaneConfig,
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          profiles: {
+            ...controlPlaneConfig.presets.default.profiles,
+            build: {
+              ...controlPlaneConfig.presets.default.profiles.build,
+              model: "gpt-5.4",
+              codexFast: true,
+            },
+          },
+        },
+      },
+    }
+
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: codexFastConfig,
+        activePreset: {
+          key: "default",
+          preset: codexFastConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+      }),
+      buildArtifacts: (config: Parameters<typeof buildOpenCodeArtifacts>[0], settings: Parameters<typeof buildOpenCodeArtifacts>[1]) =>
+        buildOpenCodeArtifacts(config, settings),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.codexFastRuntime).toEqual({
+      manifestPath: "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json",
+      hasEnabledAgents: true,
     })
   })
 
@@ -2520,6 +3550,7 @@ describe("runCli", () => {
         ...controlPlaneConfig.settings,
         defaultLane: "frontend",
         laneSelection: { mode: "suggest" as const },
+        subagentExecution: { mode: "suggest" as const },
       },
       profiles: {
         "frontend-strategy": {
@@ -2586,6 +3617,14 @@ describe("runCli", () => {
     expect(output.presetDefaultLane).toBe("backend")
     expect(output.effectiveLane).toBe("frontend")
     expect(output.laneSelection).toEqual({ mode: "suggest" })
+    expect(output.subagentExecution).toEqual({
+      mode: "suggest",
+      availableLanes: ["frontend", "backend"],
+      commandsByLane: {
+        frontend: "sp-execute-frontend",
+        backend: "sp-execute-backend",
+      },
+    })
     expect(output.nonApplyingReason).toContain("Stage 1")
   })
 
@@ -2658,6 +3697,43 @@ describe("runCli", () => {
 
     expect(result.exitCode).toBe(0)
     expect(syncedEffectiveLane).toBe("frontend")
+  })
+
+  it("passes allowed lanes into OpenCode sync artifact generation", async () => {
+    let syncedAvailableLanes: string[] | undefined
+
+    const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: {
+          allowedLanes: ["frontend"],
+          defaultLane: "frontend",
+          presetDefaultLane: "backend",
+          effectiveLane: "frontend",
+          runtimeLane: undefined,
+          mode: "suggest" as const,
+          nonApplyingReason: "Lane suggestions do not change routing in Stage 1.",
+        },
+      }),
+      buildArtifacts: (config: { availableLanes?: string[] }) => {
+        syncedAvailableLanes = config.availableLanes
+        return { agents: [], commands: [] }
+      },
+      materializeArtifacts: async () => ({ exitCode: 0 as const, warnings: [], written: [], removed: [] }),
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(syncedAvailableLanes).toEqual(["frontend"])
   })
 
   it("summarizes expected, present, missing, and stale OpenCode artifacts in doctor output", async () => {
@@ -2809,6 +3885,20 @@ describe("runCli", () => {
     expect(output.routing.defaultRoutedPhases).toEqual(["build"])
     expect(output.routing.defaultRoutedPhases).not.toContain("brainstorming")
     expect(output.routing.unusedProfiles).toEqual(["unused"])
+    expect(output.subagentExecution).toBeUndefined()
+  })
+
+  it("lists only supported control-plane wrappers in direct-mode OpenCode doctor output", async () => {
+    const result = await runCli(["doctor", "--host", "opencode"], createDirectCliDeps())
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.commands.rendered).toEqual({
+      status: ["oms-status", "oms-st"],
+      sync: ["oms-sync", "oms-sy"],
+      doctor: ["oms-doctor", "oms-dr"],
+    })
   })
 
   it("counts lane-only profiles as used in OpenCode doctor output", async () => {
@@ -3185,7 +4275,10 @@ describe("runCli", () => {
   })
 
   it("supports status --host qwen and inspects OMS-managed Qwen commands plus agents", async () => {
-    const inspectedPaths: string[] = []
+    const files = {
+      "/workspace/project/.qwen/agents/oms-review.md": renderOwnedMarkdownArtifact("oms-review"),
+      "/workspace/project/.qwen/commands/oms-status.md": renderOwnedMarkdownArtifact("oms-status"),
+    }
 
     const result = await runCli(["status", "--host", "qwen"], createCliDeps({
       buildQwenArtifacts: async () => ({
@@ -3208,13 +4301,7 @@ describe("runCli", () => {
           },
         ],
       }),
-      artifactExists: async (filePath: string) => {
-        inspectedPaths.push(filePath)
-        return (
-          filePath === "/workspace/project/.qwen/commands/oms-status.md"
-          || filePath === "/workspace/project/.qwen/agents/oms-review.md"
-        )
-      },
+      ...createArtifactFs(files),
     }))
 
     const parsed = JSON.parse(result.stdout)
@@ -3225,14 +4312,43 @@ describe("runCli", () => {
       "/workspace/project/.qwen/agents/oms-review.md",
       "/workspace/project/.qwen/commands/oms-status.md",
     ])
-    expect(inspectedPaths).toEqual(expect.arrayContaining([
-      "/workspace/project/.qwen/agents/oms-review.md",
-      "/workspace/project/.qwen/commands/oms-status.md",
-    ]))
+  })
+
+  it("does not count an unowned expected Codex file as present in status", async () => {
+    const files = {
+      "/workspace/project/.codex/agents/oms-review.toml": renderUserMarkdownArtifact("user-codex-agent"),
+      "/workspace/project/.agents/plugins/marketplace.json": renderCodexMarketplace(),
+      "/workspace/project/plugins/oh-my-superagents-codex/.codex-plugin/plugin.json": renderCodexPluginManifest(),
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/oms-status/SKILL.md": renderOwnedCodexSkill("oms-status", "status"),
+    }
+
+    const result = await runCli(["status", "--host", "codex"], createCliDeps({
+      buildCodexArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".codex/agents",
+            fileName: "oms-review.toml",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+      }),
+      ...createArtifactFs(files),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.artifacts.present).not.toContain("/workspace/project/.codex/agents/oms-review.toml")
+    expect(output.artifacts.missing).toContain("/workspace/project/.codex/agents/oms-review.toml")
   })
 
   it("supports doctor --host qwen and reports OMS-managed Qwen commands plus agents", async () => {
-    const inspectedPaths: string[] = []
+    const files = {
+      "/workspace/project/.qwen/agents/oms-review.md": renderOwnedMarkdownArtifact("oms-review"),
+      "/workspace/project/.qwen/commands/oms-doctor.md": renderOwnedMarkdownArtifact("oms-doctor"),
+    }
 
     const result = await runCli(["doctor", "--host", "qwen"], createCliDeps({
       buildQwenArtifacts: async () => ({
@@ -3255,13 +4371,7 @@ describe("runCli", () => {
           },
         ],
       }),
-      artifactExists: async (filePath: string) => {
-        inspectedPaths.push(filePath)
-        return (
-          filePath === "/workspace/project/.qwen/commands/oms-doctor.md"
-          || filePath === "/workspace/project/.qwen/agents/oms-review.md"
-        )
-      },
+      ...createArtifactFs(files),
     }))
 
     const parsed = JSON.parse(result.stdout)
@@ -3272,10 +4382,95 @@ describe("runCli", () => {
       "/workspace/project/.qwen/agents/oms-review.md",
       "/workspace/project/.qwen/commands/oms-doctor.md",
     ])
+  })
+
+  it("does not count an unowned expected Qwen file as present in doctor", async () => {
+    const files = {
+      "/workspace/project/.qwen/agents/oms-review.md": renderUserMarkdownArtifact("user-qwen-agent"),
+      "/workspace/project/.qwen/commands/oms-doctor.md": renderOwnedMarkdownArtifact("oms-doctor"),
+    }
+
+    const result = await runCli(["doctor", "--host", "qwen"], createCliDeps({
+      buildQwenArtifacts: async () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".qwen/agents",
+            fileName: "oms-review.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+        commands: [
+          {
+            kind: "command" as const,
+            directory: ".qwen/commands",
+            fileName: "oms-doctor.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+      }),
+      ...createArtifactFs(files),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.artifacts.present).not.toContain("/workspace/project/.qwen/agents/oms-review.md")
+    expect(output.artifacts.missing).toContain("/workspace/project/.qwen/agents/oms-review.md")
+  })
+
+  it("uses direct-mode expected artifacts in qwen status", async () => {
+    const inspectedPaths: string[] = []
+
+    const result = await runCli(["status", "--host", "qwen"], createDirectCliDeps({
+      buildQwenArtifacts,
+      artifactExists: async (filePath: string) => {
+        inspectedPaths.push(filePath)
+        return (
+          filePath === "/workspace/project/.qwen/agents/rt-plan.md"
+          || filePath === "/workspace/project/.qwen/commands/ai-plan.md"
+          || filePath === "/workspace/project/.qwen/commands/oms-status.md"
+        )
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.host).toBe("qwen")
     expect(inspectedPaths).toEqual(expect.arrayContaining([
-      "/workspace/project/.qwen/agents/oms-review.md",
-      "/workspace/project/.qwen/commands/oms-doctor.md",
+      "/workspace/project/.qwen/agents/rt-plan.md",
+      "/workspace/project/.qwen/commands/ai-plan.md",
     ]))
+    expect(inspectedPaths).not.toContain("/workspace/project/.qwen/agents/oms-review.md")
+  })
+
+  it("uses direct-mode expected artifacts in qwen doctor", async () => {
+    const inspectedPaths: string[] = []
+
+    const result = await runCli(["doctor", "--host", "qwen"], createDirectCliDeps({
+      buildQwenArtifacts,
+      artifactExists: async (filePath: string) => {
+        inspectedPaths.push(filePath)
+        return (
+          filePath === "/workspace/project/.qwen/agents/rt-plan.md"
+          || filePath === "/workspace/project/.qwen/commands/ai-plan.md"
+          || filePath === "/workspace/project/.qwen/commands/oms-doctor.md"
+        )
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.host).toBe("qwen")
+    expect(inspectedPaths).toEqual(expect.arrayContaining([
+      "/workspace/project/.qwen/agents/rt-plan.md",
+      "/workspace/project/.qwen/commands/ai-plan.md",
+    ]))
+    expect(inspectedPaths).not.toContain("/workspace/project/.qwen/agents/oms-review.md")
   })
 
   it("supports sync --host qwen and materializes OMS-managed Qwen commands plus agents", async () => {
@@ -3327,6 +4522,130 @@ describe("runCli", () => {
       ".qwen/agents/oms-review.md",
       ".qwen/commands/oms-sync.md",
     ])
+  })
+
+  it("syncs direct workflow artifacts for Qwen without requiring upstream skills", async () => {
+    let materializeCalled = false
+
+    const result = await runCli(["sync", "--host", "qwen"], createDirectCliDeps({
+      evaluateSuperpowersCompatibility: () => incompatibleOpencodeStrict,
+      buildQwenArtifacts: async () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".qwen/agents",
+            fileName: "rt-plan.md",
+            ownerPrefix: "rt-",
+            content: "",
+          },
+        ],
+        commands: [
+          {
+            kind: "command" as const,
+            directory: ".qwen/commands",
+            fileName: "ai-plan.md",
+            ownerPrefix: "ai-",
+            content: "",
+          },
+        ],
+      }),
+      materializeArtifacts: async ({ artifacts }: { artifacts: Array<{ directory: string; fileName: string }> }) => {
+        materializeCalled = true
+
+        return {
+          exitCode: 0 as const,
+          warnings: [],
+          written: artifacts.map((artifact) => path.join("/workspace/project", artifact.directory, artifact.fileName)),
+          removed: [],
+        }
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(materializeCalled).toBe(true)
+    expect(parsed.compatibility).toBeNull()
+    expect(parsed.written).toEqual([
+      "/workspace/project/.qwen/agents/rt-plan.md",
+      "/workspace/project/.qwen/commands/ai-plan.md",
+    ])
+  })
+
+  it("inspects direct-mode Codex bootstrap skills in status and doctor", async () => {
+    const inspectedPaths: string[] = []
+
+    const deps = createDirectCliDeps({
+      buildCodexArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".codex/agents",
+            fileName: "rt-plan.toml",
+            ownerPrefix: "rt-",
+            content: 'name = "rt-plan"',
+          },
+        ],
+      }),
+      artifactExists: async (filePath: string) => {
+        inspectedPaths.push(filePath)
+        return (
+          filePath === "/workspace/project/.codex/agents/rt-plan.toml"
+          || filePath === "/workspace/project/.agents/plugins/marketplace.json"
+          || filePath === "/workspace/project/plugins/oh-my-superagents-codex/.codex-plugin/plugin.json"
+          || filePath === "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md"
+        )
+      },
+    })
+
+    const status = await runCli(["status", "--host", "codex"], deps)
+    const doctor = await runCli(["doctor", "--host", "codex"], deps)
+
+    expect(status.exitCode).toBe(0)
+    expect(doctor.exitCode).toBe(0)
+    expect(inspectedPaths).toEqual(expect.arrayContaining([
+      "/workspace/project/.codex/agents/rt-plan.toml",
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    ]))
+  })
+
+  it("materializes direct-mode Codex bootstrap skills during sync", async () => {
+    let materializedPaths: string[] = []
+
+    const result = await runCli(["sync", "--host", "codex"], createDirectCliDeps({
+      buildCodexArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".codex/agents",
+            fileName: "rt-plan.toml",
+            ownerPrefix: "rt-",
+            content: 'name = "rt-plan"',
+          },
+        ],
+      }),
+      materializeArtifacts: async ({ artifacts }: { artifacts: Array<{ directory: string; fileName: string }> }) => {
+        materializedPaths = artifacts.map((artifact) => `${artifact.directory}/${artifact.fileName}`)
+        return {
+          exitCode: 0 as const,
+          warnings: [],
+          written: artifacts.map((artifact) => path.join("/workspace/project", artifact.directory, artifact.fileName)),
+          removed: [],
+        }
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(materializedPaths).toEqual(expect.arrayContaining([
+      ".codex/agents/rt-plan.toml",
+      "plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    ]))
+    expect(parsed.written).toEqual(expect.arrayContaining([
+      "/workspace/project/.codex/agents/rt-plan.toml",
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    ]))
   })
 
   it("reconciles the full OMS Codex Stage 1 surface during sync", async () => {

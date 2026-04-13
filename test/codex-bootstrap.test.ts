@@ -186,6 +186,82 @@ describe("buildCodexBootstrapFiles", () => {
     expect(pluginManifest?.content).toContain("$oms-doctor")
   })
 
+  it("generates direct-mode Codex skills for intents", () => {
+    const result = buildCodexBootstrapFiles({
+      packageVersion: "0.1.0",
+      includeConfig: false,
+      routerConfig: {
+        workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+        profiles: { planner: { model: "openai/gpt-5" } },
+        routes: { plan: "planner" },
+        defaultRoute: "planner",
+      } as never,
+      controlPlaneSettings: createDefaultControlPlaneConfig().settings,
+    })
+
+    expect(result.files.some((file) => file.path.includes("skills/ai-plan/SKILL.md"))).toBe(true)
+  })
+
+  it("does not mention upstream superpowers skills in direct-mode Codex skill prompts", () => {
+    const result = buildCodexBootstrapFiles({
+      packageVersion: "0.1.0",
+      includeConfig: false,
+      routerConfig: {
+        workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+        profiles: { planner: { model: "openai/gpt-5" } },
+        routes: { plan: "planner" },
+        defaultRoute: "planner",
+      } as never,
+      controlPlaneSettings: createDefaultControlPlaneConfig().settings,
+    })
+
+    const planSkill = result.files.find((file) => file.path.includes("skills/ai-plan/SKILL.md"))
+    expect(planSkill).toBeDefined()
+
+    const prompt = planSkill?.content.split("-->\n")[1] ?? planSkill?.content ?? ""
+    expect(prompt).not.toContain("superpowers")
+  })
+
+  it("adds distinct ownership metadata to direct-mode Codex skills", () => {
+    const result = buildCodexBootstrapFiles({
+      packageVersion: "0.1.0",
+      includeConfig: false,
+      routerConfig: {
+        workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+        profiles: { planner: { model: "openai/gpt-5" } },
+        routes: { plan: "planner" },
+        defaultRoute: "planner",
+      } as never,
+      controlPlaneSettings: createDefaultControlPlaneConfig().settings,
+    })
+
+    const planSkill = result.files.find((file) => file.path.includes("skills/ai-plan/SKILL.md"))
+    expect(planSkill?.content).toContain(
+      "oms-direct: stage=1; host=codex; artifact=skill; intent=plan; rendered-name=ai-plan",
+    )
+  })
+
+  it("omits direct-mode Codex use and disable entrypoints", () => {
+    const result = buildCodexBootstrapFiles({
+      packageVersion: "0.1.0",
+      includeConfig: false,
+      routerConfig: {
+        workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+        profiles: { planner: { model: "openai/gpt-5" } },
+        routes: { plan: "planner" },
+        defaultRoute: "planner",
+      } as never,
+      controlPlaneSettings: createDefaultControlPlaneConfig().settings,
+    })
+
+    const filePaths = result.files.map((file) => file.path)
+
+    expect(filePaths).not.toContain("plugins/oh-my-superagents-codex/skills/oms-use/SKILL.md")
+    expect(filePaths).not.toContain("plugins/oh-my-superagents-codex/skills/oms-u/SKILL.md")
+    expect(filePaths).not.toContain("plugins/oh-my-superagents-codex/skills/oms-off/SKILL.md")
+    expect(filePaths).not.toContain("plugins/oh-my-superagents-codex/skills/oms-o/SKILL.md")
+  })
+
   it("includes the starter config only when requested", () => {
     const result = buildCodexBootstrapFiles({
       packageVersion: "0.1.0",
@@ -290,6 +366,34 @@ describe("buildCodexBootstrapFiles", () => {
         },
       }),
     ).toThrow(/collide|helper|oms-no-superpowers/i)
+  })
+
+  it("rejects direct-mode Codex skill names that collide with control-plane skill names", () => {
+    const defaults = createDefaultControlPlaneConfig().settings
+
+    expect(() =>
+      buildCodexBootstrapFiles({
+        packageVersion: "0.1.0",
+        includeConfig: false,
+        routerConfig: {
+          workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+          profiles: { planner: { model: "openai/gpt-5" } },
+          routes: { plan: "planner" },
+          defaultRoute: "planner",
+        } as never,
+        controlPlaneSettings: {
+          ...defaults,
+          commandPrefix: "ai",
+          commands: {
+            ...defaults.commands,
+            status: {
+              name: "plan",
+              aliases: [],
+            },
+          },
+        },
+      }),
+    ).toThrow(/collision|duplicate|ai-plan/i)
   })
 
   it("materializes the fixed helper skill idempotently across reruns", async () => {
@@ -654,6 +758,72 @@ describe("runCodexBootstrap", () => {
     )
   })
 
+  it("removes stale direct-mode Codex skills when intents change on rerun", async () => {
+    const fs = createMemoryFs()
+    const configPath = "/workspace/project/oh-my-superagents.config.jsonc"
+    const planRouterConfig = {
+      workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+      profiles: { planner: { model: "openai/gpt-5" } },
+      routes: { plan: "planner" },
+      defaultRoute: "planner",
+    } as const
+
+    const buildRouterConfig = {
+      workflow: { kind: "direct", intents: { build: { label: "Build" } } },
+      profiles: { builder: { model: "gpt-5.4" } },
+      routes: { build: "builder" },
+      defaultRoute: "builder",
+    } as const
+
+    let currentRouterConfig = planRouterConfig
+    const writeConfig = async (routerConfig: typeof planRouterConfig | typeof buildRouterConfig) => {
+      await fs.writeFile(
+        configPath,
+        JSON.stringify({
+          workflow: routerConfig.workflow,
+          settings: createDefaultControlPlaneConfig().settings,
+          presets: {
+            default: {
+              label: "Default",
+              short: "def",
+              profiles: routerConfig.profiles,
+              routes: routerConfig.routes,
+              defaultRoute: routerConfig.defaultRoute,
+            },
+          },
+        }),
+      )
+    }
+
+    await writeConfig(currentRouterConfig)
+
+    const run = () =>
+      runCodexBootstrap({
+        cwd: "/workspace/project",
+        discoverConfigPath: async () => configPath,
+        loadConfig: async () => ({
+          path: configPath,
+          config: currentRouterConfig as never,
+        }),
+        resolveCompatibility: async () => compatibleCodexWarn,
+        buildCodexArtifacts: () => ({ agents: [] }),
+        materializeArtifacts,
+        fs,
+      })
+
+    const first = await run()
+    currentRouterConfig = buildRouterConfig
+    await writeConfig(currentRouterConfig)
+    const second = await run()
+
+    expect(first.syncResult.exitCode).toBe(0)
+    expect(second.syncResult.exitCode).toBe(0)
+    expect(second.syncResult.warnings).toEqual([])
+    expect(second.syncResult.removed).toContain(
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    )
+  })
+
   it("fails before mutation when the existing marketplace JSON is malformed", async () => {
     const mkdirCalls: string[] = []
     const writeCalls: string[] = []
@@ -760,5 +930,68 @@ describe("runCodexBootstrap", () => {
     expect(materializeArtifactsCalled).toBe(false)
     expect(mkdirCalls).toEqual([])
     expect(writeCalls).toEqual([])
+  })
+
+  it("does not block direct-mode bootstrap when strict compatibility is incompatible", async () => {
+    let materializeArtifactsCalled = false
+
+    const result = await runCodexBootstrap({
+      cwd: "/workspace/project",
+      discoverConfigPath: async () => "/workspace/project/oh-my-superagents.config.jsonc",
+      loadConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        config: {
+          workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+          profiles: { planner: { model: "openai/gpt-5" } },
+          routes: { plan: "planner" },
+          defaultRoute: "planner",
+          superpowersCompatibility: { mode: "strict" as const },
+        },
+      }),
+      resolveCompatibility: async () => incompatibleCodexStrict,
+      buildCodexArtifacts: () => ({ agents: [] }),
+      materializeArtifacts: async () => {
+        materializeArtifactsCalled = true
+        return { exitCode: 0 as const, warnings: [], written: [], removed: [] }
+      },
+      fs: {
+        mkdir: async () => {},
+        writeFile: async () => {},
+        readFile: async (filePath: string) => {
+          if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+            return JSON.stringify({
+              workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+              settings: createDefaultControlPlaneConfig().settings,
+              presets: {
+                default: {
+                  label: "Default",
+                  short: "def",
+                  profiles: { planner: { model: "openai/gpt-5" } },
+                  routes: { plan: "planner" },
+                  defaultRoute: "planner",
+                },
+              },
+            })
+          }
+
+          throw createNotFoundError(filePath)
+        },
+        readdir: async () => [],
+        stat: async () => ({ isFile: () => true }),
+        rename: async () => {
+          throw new Error("unexpected")
+        },
+        unlink: async () => {
+          throw new Error("unexpected")
+        },
+      },
+    })
+
+    expect(result.syncResult.exitCode).toBe(0)
+    expect(result.compatibility).toBeNull()
+    expect(result.bootstrapFiles).toEqual(expect.arrayContaining([
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    ]))
+    expect(materializeArtifactsCalled).toBe(true)
   })
 })

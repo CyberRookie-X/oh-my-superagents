@@ -1,5 +1,8 @@
+import { readFile } from "node:fs/promises"
+import path from "node:path"
 import type { Plugin } from "@opencode-ai/plugin"
 import { loadRouterConfig } from "./config.js"
+import { RUNTIME_AGENT_METADATA_DIRECTORY, RUNTIME_AGENT_METADATA_FILE } from "./opencode.js"
 import {
   evaluateSuperpowersCompatibility,
   type SuperpowersCompatibilityMode,
@@ -8,6 +11,7 @@ import {
 import { detectOpenCodeSuperpowers } from "./superpowers-detectors.js"
 
 const SERVICE_NAME = "oh-my-superagents"
+const CONFIG_FILE_NAME = "oh-my-superagents.config.jsonc"
 
 type LogLevel = "info" | "warn" | "error"
 type PluginClient = {
@@ -22,13 +26,18 @@ type StartupGuidanceState =
   | "upstream_incompatible"
   | "upstream_not_detected"
 
-export const OhMySuperpowersPlugin: Plugin = async ({ client, directory }) => {
+type RuntimeAgentMetadata = {
+  agents: Record<string, { profile: string; codexFast: boolean; profiles?: string[] }>
+}
+
+export const OhMySuperpowersPlugin: Plugin = async ({ client, directory, worktree }) => {
   const log = createPluginLogger(client as PluginClient)
+  const rootDirectory = await resolvePluginRootDirectory(directory, worktree)
   let compatibilityMode: SuperpowersCompatibilityMode = "warn"
   let shouldReportCompatibility = true
 
   try {
-    const { config } = await loadRouterConfig({ cwd: directory })
+    const { config } = await loadRouterConfig({ cwd: rootDirectory })
     compatibilityMode = config.superpowersCompatibility.mode
 
     void log("info", "router config loaded")
@@ -58,13 +67,61 @@ export const OhMySuperpowersPlugin: Plugin = async ({ client, directory }) => {
 
   if (shouldReportCompatibility) {
     void reportCompatibilityDiagnostics({
-      cwd: directory,
+      cwd: rootDirectory,
       policyMode: compatibilityMode,
       log,
     })
   }
 
-  return {}
+  return {
+    "chat.params": async (input, output) => {
+      const metadata = await readRuntimeAgentMetadata(rootDirectory)
+
+      if (metadata?.agents[input.agent]?.codexFast) {
+        output.options.serviceTier = "fast"
+      }
+    },
+  }
+}
+
+async function readRuntimeAgentMetadata(cwd: string): Promise<RuntimeAgentMetadata | undefined> {
+  try {
+    const content = await readFile(
+      path.join(cwd, RUNTIME_AGENT_METADATA_DIRECTORY, RUNTIME_AGENT_METADATA_FILE),
+      "utf8",
+    )
+    const parsed = JSON.parse(content) as unknown
+
+    if (!isRuntimeAgentMetadata(parsed)) {
+      return undefined
+    }
+
+    return parsed
+  } catch {
+    return undefined
+  }
+}
+
+async function fileExists(filePath: string) {
+  try {
+    await readFile(filePath, "utf8")
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function resolvePluginRootDirectory(directory: string, worktree?: string) {
+  if (!worktree || directory === worktree) {
+    return directory
+  }
+
+  const localConfigPath = path.join(directory, CONFIG_FILE_NAME)
+  if (await fileExists(localConfigPath)) {
+    return directory
+  }
+
+  return worktree
 }
 
 async function reportCompatibilityDiagnostics(input: {
@@ -157,6 +214,33 @@ function createPluginLogger(client: PluginClient) {
       // Startup diagnostics should never fail plugin initialization.
     }
   }
+}
+
+function isRuntimeAgentMetadata(value: unknown): value is RuntimeAgentMetadata {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false
+  }
+
+  const { agents } = value as { agents?: unknown }
+  if (typeof agents !== "object" || agents === null || Array.isArray(agents)) {
+    return false
+  }
+
+  return Object.values(agents).every((entry) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      return false
+    }
+
+    const candidate = entry as { profile?: unknown; codexFast?: unknown; profiles?: unknown }
+    if (typeof candidate.profile !== "string" || typeof candidate.codexFast !== "boolean") {
+      return false
+    }
+
+    return (
+      candidate.profiles === undefined ||
+      (Array.isArray(candidate.profiles) && candidate.profiles.every((profile) => typeof profile === "string"))
+    )
+  })
 }
 
 function createNotDetectedCompatibilityResult(

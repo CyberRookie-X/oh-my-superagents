@@ -1,5 +1,5 @@
-import { BUILT_IN_PHASES, type RouterConfig } from "./config.js"
-import { resolvePhase, type BuiltInPhase } from "./router.js"
+import { BUILT_IN_PHASES, SAFE_NAME_PATTERN, type RouterConfig } from "./config.js"
+import { resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
 import { MARKER_TEXT, type GeneratedArtifact } from "./opencode.js"
 
 const PHASE_TO_CODEX_AGENT = {
@@ -50,6 +50,10 @@ function tomlString(value: string) {
   return JSON.stringify(value)
 }
 
+function sanitizeTomlMultilineString(value: string) {
+  return value.replace(/"""/g, '\\"\\"\\"')
+}
+
 export function renderCodexAgentFile(input: {
   name: string
   description: string
@@ -66,7 +70,7 @@ export function renderCodexAgentFile(input: {
     ...(input.reasoningEffort ? [`model_reasoning_effort = ${tomlString(input.reasoningEffort)}`] : []),
     ...(input.serviceTier ? [`service_tier = ${tomlString(input.serviceTier)}`] : []),
     "developer_instructions = \"\"\"",
-    input.developerInstructions,
+    sanitizeTomlMultilineString(input.developerInstructions),
     '"""',
     "",
   ].join("\n")
@@ -95,6 +99,42 @@ export function explainAllCodex(config: RouterConfig) {
 
 export function buildCodexArtifacts(config: RouterConfig) {
   const agents: GeneratedArtifact[] = []
+
+  if (config.workflow?.kind === "direct") {
+    for (const [intent, intentConfig] of Object.entries(config.workflow.intents)) {
+      if (!SAFE_NAME_PATTERN.test(intent)) {
+        throw new Error(`Invalid direct intent id: ${intent}`)
+      }
+
+      const resolved = resolveRoute(config, intent)
+      const codexEffort = getCodexEffortConfig(resolved.selection)
+      const agentName = `rt-${intent}`
+      const intentDescription = intentConfig.description
+        ? `${intentConfig.label}: ${intentConfig.description}`
+        : intentConfig.label
+
+      agents.push({
+        kind: "agent",
+        directory: ".codex/agents",
+        fileName: `${agentName}.toml`,
+        ownerPrefix: "rt-",
+        content: renderCodexAgentFile({
+          name: agentName,
+          description: `${agentName} routing agent for ${intent}`,
+          developerInstructions: [
+            `You are the ${agentName} direct-mode agent for the \`${intent}\` intent.`,
+            `Handle requests that match this intent: ${intentDescription}.`,
+            "Stay focused on this intent and do not switch to another workflow intent unless the user explicitly asks.",
+          ].join("\n"),
+          model: resolved.selection.model,
+          reasoningEffort: codexEffort?.reasoningEffort,
+          serviceTier: codexEffort?.serviceTier,
+        }),
+      })
+    }
+
+    return { agents }
+  }
 
   for (const phase of BUILT_IN_PHASES) {
     const resolved = resolvePhase(config, phase)

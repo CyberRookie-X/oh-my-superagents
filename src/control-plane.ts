@@ -18,6 +18,7 @@ import {
   readControlPlaneSourceDocument,
   resolvePresetReuse,
 } from "./config.js"
+import { listLaneExecutionUnits } from "./lane-execution.js"
 import { resolveRoute, type BuiltInPhase } from "./router.js"
 import type { SuperpowersCompatibilityResult, SupportedSuperpowersHost } from "./superpowers-compatibility.js"
 
@@ -102,6 +103,12 @@ export type LaneExplainability = ResolvedControlPlane["laneState"] & {
   laneSelection: ControlPlaneConfig["settings"]["laneSelection"]
 }
 
+export type SubagentExecutionDiagnostics = {
+  mode: ControlPlaneConfig["settings"]["subagentExecution"]["mode"]
+  availableLanes: string[]
+  commandsByLane: Record<string, string>
+}
+
 const STAGE_1_SUGGESTION_MESSAGE =
   "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session."
 
@@ -165,6 +172,24 @@ export function summarizeLaneExplainability(resolved: ResolvedControlPlane): Lan
     mode,
     nonApplyingReason: laneState.nonApplyingReason ?? (mode === "suggest" ? STAGE_1_SUGGESTION_MESSAGE : undefined),
     laneSelection,
+  }
+}
+
+export function summarizeSubagentExecutionDiagnostics(resolved: ResolvedControlPlane): SubagentExecutionDiagnostics {
+  const laneState = (resolved as ResolvedControlPlane & { laneState?: ResolvedControlPlane["laneState"] }).laneState
+    ?? resolveLaneState(resolved.config, resolved.activePreset)
+  const availableLanes = [...laneState.allowedLanes]
+  const units = listLaneExecutionUnits({
+    activePresetKey: resolved.activePreset.key,
+    activePreset: { usesLanes: availableLanes },
+  })
+
+  return {
+    mode: resolved.config.settings.subagentExecution?.mode ?? "suggest",
+    availableLanes,
+    commandsByLane: Object.fromEntries(
+      units.map((unit) => [unit.lane, unit.commandFileName.replace(/\.md$/, "")]),
+    ),
   }
 }
 
@@ -603,6 +628,13 @@ function validateControlPlaneConfig(config: ControlPlaneConfig, runtimeLane?: st
     validatePresetGraph(config, presetKey, preset)
   }
 
+  if (config.workflow.kind === "superpowers") {
+    listLaneExecutionUnits({
+      activePresetKey: config.settings.activePreset,
+      activePreset,
+    })
+  }
+
   return {
     activePreset: {
       key: config.settings.activePreset,
@@ -679,6 +711,7 @@ function toLayeredDocument(config: ControlPlaneConfig): LayeredControlPlaneConfi
       activePreset: config.settings.activePreset,
       defaultLane: config.settings.defaultLane,
       laneSelection: { ...config.settings.laneSelection },
+      subagentExecution: { ...config.settings.subagentExecution },
       commandPrefix: config.settings.commandPrefix,
       commands: Object.fromEntries(
         Object.entries(config.settings.commands).map(([key, command]) => [
@@ -723,6 +756,7 @@ function ensureStandaloneSettings(config: LayeredControlPlaneConfigInput) {
       ...config.settings,
       commandPrefix: config.settings?.commandPrefix ?? defaults.settings.commandPrefix,
       commands: config.settings?.commands ?? defaults.settings.commands,
+      subagentExecution: config.settings?.subagentExecution ?? defaults.settings.subagentExecution,
       superpowersCompatibility:
         config.settings?.superpowersCompatibility ?? defaults.settings.superpowersCompatibility,
     },

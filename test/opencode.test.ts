@@ -24,6 +24,12 @@ function createRouterConfig(): RouterConfig {
   }
 }
 
+function parseRuntimeMetadata(content: string) {
+  return JSON.parse(content) as {
+    agents: Record<string, { profile: string; profiles: string[]; codexFast: boolean }>
+  }
+}
+
 describe("renderAgentFile", () => {
   it("renders hidden subagent frontmatter and marker", () => {
     const output = renderAgentFile({
@@ -81,7 +87,11 @@ describe("buildArtifacts", () => {
       defaultRoute: "build",
     })
 
-    expect(artifacts.commands.map((item: { fileName: string }) => item.fileName)).toEqual([
+    expect(
+      artifacts.commands
+        .filter((item) => item.directory === ".opencode/commands")
+        .map((item: { fileName: string }) => item.fileName),
+    ).toEqual([
       "sp-brainstorm.md",
       "sp-plan.md",
       "sp-execute.md",
@@ -90,6 +100,107 @@ describe("buildArtifacts", () => {
       "sp-visual.md",
       "sp-web-test.md",
     ])
+  })
+
+  it("generates an OpenCode runtime metadata artifact for codexFast-enabled agents", () => {
+    const artifacts = buildArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: {
+        build: { model: "gpt-5.4", codexFast: true },
+      },
+      routes: {},
+      defaultRoute: "build",
+    } as never)
+
+    const runtimeFile = artifacts.commands.find((item) => item.fileName === "runtime-agent-metadata.json")
+
+    expect(runtimeFile).toBeDefined()
+    expect(runtimeFile?.directory).toBe(".opencode/oh-my-superagents")
+    expect(runtimeFile?.content).not.toContain("generated-by: oh-my-superagents")
+    expect(parseRuntimeMetadata(runtimeFile?.content ?? "")).toEqual({
+      agents: expect.objectContaining({
+        "spr-build": {
+          profile: "build",
+          profiles: ["build"],
+          codexFast: true,
+        },
+      }),
+    })
+  })
+
+  it("includes codexFast false or absent agents in the runtime metadata without enabling them", () => {
+    const artifacts = buildArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: {
+        strategy: { model: "openai/gpt-5" },
+        build: { model: "gpt-5.4", codexFast: true },
+      },
+      routes: { brainstorming: "strategy" },
+      defaultRoute: "build",
+    } as never)
+
+    const runtimeFile = artifacts.commands.find((item) => item.fileName === "runtime-agent-metadata.json")
+
+    expect(runtimeFile).toBeDefined()
+    expect(parseRuntimeMetadata(runtimeFile?.content ?? "")).toEqual({
+      agents: expect.objectContaining({
+        "spr-strategy": {
+          profile: "strategy",
+          profiles: ["strategy"],
+          codexFast: false,
+        },
+        "spr-build": {
+          profile: "build",
+          profiles: ["build"],
+          codexFast: true,
+        },
+      }),
+    })
+  })
+
+  it("allows shared OpenCode agents to retain multiple profile ids when codexFast semantics match", () => {
+    const artifacts = buildArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: {
+        visualA: { model: "google/gemini-2.5-pro", variant: "high" },
+        visualB: { model: "google/gemini-2.5-pro", variant: "high" },
+      },
+      routes: {
+        "frontend-design": "visualA",
+        "webapp-testing": "visualB",
+      },
+      defaultRoute: "visualA",
+    } as never)
+
+    const runtimeFile = artifacts.commands.find((item) => item.fileName === "runtime-agent-metadata.json")
+
+    expect(runtimeFile).toBeDefined()
+    expect(parseRuntimeMetadata(runtimeFile?.content ?? "")).toEqual({
+      agents: expect.objectContaining({
+        "spr-visual": {
+          profile: "visualA",
+          profiles: ["visualA", "visualB"],
+          codexFast: false,
+        },
+      }),
+    })
+  })
+
+  it("keeps shared OpenCode agents conflicting when matching selections disagree on codexFast", () => {
+    expect(() =>
+      buildArtifacts({
+        workflow: { kind: "superpowers" },
+        profiles: {
+          visualA: { model: "google/gemini-2.5-pro", variant: "high", codexFast: true },
+          visualB: { model: "google/gemini-2.5-pro", variant: "high" },
+        },
+        routes: {
+          "frontend-design": "visualA",
+          "webapp-testing": "visualB",
+        },
+        defaultRoute: "visualA",
+      } as never),
+    ).toThrow(/spr-visual/)
   })
 
   it("fails when a built-in phase has no route and no defaultRoute", () => {
@@ -217,41 +328,175 @@ describe("buildArtifacts", () => {
     expect(agent?.content).not.toContain("Load the upstream superpowers skill")
   })
 
-  it("fails when a direct-mode command collides with an OMS control-plane command path", () => {
+  it("renders lane-scoped execute commands and agents for subagent-driven-development", () => {
+    const artifacts = buildArtifactsWithControlPlane(
+      {
+        workflow: { kind: "superpowers" },
+        profiles: {
+          frontendBuild: { model: "openai/gpt-5" },
+          backendBuild: { model: "gpt-5.4" },
+        },
+        lanes: {
+          frontend: { label: "Frontend", routes: {}, defaultRoute: "frontendBuild" },
+          backend: { label: "Backend", routes: {}, defaultRoute: "backendBuild" },
+        },
+        routes: {},
+        defaultRoute: "backendBuild",
+        effectiveLane: "backend",
+      } as never,
+      {
+        ...createDefaultControlPlaneConfig().settings,
+        subagentExecution: { mode: "suggest" },
+      },
+    )
+
+    expect(artifacts.commands.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["sp-execute.md", "sp-execute-frontend.md", "sp-execute-backend.md"]),
+    )
+    expect(artifacts.agents.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["spr-build.md", "spr-build--frontend.md", "spr-build--backend.md"]),
+    )
+
+    const frontendCommand = artifacts.commands.find((item) => item.fileName === "sp-execute-frontend.md")
+    const frontendAgent = artifacts.agents.find((item) => item.fileName === "spr-build--frontend.md")
+    const backendAgent = artifacts.agents.find((item) => item.fileName === "spr-build--backend.md")
+
+    expect(frontendCommand?.content).toContain("agent: 'spr-build--frontend'")
+    expect(frontendCommand?.content).toContain("superpowers/subagent-driven-development")
+    expect(frontendCommand?.content).toContain("lane: frontend")
+    expect(frontendCommand?.ownerPrefix).toBe("sp-execute-")
+
+    expect(frontendAgent?.content).toContain("model: 'openai/gpt-5'")
+    expect(frontendAgent?.ownerPrefix).toBe("spr-build--")
+    expect(backendAgent?.content).toContain("model: 'gpt-5.4'")
+  })
+
+  it("allows the main execute agent to dispatch lane-scoped execute agents", () => {
+    const artifacts = buildArtifactsWithControlPlane(
+      {
+        workflow: { kind: "superpowers" },
+        profiles: {
+          frontendBuild: { model: "openai/gpt-5" },
+          backendBuild: { model: "gpt-5.4" },
+        },
+        lanes: {
+          frontend: { label: "Frontend", routes: {}, defaultRoute: "frontendBuild" },
+          backend: { label: "Backend", routes: {}, defaultRoute: "backendBuild" },
+        },
+        routes: {},
+        defaultRoute: "backendBuild",
+      } as never,
+      {
+        ...createDefaultControlPlaneConfig().settings,
+        subagentExecution: { mode: "suggest" },
+      },
+    )
+
+    const mainExecuteAgent = artifacts.agents.find((item) => item.fileName === "spr-build.md")
+
+    expect(mainExecuteAgent?.content).toContain('"spr-build--frontend": allow')
+    expect(mainExecuteAgent?.content).toContain('"spr-build--backend": allow')
+  })
+
+  it("adds suggest-mode split guidance to the main execute command", () => {
+    const artifacts = buildArtifactsWithControlPlane(
+      {
+        workflow: { kind: "superpowers" },
+        profiles: {
+          frontendBuild: { model: "openai/gpt-5" },
+          backendBuild: { model: "gpt-5.4" },
+        },
+        lanes: {
+          frontend: { label: "Frontend", routes: {}, defaultRoute: "frontendBuild" },
+          backend: { label: "Backend", routes: {}, defaultRoute: "backendBuild" },
+        },
+        routes: {},
+        defaultRoute: "backendBuild",
+      } as never,
+      {
+        ...createDefaultControlPlaneConfig().settings,
+        subagentExecution: { mode: "suggest" },
+      },
+    )
+
+    const execute = artifacts.commands.find((item) => item.fileName === "sp-execute.md")
+
+    expect(execute?.content).toContain("If the task spans multiple lanes")
+    expect(execute?.content).toContain("wait for user confirmation")
+    expect(execute?.content).toContain("sp-execute-frontend")
+    expect(execute?.content).toContain("sp-execute-backend")
+  })
+
+  it("omits lane-scoped execute helpers for globally-defined lanes outside the active preset", () => {
+    const artifacts = buildArtifactsWithControlPlane(
+      {
+        workflow: { kind: "superpowers" },
+        profiles: {
+          frontendBuild: { model: "openai/gpt-5" },
+          backendBuild: { model: "gpt-5.4" },
+          reviewBuild: { model: "anthropic/claude-sonnet-4-5" },
+        },
+        lanes: {
+          frontend: { label: "Frontend", routes: {}, defaultRoute: "frontendBuild" },
+          backend: { label: "Backend", routes: {}, defaultRoute: "backendBuild" },
+          review: { label: "Review", routes: {}, defaultRoute: "reviewBuild" },
+        },
+        availableLanes: ["frontend", "backend"],
+        routes: {},
+        defaultRoute: "backendBuild",
+      } as never,
+      {
+        ...createDefaultControlPlaneConfig().settings,
+        subagentExecution: { mode: "suggest" },
+      },
+    )
+
+    expect(artifacts.commands.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["sp-execute-frontend.md", "sp-execute-backend.md"]),
+    )
+    expect(artifacts.agents.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["spr-build--frontend.md", "spr-build--backend.md"]),
+    )
+    expect(artifacts.commands.map((item) => item.fileName)).not.toContain("sp-execute-review.md")
+    expect(artifacts.agents.map((item) => item.fileName)).not.toContain("spr-build--review.md")
+  })
+
+  it("does not materialize unsupported direct-mode control-plane wrappers that would otherwise collide", () => {
     const defaults = createDefaultControlPlaneConfig().settings
 
-    expect(() =>
-      buildArtifactsWithControlPlane(
-        {
-          workflow: {
-            kind: "direct",
-            intents: { plan: { label: "Plan" } },
-          },
-          profiles: { planner: { model: "openai/gpt-5" } },
-          lanes: {
-            frontend: {
-              label: "Frontend",
-              routes: { plan: "planner" },
-              defaultRoute: "planner",
-            },
-          },
-          routes: {},
-          defaultRoute: "planner",
-          effectiveLane: "frontend",
-        } as never,
-        {
-          ...defaults,
-          commandPrefix: "ai",
-          commands: {
-            ...defaults.commands,
-            use: {
-              name: "plan",
-              aliases: [],
-            },
+    const artifacts = buildArtifactsWithControlPlane(
+      {
+        workflow: {
+          kind: "direct",
+          intents: { plan: { label: "Plan" } },
+        },
+        profiles: { planner: { model: "openai/gpt-5" } },
+        lanes: {
+          frontend: {
+            label: "Frontend",
+            routes: { plan: "planner" },
+            defaultRoute: "planner",
           },
         },
-      ),
-    ).toThrow(/collision|ai-plan/i)
+        routes: {},
+        defaultRoute: "planner",
+        effectiveLane: "frontend",
+      } as never,
+      {
+        ...defaults,
+        commandPrefix: "ai",
+        commands: {
+          ...defaults.commands,
+          use: {
+            name: "plan",
+            aliases: [],
+          },
+        },
+      },
+    )
+
+    expect(artifacts.commands.map((item) => item.fileName)).toContain("ai-plan.md")
+    expect(artifacts.commands.map((item) => item.fileName)).not.toContain("ai-plan.md.md")
   })
 
   it("renders one .opencode/commands file per primary OMS command", () => {
@@ -294,6 +539,28 @@ describe("buildArtifacts", () => {
       "oms-u.md",
       "oms-use.md",
     ])
+  })
+
+  it("omits direct-mode OpenCode use and disable wrappers", () => {
+    const settings = createDefaultControlPlaneConfig().settings
+    const artifacts = buildArtifactsWithControlPlane({
+      workflow: {
+        kind: "direct",
+        intents: { plan: { label: "Plan" } },
+      },
+      profiles: { planner: { model: "openai/gpt-5" } },
+      routes: { plan: "planner" },
+      defaultRoute: "planner",
+    } as never, settings)
+
+    const commandFileNames = artifacts.commands
+      .filter((item) => item.directory === ".opencode/commands")
+      .map((item) => item.fileName)
+
+    expect(commandFileNames).not.toContain("oms-use.md")
+    expect(commandFileNames).not.toContain("oms-u.md")
+    expect(commandFileNames).not.toContain("oms-off.md")
+    expect(commandFileNames).not.toContain("oms-o.md")
   })
 
   it("respects the configured OMS command prefix", () => {

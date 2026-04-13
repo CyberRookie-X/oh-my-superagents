@@ -1,7 +1,22 @@
 import * as fs from "node:fs/promises"
 import path from "node:path"
 import { cwd as getCwd } from "node:process"
-import { BUILT_IN_PHASES, discoverConfigPath, loadRouterConfig } from "./config.js"
+import { parse, type ParseError } from "jsonc-parser"
+import { z } from "zod"
+import {
+  applyRoutingProposalToConfig,
+  buildRoutingProposal,
+  inspectRoutingAuthoringInputs,
+  renderRoutingConfigDocument,
+  type ModelInventory,
+} from "./author-routing.js"
+import {
+  BUILT_IN_PHASES,
+  discoverConfigPath,
+  getProjectConfigPath,
+  loadRouterConfig,
+  readControlPlaneSourceDocument,
+} from "./config.js"
 import {
   buildControlPlaneExplainTrace,
   buildControlPlaneRouteExplainTrace,
@@ -10,6 +25,7 @@ import {
   prepareControlPlaneStateWrite,
   resolveControlPlane,
   summarizeLaneExplainability,
+  summarizeSubagentExecutionDiagnostics,
   summarizeRoutingValidation,
   summarizeControlPlaneArtifacts,
   type ExplainTrace,
@@ -18,8 +34,13 @@ import {
 } from "./control-plane.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
-import { hasArtifactOwnershipMarker, materializeArtifacts } from "./materialize.js"
-import { buildArtifacts, listRenderedOpenCodeControlPlaneCommands } from "./opencode.js"
+import { hasArtifactOwnershipMarker, isOpenCodeRuntimeMetadataContent, materializeArtifacts } from "./materialize.js"
+import {
+  buildArtifacts,
+  listRenderedOpenCodeControlPlaneCommands,
+  RUNTIME_AGENT_METADATA_DIRECTORY,
+  RUNTIME_AGENT_METADATA_FILE,
+} from "./opencode.js"
 import { buildQwenArtifacts } from "./qwen.js"
 import { explainAll, explainPhase, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
 import {
@@ -42,6 +63,7 @@ type CliHost = SupportedSuperpowersHost | "qwen"
 const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
 const CODEX_PLUGIN_MANIFEST_PATH = "plugins/oh-my-superagents-codex/.codex-plugin/plugin.json"
 const CODEX_SKILLS_ROOT = "plugins/oh-my-superagents-codex/skills"
+const DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS = ["status", "sync", "doctor"] as const
 const QWEN_MANAGED_AGENT_FILE_NAMES = [
   "oms-brainstorm.md",
   "oms-plan.md",
@@ -163,6 +185,265 @@ function parseArgs(argv: string[]) {
 function getStringFlag(flags: Map<string, string | true>, name: string) {
   const value = flags.get(name)
   return typeof value === "string" ? value : undefined
+}
+
+function isAuthorRoutingMode(value: string | undefined): value is "superpowers" | "direct" {
+  return value === "superpowers" || value === "direct"
+}
+
+const ModelInventoryEntrySchema = z.object({
+  model: z.string().min(1),
+  specialties: z.array(z.string().min(1)).optional(),
+  effort: z.enum(["fast", "balanced", "deep", "max"]).optional(),
+  codexFast: z.boolean().optional(),
+}).strict()
+
+const ModelInventorySchema = z.object({
+  models: z.record(z.string().min(1), ModelInventoryEntrySchema),
+}).strict()
+
+function parseJsoncDocument(filePath: string, content: string) {
+  const parseErrors: ParseError[] = []
+  const parsed = parse(content, parseErrors)
+
+  if (parseErrors.length > 0) {
+    throw new Error(`Invalid JSONC in ${filePath}`)
+  }
+
+  if (!isRecord(parsed)) {
+    throw new Error(`Invalid model inventory: ${filePath}`)
+  }
+
+  return parsed
+}
+
+async function loadModelInventory(modelsPath: string, deps: CliDeps): Promise<ModelInventory> {
+  const parsed = parseJsoncDocument(modelsPath, await deps.readArtifactFile(modelsPath))
+  const validated = ModelInventorySchema.safeParse(parsed)
+
+  if (!validated.success) {
+    const issue = validated.error.issues[0]
+    const issuePath = issue?.path.join(".")
+    const issueDetail = issuePath ? ` (${issuePath}: ${issue.message})` : ""
+    throw new Error(`Invalid model inventory: ${modelsPath}${issueDetail}`)
+  }
+
+  return validated.data
+}
+
+async function buildAuthorRoutingPreview(
+  cwd: string,
+  explicitPath: string | undefined,
+  mode: "superpowers" | "direct",
+  modelsPath: string,
+  write: boolean,
+  deps: CliDeps,
+) {
+  const inventory = await loadModelInventory(modelsPath, deps)
+  const targetPath = explicitPath
+    ?? (write ? await deps.discoverConfigPath({ cwd, exists: deps.artifactExists }) : undefined)
+    ?? getProjectConfigPath(cwd)
+  const authoringInputs = await inspectRoutingAuthoringInputs({
+    cwd,
+    exists: deps.artifactExists,
+    readFile: deps.readArtifactFile,
+  })
+  const proposal = buildRoutingProposal({
+    mode,
+    suggestedLanes: authoringInputs.suggestedLanes,
+    inventory,
+  })
+  const hasExistingConfig = await deps.artifactExists(targetPath)
+  const previousRenderedDocument = hasExistingConfig ? await deps.readArtifactFile(targetPath) : ""
+  const effectiveConfig = (write || hasExistingConfig)
+    ? (await deps.resolveControlPlane({ command: "status", cwd, explicitPath })).config
+    : undefined
+  const existingConfig = hasExistingConfig
+    ? (await readControlPlaneSourceDocument(targetPath, async () => previousRenderedDocument)).config
+    : undefined
+
+  const nextDocument = applyRoutingProposalToConfig(
+    proposal,
+    existingConfig,
+    { effectiveConfig },
+  )
+  const renderedDocument = renderRoutingConfigDocument(nextDocument)
+  const operation = hasExistingConfig ? "update" : "create"
+  const summaryText = formatAuthorRoutingSummary({
+    mode,
+    write,
+    operation,
+    targetPath,
+    suggestedLanes: authoringInputs.suggestedLanes,
+    proposal,
+  })
+  const diffText = formatAuthorRoutingDiff({
+    previousRenderedDocument,
+    renderedDocument,
+    operation,
+    targetPath,
+  })
+
+  if (write) {
+    await deps.mkdir(path.dirname(targetPath), { recursive: true })
+    await deps.writeFile(targetPath, renderedDocument)
+  }
+
+  return {
+    mode,
+    summary: {
+      lanes: authoringInputs.suggestedLanes,
+      profiles: Object.keys(proposal.profiles),
+      presets: Object.keys(proposal.presets),
+    },
+    detectedLanes: authoringInputs.suggestedLanes,
+    proposedProfiles: proposal.profiles,
+    proposedPresets: proposal.presets,
+    preview: {
+      path: targetPath,
+      operation,
+      patch: {
+        workflow: proposal.workflow,
+        profiles: proposal.profiles,
+        lanes: proposal.lanes,
+        presets: proposal.presets,
+      },
+      rendered: renderedDocument,
+    },
+    summaryText,
+    diffText,
+    written: write,
+  }
+}
+
+function formatAuthorRoutingOutput(result: Awaited<ReturnType<typeof buildAuthorRoutingPreview>>) {
+  return [
+    "Summary",
+    result.summaryText,
+    "",
+    "Diff",
+    result.diffText,
+    "",
+    "Result",
+    `Target: ${result.preview.path}`,
+    `Operation: ${result.preview.operation}`,
+    `Written: ${result.written ? "yes" : "no"}`,
+  ].join("\n")
+}
+
+function formatAuthorRoutingSummary(input: {
+  mode: "superpowers" | "direct"
+  write: boolean
+  operation: "create" | "update"
+  targetPath: string
+  suggestedLanes: string[]
+  proposal: ReturnType<typeof buildRoutingProposal>
+}) {
+  const lanes = input.suggestedLanes.length > 0 ? input.suggestedLanes.join(", ") : "none"
+  const profiles = Object.keys(input.proposal.profiles).join(", ")
+  const presets = Object.keys(input.proposal.presets).join(", ")
+
+  return [
+    `Routing authoring ${input.write ? "write" : "preview"}`,
+    `Mode: ${input.mode}`,
+    `Operation: ${input.operation}`,
+    `Target: ${input.targetPath}`,
+    `Detected lanes: ${lanes}`,
+    `Profiles: ${profiles}`,
+    `Presets: ${presets}`,
+  ].join("\n")
+}
+
+function formatAuthorRoutingDiff(input: {
+  previousRenderedDocument: string
+  renderedDocument: string
+  operation: "create" | "update"
+  targetPath: string
+}) {
+  return [
+    `Target: ${input.targetPath}`,
+    `Operation: ${input.operation}`,
+    ...formatRenderedDocumentDiff(input.previousRenderedDocument, input.renderedDocument),
+  ].join("\n")
+}
+
+function formatRenderedDocumentDiff(previousRenderedDocument: string, renderedDocument: string) {
+  const previousLines = previousRenderedDocument.length > 0 ? previousRenderedDocument.trimEnd().split("\n") : []
+  const nextLines = renderedDocument.trimEnd().split("\n")
+
+  if (previousLines.length === 0) {
+    return nextLines.map((line) => `+ ${line}`)
+  }
+
+  const diffLines: string[] = []
+  const linePairs = buildLineDiff(previousLines, nextLines)
+
+  for (const pair of linePairs) {
+    if (pair.type === "unchanged") {
+      diffLines.push(`  ${pair.line}`)
+      continue
+    }
+
+    if (pair.type === "removed") {
+      diffLines.push(`- ${pair.line}`)
+      continue
+    }
+
+    diffLines.push(`+ ${pair.line}`)
+  }
+
+  return diffLines
+}
+
+function buildLineDiff(previousLines: string[], nextLines: string[]) {
+  const lcs = Array.from({ length: previousLines.length + 1 }, () => Array<number>(nextLines.length + 1).fill(0))
+
+  for (let previousIndex = previousLines.length - 1; previousIndex >= 0; previousIndex--) {
+    for (let nextIndex = nextLines.length - 1; nextIndex >= 0; nextIndex--) {
+      lcs[previousIndex][nextIndex] = previousLines[previousIndex] === nextLines[nextIndex]
+        ? lcs[previousIndex + 1][nextIndex + 1] + 1
+        : Math.max(lcs[previousIndex + 1][nextIndex], lcs[previousIndex][nextIndex + 1])
+    }
+  }
+
+  const diffLines: Array<
+    | { type: "unchanged"; line: string }
+    | { type: "removed"; line: string }
+    | { type: "added"; line: string }
+  > = []
+
+  let previousIndex = 0
+  let nextIndex = 0
+
+  while (previousIndex < previousLines.length && nextIndex < nextLines.length) {
+    if (previousLines[previousIndex] === nextLines[nextIndex]) {
+      diffLines.push({ type: "unchanged", line: previousLines[previousIndex] })
+      previousIndex++
+      nextIndex++
+      continue
+    }
+
+    if (lcs[previousIndex + 1][nextIndex] >= lcs[previousIndex][nextIndex + 1]) {
+      diffLines.push({ type: "removed", line: previousLines[previousIndex] })
+      previousIndex++
+      continue
+    }
+
+    diffLines.push({ type: "added", line: nextLines[nextIndex] })
+    nextIndex++
+  }
+
+  while (previousIndex < previousLines.length) {
+    diffLines.push({ type: "removed", line: previousLines[previousIndex] })
+    previousIndex++
+  }
+
+  while (nextIndex < nextLines.length) {
+    diffLines.push({ type: "added", line: nextLines[nextIndex] })
+    nextIndex++
+  }
+
+  return diffLines
 }
 
 function formatCompatibilityWarning(result: SuperpowersCompatibilityResult | null) {
@@ -391,11 +672,15 @@ function joinStderr(parts: Array<string | undefined>) {
   return parts.filter((part): part is string => Boolean(part && part.length > 0)).join("\n")
 }
 
-function isDirectOpenCodeWorkflow(
+function isDirectWorkflowHostSupported(
   config: { workflow: ResolvedControlPlane["config"]["workflow"] },
   host: CliHost | SupportedSuperpowersHost,
 ) {
-  return config.workflow.kind === "direct" && host === "opencode"
+  if (config.workflow.kind !== "direct") {
+    return false
+  }
+
+  return host === "opencode" || host === "codex" || host === "qwen"
 }
 
 function assertWorkflowSupport(
@@ -407,11 +692,11 @@ function assertWorkflowSupport(
     return
   }
 
-  if (host !== "opencode") {
-    throw new Error("Direct workflow is currently only supported for --host opencode")
+  if (command === "status" || command === "doctor" || command === "sync") {
+    return
   }
 
-  if (command === "status" || command === "doctor" || command === "explain" || command === "sync") {
+  if (command === "explain" && host !== "qwen") {
     return
   }
 
@@ -446,7 +731,7 @@ function maybeResolveCompatibility(
   host: CliHost,
   resolve: () => Promise<SuperpowersCompatibilityResult | null>,
 ) {
-  return isDirectOpenCodeWorkflow(config, host) ? Promise.resolve(null) : resolve()
+  return isDirectWorkflowHostSupported(config, host) ? Promise.resolve(null) : resolve()
 }
 
 function toRouterConfig(
@@ -465,10 +750,41 @@ function toRouterConfig(
       ...(activePreset.profiles ?? {}),
     },
     lanes: config.lanes,
+    availableLanes: laneState?.allowedLanes ?? activePreset.usesLanes ?? [],
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
     effectiveLane: laneState?.effectiveLane ?? config.settings.defaultLane ?? activePreset.defaultLane,
     superpowersCompatibility: config.settings.superpowersCompatibility,
+  }
+}
+
+function buildOpenCodeCodexFastRuntimeDiagnostics(
+  cwd: string,
+  config: ResolvedControlPlane["config"],
+  laneState: ResolvedControlPlane["laneState"] | undefined,
+  deps: CliDeps,
+) {
+  const manifestPath = path.join(cwd, RUNTIME_AGENT_METADATA_DIRECTORY, RUNTIME_AGENT_METADATA_FILE)
+  const built = deps.buildArtifacts(toRouterConfig(config, laneState), config.settings)
+  const runtimeMetadataArtifact = built.commands.find((artifact) => (
+    artifact.directory === RUNTIME_AGENT_METADATA_DIRECTORY
+    && artifact.fileName === RUNTIME_AGENT_METADATA_FILE
+  ))
+
+  if (!runtimeMetadataArtifact || !isOpenCodeRuntimeMetadataContent(runtimeMetadataArtifact.content)) {
+    return {
+      manifestPath,
+      hasEnabledAgents: false,
+    }
+  }
+
+  const parsed = JSON.parse(runtimeMetadataArtifact.content) as {
+    agents: Record<string, { codexFast: boolean }>
+  }
+
+  return {
+    manifestPath,
+    hasEnabledAgents: Object.values(parsed.agents).some((agent) => agent.codexFast),
   }
 }
 
@@ -527,6 +843,7 @@ async function getExpectedArtifacts(
       packageVersion: "0.0.0",
       includeConfig: false,
       configArtifactPath: toProjectRelativePath(cwd, path.join(cwd, "oh-my-superagents.config.jsonc")),
+      routerConfig,
       controlPlaneSettings: config.settings,
     }).files
 
@@ -537,6 +854,17 @@ async function getExpectedArtifacts(
   }
 
   if (host === "qwen") {
+    if (routerConfig.workflow.kind === "direct") {
+      const built = await deps.buildQwenArtifacts(routerConfig, {
+        cwd,
+        controlPlaneSettings: config.settings,
+      })
+
+      return [...built.agents, ...built.commands]
+        .map((artifact) => path.join(cwd, artifact.directory, artifact.fileName))
+        .sort()
+    }
+
     const built = await deps.buildQwenArtifacts(routerConfig, {
       cwd,
       controlPlaneSettings: config.settings,
@@ -558,6 +886,7 @@ const OWNED_ARTIFACT_RULES: Record<CliHost, Array<{ directory: string; extension
   opencode: [
     { directory: ".opencode/agents", extension: ".md" },
     { directory: ".opencode/commands", extension: ".md" },
+    { directory: RUNTIME_AGENT_METADATA_DIRECTORY, extension: ".json" },
   ],
   codex: [
     { directory: ".codex/agents", extension: ".toml" },
@@ -614,6 +943,7 @@ function removeCodexMarketplaceEntry(content: string) {
 async function buildCodexLifecycleFiles(
   cwd: string,
   configPath: string,
+  routerConfig: Awaited<ReturnType<typeof loadRouterConfig>>["config"],
   controlPlaneSettings: ResolvedControlPlane["config"]["settings"],
   deps: CliDeps,
 ) {
@@ -626,6 +956,7 @@ async function buildCodexLifecycleFiles(
     includeConfig: false,
     configArtifactPath: toProjectRelativePath(cwd, configPath),
     existingMarketplaceContent,
+    routerConfig,
     controlPlaneSettings,
   }).files
 }
@@ -751,6 +1082,10 @@ async function discoverOwnedArtifacts(
       }
 
       const filePath = path.join(directory, entry)
+      const isOpenCodeRuntimeMetadata =
+        host === "opencode"
+        && rule.directory === RUNTIME_AGENT_METADATA_DIRECTORY
+        && entry === RUNTIME_AGENT_METADATA_FILE
 
       try {
         const stats = await deps.artifactStat(filePath)
@@ -759,8 +1094,15 @@ async function discoverOwnedArtifacts(
         }
 
         const content = await deps.readArtifactFile(filePath)
-        if (!hasArtifactOwnershipMarker(content)) {
-          continue
+
+        if (isOpenCodeRuntimeMetadata) {
+          if (!isOpenCodeRuntimeMetadataContent(content)) {
+            continue
+          }
+        } else {
+          if (!hasArtifactOwnershipMarker(content)) {
+            continue
+          }
         }
 
         discovered.add(filePath)
@@ -827,7 +1169,11 @@ async function inspectArtifacts(cwd: string, filePaths: string[], host: CliHost,
         )
       }
 
-      return state.present
+      return state.present && (
+        ownedPresent.has(state.filePath)
+        || unverifiedDirectories.has(path.dirname(state.filePath))
+        || unverifiedFiles.has(state.filePath)
+      )
     })
     .map((state) => state.filePath)
   const present = new Set(expectedPresent)
@@ -861,6 +1207,19 @@ function formatArtifactInspection(artifacts: Awaited<ReturnType<typeof inspectAr
     missing: artifacts.missing,
     ...(artifacts.discoveryWarnings ? { discoveryWarnings: artifacts.discoveryWarnings } : {}),
   }
+}
+
+function filterRenderedOpenCodeCommandsForWorkflow(
+  rendered: Record<string, string[]>,
+  workflow: ResolvedControlPlane["config"]["workflow"],
+) {
+  if (workflow.kind !== "direct") {
+    return rendered
+  }
+
+  return Object.fromEntries(
+    DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS.map((commandKey) => [commandKey, rendered[commandKey]]),
+  )
 }
 
 async function writePreparedConfig(
@@ -921,7 +1280,7 @@ async function materializeCodexLifecycle(
   controlPlaneSettings: ResolvedControlPlane["config"]["settings"],
   deps: CliDeps,
 ) {
-  const lifecycleFiles = await buildCodexLifecycleFiles(cwd, configPath, controlPlaneSettings, deps)
+  const lifecycleFiles = await buildCodexLifecycleFiles(cwd, configPath, routerConfig, controlPlaneSettings, deps)
   const controlPlaneSkillFiles = lifecycleFiles.filter((file) => file.path.endsWith("/SKILL.md"))
   const scaffoldFiles = lifecycleFiles.filter((file) => !file.path.endsWith("/SKILL.md"))
   const scaffoldWrites = await writeLifecycleFiles(cwd, scaffoldFiles, deps)
@@ -1024,6 +1383,9 @@ async function buildControlPlaneStatus(
       return { state, ...(nextAction ? { nextAction } : {}), artifactSummary }
     })()
     : undefined
+  const subagentExecution = host === "opencode" && resolved.config.workflow.kind === "superpowers"
+    ? summarizeSubagentExecutionDiagnostics(resolved)
+    : undefined
 
   return {
     enabled: resolved.config.settings.enabled,
@@ -1041,6 +1403,7 @@ async function buildControlPlaneStatus(
     compatibility,
     artifacts: formattedArtifacts,
     ...summarizeLaneExplainability(resolved),
+    ...(subagentExecution ? { subagentExecution } : {}),
     ...openCodeStatus,
   }
 }
@@ -1073,6 +1436,9 @@ async function buildControlPlaneDoctor(
       stale: artifacts.stale,
     })
     : undefined
+  const subagentExecution = host === "opencode" && resolved.config.workflow.kind === "superpowers"
+    ? summarizeSubagentExecutionDiagnostics(resolved)
+    : undefined
 
   return {
     activePreset: {
@@ -1086,13 +1452,17 @@ async function buildControlPlaneDoctor(
       prefix: resolved.config.settings.commandPrefix,
       ...(host === "opencode"
         ? {
-          rendered: listRenderedOpenCodeControlPlaneCommands(resolved.config.settings),
+          rendered: filterRenderedOpenCodeCommandsForWorkflow(
+            listRenderedOpenCodeControlPlaneCommands(resolved.config.settings),
+            resolved.config.workflow,
+          ),
         }
         : resolved.config.settings.commands),
     },
     compatibility,
     artifacts: formattedArtifacts,
     ...summarizeLaneExplainability(resolved),
+    ...(subagentExecution ? { subagentExecution } : {}),
     ...(artifactSummary ? { artifactSummary } : {}),
     ...(host === "opencode"
       ? {
@@ -1101,6 +1471,7 @@ async function buildControlPlaneDoctor(
             resolved.activePreset.key,
             resolved.trace?.activePresetDefinition?.preset,
           ),
+          codexFastRuntime: buildOpenCodeCodexFastRuntimeDiagnostics(cwd, resolved.config, resolved.laneState, deps),
         }
       : {}),
   }
@@ -1118,6 +1489,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       command !== "sync"
       && command !== "explain"
       && command !== "bootstrap"
+      && command !== "author"
       && command !== "status"
       && command !== "doctor"
       && command !== "use"
@@ -1145,12 +1517,37 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       return {
         exitCode: result.syncResult.exitCode,
         stdout: JSON.stringify(result, null, 2),
-        stderr: result.compatibility.shouldBlock
+        stderr: result.compatibility?.shouldBlock
           ? formatCompatibilityBlock(result.compatibility)
           : joinStderr([
             formatCompatibilityWarning(result.compatibility),
             ...result.syncResult.warnings,
           ]),
+      }
+    }
+
+    if (command === "author") {
+      if (positionals[0] !== "routing") {
+        return { exitCode: 1, stdout: "", stderr: "Unknown author subcommand" }
+      }
+
+      const mode = getStringFlag(flags, "--mode")
+      if (!isAuthorRoutingMode(mode)) {
+        return { exitCode: 1, stdout: "", stderr: "Missing or invalid --mode (supported: superpowers, direct)" }
+      }
+
+      const modelsPath = getStringFlag(flags, "--models")
+      if (!modelsPath) {
+        return { exitCode: 1, stdout: "", stderr: "Missing required --models" }
+      }
+
+      const write = flags.get("--write") === true
+      const output = await buildAuthorRoutingPreview(cwd, explicitPath, mode, modelsPath, write, deps)
+
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify(output, null, 2),
+        stderr: formatAuthorRoutingOutput(output),
       }
     }
 
@@ -1186,7 +1583,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
     if (command === "explain") {
       const loaded = await deps.loadConfig({ cwd, explicitPath })
-      const resolved = host === "opencode" || (host === "codex" && runtimeLane)
+      const shouldResolveExplainControlPlane = host === "opencode"
+        || (host === "codex" && (runtimeLane !== undefined || loaded.config.workflow.kind === "direct"))
+      const resolved = shouldResolveExplainControlPlane
         ? await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
         : null
       const explainConfig = resolved?.config ?? loaded.config

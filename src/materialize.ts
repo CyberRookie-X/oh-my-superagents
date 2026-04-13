@@ -4,6 +4,8 @@ import {
   AUXILIARY_MARKER_PREFIX,
   CONTROL_PLANE_MARKER_PREFIX,
   MARKER_TEXT,
+  RUNTIME_AGENT_METADATA_DIRECTORY,
+  RUNTIME_AGENT_METADATA_FILE,
   type GeneratedArtifact,
 } from "./opencode.js"
 
@@ -37,8 +39,16 @@ export type MaterializeArtifactsResult = {
 const CODEX_SKILL_FILE_NAME = "SKILL.md"
 const CONTROL_PLANE_LOGICAL_COMMANDS = new Set<ControlPlaneCommandKey>(CONTROL_PLANE_COMMAND_KEYS)
 const AUXILIARY_HELPER_NAME = "temporary-disable"
+const CODEX_DIRECT_SKILL_MARKER_PREFIX = "oms-direct:"
+const CODEX_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
 const OPENCODE_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["sp-", "ai-"])
 const OPENCODE_ROUTER_OWNED_AGENT_PREFIXES = new Set(["spr-", "rt-"])
+const QWEN_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["oms-", "ai-"])
+const QWEN_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
 
 function getTargetDirectory(cwd: string, directory: string) {
   return path.join(cwd, directory)
@@ -98,6 +108,49 @@ function isOpenCodeRouterOwnedFile(directory: string, fileName: string, content:
   return false
 }
 
+function isCodexRouterOwnedFile(directory: string, fileName: string, content: string) {
+  if (directory.endsWith(`${path.sep}.codex${path.sep}agents`)) {
+    return isPrefixOwned(fileName, content, CODEX_ROUTER_OWNED_AGENT_PREFIXES)
+  }
+
+  return false
+}
+
+function isQwenRouterOwnedFile(directory: string, fileName: string, content: string) {
+  if (directory.endsWith(`${path.sep}.qwen${path.sep}commands`)) {
+    return isPrefixOwned(fileName, content, QWEN_ROUTER_OWNED_COMMAND_PREFIXES)
+  }
+
+  if (directory.endsWith(`${path.sep}.qwen${path.sep}agents`)) {
+    return isPrefixOwned(fileName, content, QWEN_ROUTER_OWNED_AGENT_PREFIXES)
+  }
+
+  return false
+}
+
+function isOpenCodeRuntimeMetadataFile(filePath: string) {
+  return filePath.endsWith(`${path.sep}${RUNTIME_AGENT_METADATA_DIRECTORY.replace(/\//g, path.sep)}${path.sep}${RUNTIME_AGENT_METADATA_FILE}`)
+}
+
+export function isOpenCodeRuntimeMetadataContent(content: string) {
+  try {
+    const parsed = JSON.parse(content) as unknown
+    if (!isRecord(parsed) || !isRecord(parsed.agents)) {
+      return false
+    }
+
+    return Object.values(parsed.agents).every((entry) => {
+      if (!isRecord(entry) || typeof entry.profile !== "string" || typeof entry.codexFast !== "boolean") {
+        return false
+      }
+
+      return entry.profiles === undefined || (Array.isArray(entry.profiles) && entry.profiles.every((value) => typeof value === "string"))
+    })
+  } catch {
+    return false
+  }
+}
+
 function parseControlPlaneOwnership(content: string) {
   if (!hasArtifactOwnershipMarker(content)) {
     return undefined
@@ -153,6 +206,31 @@ function parseAuxiliaryOwnership(content: string) {
   }
 }
 
+function parseCodexDirectSkillOwnership(content: string) {
+  if (!hasArtifactOwnershipMarker(content)) {
+    return undefined
+  }
+
+  const escapedPrefix = CODEX_DIRECT_SKILL_MARKER_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const match = content.match(
+    new RegExp(
+      `<!-- ${escapedPrefix} stage=(1|2); host=(codex); artifact=(skill); intent=([a-z0-9-]+); rendered-name=([a-z0-9-]+) -->`,
+    ),
+  )
+
+  if (!match) {
+    return undefined
+  }
+
+  return {
+    stage: match[1] as "1" | "2",
+    host: match[2] as "codex",
+    artifact: match[3] as "skill",
+    intent: match[4],
+    renderedName: match[5],
+  }
+}
+
 function isSameControlPlaneOwnership(leftContent: string, rightContent: string) {
   const left = parseControlPlaneOwnership(leftContent)
   const right = parseControlPlaneOwnership(rightContent)
@@ -187,6 +265,11 @@ function isCodexOmsControlPlaneSkillContent(content: string) {
 
 function isCodexOmsAuxiliarySkillContent(content: string) {
   const ownership = parseAuxiliaryOwnership(content)
+  return ownership?.stage === "1" && ownership.host === "codex" && ownership.artifact === "skill"
+}
+
+function isCodexDirectSkillContent(content: string) {
+  const ownership = parseCodexDirectSkillOwnership(content)
   return ownership?.stage === "1" && ownership.host === "codex" && ownership.artifact === "skill"
 }
 
@@ -226,6 +309,17 @@ function isCodexOmsAuxiliarySkillFile(filePath: string, content: string) {
   )
 }
 
+function isCodexDirectSkillFile(filePath: string, content: string) {
+  const ownership = parseCodexDirectSkillOwnership(content)
+
+  return (
+    path.basename(filePath) === CODEX_SKILL_FILE_NAME
+    && filePath.includes(`${path.sep}plugins${path.sep}oh-my-superagents-codex${path.sep}skills${path.sep}`)
+    && isCodexDirectSkillContent(content)
+    && path.basename(path.dirname(filePath)) === ownership?.renderedName
+  )
+}
+
 function isCodexOmsControlPlaneSkillArtifact(artifact: GeneratedArtifact) {
   return (
     artifact.fileName === CODEX_SKILL_FILE_NAME
@@ -239,6 +333,14 @@ function isCodexOmsAuxiliarySkillArtifact(artifact: GeneratedArtifact) {
     artifact.fileName === CODEX_SKILL_FILE_NAME
     && artifact.directory.startsWith("plugins/oh-my-superagents-codex/skills/")
     && isCodexOmsAuxiliarySkillContent(artifact.content)
+  )
+}
+
+function isCodexDirectSkillArtifact(artifact: GeneratedArtifact) {
+  return (
+    artifact.fileName === CODEX_SKILL_FILE_NAME
+    && artifact.directory.startsWith("plugins/oh-my-superagents-codex/skills/")
+    && isCodexDirectSkillContent(artifact.content)
   )
 }
 
@@ -271,9 +373,27 @@ function isArtifactOwnedByCurrentContract(
     )
   }
 
+  if (isCodexDirectSkillArtifact(artifact)) {
+    const nextOwnership = parseCodexDirectSkillOwnership(artifact.content)
+    const existingOwnership = parseCodexDirectSkillOwnership(existingContent)
+
+    return (
+      isCodexDirectSkillFile(existingPath, existingContent)
+      && nextOwnership !== undefined
+      && existingOwnership !== undefined
+      && nextOwnership.host === existingOwnership.host
+      && nextOwnership.artifact === existingOwnership.artifact
+      && nextOwnership.intent === existingOwnership.intent
+    )
+  }
+
   if (artifact.directory === ".qwen/commands" && isQwenOmsControlPlaneCommand(artifact.content)) {
     return isQwenOmsControlPlaneFile(existingPath, existingContent)
       && isSameControlPlaneOwnership(artifact.content, existingContent)
+  }
+
+  if (artifact.directory === RUNTIME_AGENT_METADATA_DIRECTORY && artifact.fileName === RUNTIME_AGENT_METADATA_FILE) {
+    return isOpenCodeRuntimeMetadataFile(existingPath) && isOpenCodeRuntimeMetadataContent(existingContent)
   }
 
   return isPrefixOwned(artifact.fileName, existingContent, new Set([artifact.ownerPrefix]))
@@ -289,8 +409,14 @@ export async function materializeArtifacts(
   const desiredFinalPaths = new Set<string>()
   const directoryPrefixes = new Map<string, Set<string>>()
   const opencodeOmsCommandDirectories = new Set<string>()
+  const opencodeRuntimeMetadataDirectories = new Set<string>()
   const qwenOmsCommandDirectories = new Set<string>()
   const codexSkillCleanupRoots = new Map<string, Set<string>>()
+  const openCodeRuntimeMetadataPath = path.join(
+    input.cwd,
+    RUNTIME_AGENT_METADATA_DIRECTORY,
+    RUNTIME_AGENT_METADATA_FILE,
+  )
 
   try {
     for (const artifact of input.artifacts) {
@@ -308,11 +434,19 @@ export async function materializeArtifacts(
         opencodeOmsCommandDirectories.add(targetDirectory)
       }
 
+      if (artifact.directory === RUNTIME_AGENT_METADATA_DIRECTORY && artifact.fileName === RUNTIME_AGENT_METADATA_FILE) {
+        opencodeRuntimeMetadataDirectories.add(targetDirectory)
+      }
+
       if (artifact.directory === ".qwen/commands" && isQwenOmsControlPlaneCommand(artifact.content)) {
         qwenOmsCommandDirectories.add(targetDirectory)
       }
 
-      if (isCodexOmsControlPlaneSkillArtifact(artifact) || isCodexOmsAuxiliarySkillArtifact(artifact)) {
+      if (
+        isCodexOmsControlPlaneSkillArtifact(artifact)
+        || isCodexOmsAuxiliarySkillArtifact(artifact)
+        || isCodexDirectSkillArtifact(artifact)
+      ) {
         const cleanupRoot = path.dirname(targetDirectory)
         const desiredSkillDirectories = codexSkillCleanupRoots.get(cleanupRoot) ?? new Set<string>()
         desiredSkillDirectories.add(path.basename(targetDirectory))
@@ -362,11 +496,14 @@ export async function materializeArtifacts(
           opencodeOmsCommandDirectories.has(directory)
           && isOpenCodeOmsControlPlaneFile(fullPath, content)
         )
+        || (opencodeRuntimeMetadataDirectories.has(directory) && isOpenCodeRuntimeMetadataFile(fullPath))
         || (
           qwenOmsCommandDirectories.has(directory)
           && isQwenOmsControlPlaneFile(fullPath, content)
         )
         || isOpenCodeRouterOwnedFile(directory, entry, content)
+        || isCodexRouterOwnedFile(directory, entry, content)
+        || isQwenRouterOwnedFile(directory, entry, content)
         || isPrefixOwned(entry, content, prefixes)
 
       if (!isOwnedByDirectoryContract) {
@@ -381,6 +518,22 @@ export async function materializeArtifacts(
 
         await input.fs.unlink(fullPath)
         removed.push(fullPath)
+      } catch (error) {
+        warnings.push(String(error))
+      }
+    }
+  }
+
+  if (!desiredFinalPaths.has(openCodeRuntimeMetadataPath)) {
+    const content = await input.fs.readFile(openCodeRuntimeMetadataPath).catch(() => "")
+
+    if (isOpenCodeRuntimeMetadataFile(openCodeRuntimeMetadataPath) && isOpenCodeRuntimeMetadataContent(content)) {
+      try {
+        const stats = await input.fs.stat(openCodeRuntimeMetadataPath)
+        if (stats.isFile()) {
+          await input.fs.unlink(openCodeRuntimeMetadataPath)
+          removed.push(openCodeRuntimeMetadataPath)
+        }
       } catch (error) {
         warnings.push(String(error))
       }
@@ -402,7 +555,11 @@ export async function materializeArtifacts(
 
       const skillPath = path.join(cleanupRoot, entry, CODEX_SKILL_FILE_NAME)
       const content = await input.fs.readFile(skillPath).catch(() => "")
-      if (!isCodexOmsControlPlaneSkillFile(skillPath, content) && !isCodexOmsAuxiliarySkillFile(skillPath, content)) {
+      if (
+        !isCodexOmsControlPlaneSkillFile(skillPath, content)
+        && !isCodexOmsAuxiliarySkillFile(skillPath, content)
+        && !isCodexDirectSkillFile(skillPath, content)
+      ) {
         continue
       }
 

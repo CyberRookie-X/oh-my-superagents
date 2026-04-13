@@ -72,6 +72,200 @@ describe("buildQwenArtifacts", () => {
     },
   }
 
+  it("renders direct-mode Qwen agents and commands for intents", async () => {
+    const artifacts = await buildQwenArtifacts(
+      {
+        workflow: {
+          kind: "direct",
+          intents: {
+            plan: { label: "Plan" },
+            build: { label: "Build" },
+          },
+        },
+        profiles: {
+          planner: { model: "openai/gpt-5" },
+          builder: { model: "gpt-5.4" },
+        },
+        routes: { plan: "planner" },
+        defaultRoute: "builder",
+      } as never,
+      {
+        cwd: "/workspace/project",
+        homeDir: "/home/test",
+        controlPlaneSettings,
+      },
+    )
+
+    expect(artifacts.commands.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["ai-plan.md", "ai-build.md"]),
+    )
+    expect(artifacts.agents.map((item) => item.fileName)).toEqual(
+      expect.arrayContaining(["rt-plan.md", "rt-build.md"]),
+    )
+
+    const planCommand = artifacts.commands.find((item) => item.fileName === "ai-plan.md")
+    expect(planCommand?.content).not.toContain("agent: rt-plan")
+    expect(planCommand?.content).toContain("Use the `rt-plan` direct-mode agent for this intent.")
+    expect(planCommand?.content).toContain("- intent: plan")
+    expect(planCommand?.content).toContain("- arguments: {{args}}")
+  })
+
+  it("rejects invalid direct intent ids before generating Qwen artifacts", async () => {
+    await expect(
+      buildQwenArtifacts(
+        {
+          workflow: {
+            kind: "direct",
+            intents: {
+              "foo/bar": { label: "Foo" },
+            },
+          },
+          profiles: {
+            planner: { model: "openai/gpt-5" },
+          },
+          routes: {
+            "foo/bar": "planner",
+          },
+          defaultRoute: "planner",
+        } as never,
+        {
+          cwd: "/workspace/project",
+          homeDir: "/home/test",
+          controlPlaneSettings,
+        },
+      ),
+    ).rejects.toThrow(/invalid direct intent id|foo\/bar/i)
+  })
+
+  it("skips upstream skill discovery and fail-closed behavior in direct mode", async () => {
+    await expect(
+      buildQwenArtifacts(
+        {
+          workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+          profiles: { planner: { model: "openai/gpt-5" } },
+          routes: { plan: "planner" },
+          defaultRoute: "planner",
+        } as never,
+        {
+          cwd: "/workspace/project",
+          homeDir: "/home/test",
+          controlPlaneSettings,
+          readDirectoryBasenames: async () => [],
+        },
+      ),
+    ).resolves.toBeDefined()
+  })
+
+  it("keeps direct-mode commands when includeAgents is false", async () => {
+    const artifacts = await buildQwenArtifacts(
+      {
+        workflow: {
+          kind: "direct",
+          intents: {
+            plan: { label: "Plan" },
+          },
+        },
+        profiles: {
+          planner: { model: "openai/gpt-5" },
+        },
+        routes: { plan: "planner" },
+        defaultRoute: "planner",
+      } as never,
+      {
+        cwd: "/workspace/project",
+        homeDir: "/home/test",
+        controlPlaneSettings,
+        includeAgents: false,
+      },
+    )
+
+    expect(artifacts.agents).toEqual([])
+    expect(artifacts.commands.map((item) => item.fileName)).toContain("ai-plan.md")
+  })
+
+  it("keeps direct-mode commands lightweight when includeAgents is false", async () => {
+    const artifacts = await buildQwenArtifacts(
+      {
+        workflow: {
+          kind: "direct",
+          intents: {
+            plan: { label: "Plan" },
+          },
+        },
+        profiles: {},
+        routes: { plan: "missing-profile" },
+        defaultRoute: "missing-profile",
+      } as never,
+      {
+        cwd: "/workspace/project",
+        homeDir: "/home/test",
+        controlPlaneSettings,
+        includeAgents: false,
+      },
+    )
+
+    expect(artifacts.agents).toEqual([])
+    expect(artifacts.commands.map((item) => item.fileName)).toContain("ai-plan.md")
+  })
+
+  it("omits direct-mode qwen use and disable entrypoints", async () => {
+    const artifacts = await buildQwenArtifacts(
+      {
+        workflow: {
+          kind: "direct",
+          intents: {
+            plan: { label: "Plan" },
+          },
+        },
+        profiles: {
+          planner: { model: "openai/gpt-5" },
+        },
+        routes: { plan: "planner" },
+        defaultRoute: "planner",
+      } as never,
+      {
+        cwd: "/workspace/project",
+        homeDir: "/home/test",
+        controlPlaneSettings,
+      },
+    )
+
+    const fileNames = artifacts.commands.map((item) => item.fileName)
+
+    expect(fileNames).not.toContain("oms-use.md")
+    expect(fileNames).not.toContain("oms-u.md")
+    expect(fileNames).not.toContain("oms-off.md")
+    expect(fileNames).not.toContain("oms-o.md")
+  })
+
+  it("fails fast when a direct-mode command collides with a control-plane command", async () => {
+    await expect(
+      buildQwenArtifacts(
+        {
+          workflow: {
+            kind: "direct",
+            intents: {
+              sync: { label: "Sync" },
+            },
+          },
+          profiles: {
+            planner: { model: "openai/gpt-5" },
+          },
+          routes: { sync: "planner" },
+          defaultRoute: "planner",
+        } as never,
+        {
+          cwd: "/workspace/project",
+          homeDir: "/home/test",
+          controlPlaneSettings: {
+            ...controlPlaneSettings,
+            commandPrefix: "ai",
+          },
+        },
+      ),
+    ).rejects.toThrow(/ai-sync\.md|Duplicate Qwen command file rendering/i)
+  })
+
   it("materializes the required fixed Qwen wrapper agent names", async () => {
     const artifacts = await buildQwenArtifacts(
       {

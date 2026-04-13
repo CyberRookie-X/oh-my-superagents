@@ -4,20 +4,20 @@
 
 架构说明：[English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen 上提供一等公民级别的 `superpowers` 支持，并包含一个实验性的 OpenCode 优先 direct mode 切片。
+`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖这三个宿主的实验性、宿主原生 direct mode。
 
 ## 支持矩阵
 
 | 能力 | OpenCode | Codex | Qwen | Claude Code |
 | --- | --- | --- | --- | --- |
 | `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 暂不计划 |
-| Direct mode | 实验性支持 | 暂未实现 | 暂未实现 | 暂不计划 |
+| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂不计划 |
 | OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 暂不计划 |
 | 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂不计划 |
 | 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂不计划 |
 | 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | 无 |
 | 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂不计划 |
-| `codexFast` | 部分支持 | 完整支持 | 暂未实现 | 暂不计划 |
+| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂不计划 |
 
 支持等级说明：
 
@@ -30,7 +30,8 @@
 补充说明：
 
 - 临时停用 helper 是宿主本地、会话级的提示便捷功能，不会改变持久化的 OMS 状态。
-- `codexFast` 在 Codex 上是完整支持，在 OpenCode 上仍属于分阶段/部分支持；Qwen 目前还不支持。
+- `codexFast` 在 OpenCode 和 Codex 上都属于完整支持；Qwen 目前还不支持。
+- Direct mode 会保持宿主原生形态：OpenCode 生成 commands + agents，Codex 生成 agent TOML + 本地 bootstrap skills，Qwen 生成项目内 commands + agents。
 
 ## 实现厚度
 
@@ -56,7 +57,7 @@
 ## 项目边界
 
 `oh-my-superagents` 正在演进成一个更广义的路由与控制平面产品。
-当前它仍然在已支持宿主上提供一等公民级别的 `superpowers` 支持，而首个通用切片则是实验性的 OpenCode direct mode。
+当前它仍然在已支持宿主上提供一等公民级别的 `superpowers` 支持，而首个通用切片现在已经扩展为覆盖 OpenCode、Codex、Qwen 的实验性宿主原生 direct mode。
 
 它不是：
 
@@ -71,40 +72,44 @@
 - packaged plugin entrypoints
 - Stage 1 OMS control plane
 - Stage 2 Qwen adapter
-- 实验性的 OpenCode direct mode 切片
+- OpenCode、Codex、Qwen 上的实验性 direct mode 切片
 - 当前 `oh-my-superagents/library` 导出面
 
 当前结论：
 
 - OpenCode：支持 `superpowers` 工作流路由，也支持实验性的 direct mode 切片
-- Codex：支持 `superpowers` 工作流路由
-- Qwen：支持，但目前仍是有边界的 Stage 2 `superpowers` 工作流形态
+- Codex：支持 `superpowers` 工作流路由，也支持实验性的 direct mode 切片
+- Qwen：支持，但目前仍是有边界的 Stage 2 `superpowers` 工作流形态，同时也支持实验性的 direct mode 切片
 - Claude Code：暂不计划，因为原生能力已经足够强
 
 ## 它能做什么
 
 - 从项目级和全局级位置读取分层的 `oh-my-superagents.config.jsonc`
-- 在已支持宿主上解析内置 `superpowers` phase 路由，并在 OpenCode 上解析用户定义的 direct intent 路由
+- 在已支持宿主上解析内置 `superpowers` phase 路由，并在 OpenCode、Codex、Qwen 上解析用户定义的 direct intent 路由
 - 生成 `.opencode/agents/*.md` 与 `.opencode/commands/*.md`
 - 生成 `.codex/agents/*.toml`
 - 生成 `.qwen/agents/*.md` 与 `.qwen/commands/*.md`
-- 提供 `status`、`use`、`disable`、`sync`、`doctor`、`explain`、`bootstrap` CLI
+- 通过 `author routing` 基于仓库信号和用户提供的模型清单生成路由配置提案
+- 提供 `author routing`、`status`、`use`、`disable`、`sync`、`doctor`、`explain`、`bootstrap` CLI
 - 提供最小 OpenCode plugin 入口用于启动诊断
 
-## OpenCode Direct Mode
+## Direct Mode
 
-首个通用路由切片是 OpenCode 上的实验性 direct workflow。
+首个通用路由切片现在已经扩展为 OpenCode、Codex、Qwen 上的实验性 direct workflow。
 
-- 使用用户定义的 intent，并生成 OpenCode 原生的 `ai-<intent>` commands 与 `rt-<intent>` agents。
-- Direct intent id 只能包含小写字母、数字和 `-`，这样生成的 OpenCode 文件名才合法。
-- 当前只适用于 `--host opencode`。
-- 当前 direct mode 的控制平面支持面为 `status`、`doctor`、`explain`、`sync`。
-- 渲染或解释 direct mode 的 OpenCode 工件时，不依赖 upstream `superpowers`。
+- 使用用户定义的 intent，并保持各宿主自己的原生文件形态，而不是强行做成完全一致。
+- OpenCode 生成 `ai-<intent>` commands 与 `rt-<intent>` agents。
+- Codex 生成 `rt-<intent>.toml` agents，以及位于 `plugins/oh-my-superagents-codex/skills/` 下的 repo-local `ai-<intent>` bootstrap skills。
+- Qwen 生成项目内的 `.qwen/commands/ai-<intent>.md` commands 与 `.qwen/agents/rt-<intent>.md` agents。
+- Direct intent id 只能包含小写字母、数字和 `-`，这样生成的宿主文件名才合法。
+- 当前 direct mode 在 OpenCode、Codex、Qwen 上都支持 `status`、`doctor`、`sync`。
+- `explain --intent` 目前只在 OpenCode 和 Codex 上支持，Qwen 还没有接上。
+- direct mode 不依赖 upstream `superpowers`；与此同时，一等公民级别的 `superpowers` 工作流支持保持不变。
 
 ## 安装
 
 如果使用 `superpowers` workflow mode，请先单独安装 upstream `superpowers`，然后按宿主分别接入。
-如果使用实验性的 OpenCode direct mode，则不要求安装 upstream `superpowers`。
+如果使用 OpenCode、Codex、Qwen 上的实验性 direct mode，则不要求安装 upstream `superpowers`。
 
 按宿主的接入方式：
 
@@ -264,6 +269,18 @@ oh-my-superagents explain --host opencode --phase brainstorming --lane frontend
 }
 ```
 
+## Lane 感知子代理执行
+
+Lane-aware subagent execution 是 `superpowers` 下面的执行层增强，不是另一套工作流体系。在当前切片里，OMS 仍然把主 `/sp-execute` 路径保留在 `superpowers/subagent-driven-development` 上，并在 active preset 通过 `usesLanes` 启用 lanes 时，为 OpenCode 额外生成 `/sp-execute-frontend` 这类 lane-scoped wrapper，以及对应的 `spr-build--frontend` agents。
+
+可通过 `settings.subagentExecution.mode` 控制拆分行为：
+
+- `manual`：只有用户明确要求时才使用 lane-specific 执行
+- `suggest`：先提出拆分方案并等待确认；这是默认值
+- `auto`：在当前执行中自动把任务拆到匹配的 lane helpers 上
+
+这些 lane-scoped helpers 仍然属于现有的 `superpowers` 执行流。它们只是把执行时使用的 lane 更明确地暴露出来，并不会引入新的顶层工作流系统。
+
 ## OMS 控制平面
 
 Stage 1 新增了宿主本地控制平面命令：
@@ -282,6 +299,31 @@ Stage 1 新增了宿主本地控制平面命令：
 - `use` 先按 preset key 匹配，再按唯一 `short` 匹配
 - `disable` 和禁用状态下的 `sync` 只清理**当前宿主**的 OMS 工件，不会去动别的宿主
 - `status` 与 `doctor` 的工件检查也只针对当前宿主
+
+## AI 辅助路由编写
+
+`author routing` 是面向路由配置的 AI 辅助编写能力。它会结合仓库信号与本地模型清单，提出 lane、profile、preset 以及可选的 direct-mode intent 配置建议。它不是自动改写器，也不会静默写入你的配置。
+
+首个切片的命令形态：
+
+```bash
+oh-my-superagents author routing --mode direct --models ./models.jsonc
+```
+
+行为说明：
+
+- `--mode <superpowers|direct>` 为必填。
+- `--models <path>` 在首个切片中为必填，指向本地 JSON 或 JSONC 模型清单。
+- 默认只做预览：命令会输出摘要和 diff，并在 JSON 输出中返回提议的 patch，但不会落盘。
+- 显式传入 `--write` 后，才会在输出相同摘要和 diff 之后写入提议的配置文档。
+- 该切片是 CLI-first、宿主无关的辅助编写能力，用来帮助更快地引导或演进路由配置；最终的模型 id、lane 名称和写入动作仍由用户确认。
+
+示例：
+
+```bash
+oh-my-superagents author routing --mode superpowers --models ./models.jsonc
+oh-my-superagents author routing --mode direct --models ./models.jsonc --write
+```
 
 ## 命令前缀与别名
 
@@ -326,7 +368,7 @@ OpenCode 与 Qwen 的命令文件名来自：
 
 ## Qwen 支持
 
-Stage 2 的 Qwen 支持刻意保持很薄：
+Stage 2 的 Qwen 支持在 `superpowers` workflow mode 下刻意保持很薄：
 
 - 不做重型 bootstrap
 - 不生成 `.qwen/skills`
@@ -343,6 +385,9 @@ Stage 2 的 Qwen 支持刻意保持很薄：
 - `oms-verify`
 - `oms-visual`
 - `oms-web-test`
+
+如果是 Qwen direct mode，OMS 会继续沿用项目内宿主原生形态，但改为生成 `ai-<intent>` commands 与 `rt-<intent>` agents。
+这条 direct-mode 路径不要求 upstream skill discovery，当前支持 `status`、`doctor`、`sync`，但 `explain` 在 Qwen 上仍未支持。
 
 ## Bootstrap
 
@@ -395,6 +440,11 @@ oh-my-superagents sync --host qwen
 
 可用 `--config /absolute/or/relative/path.jsonc` 覆盖默认配置发现。
 
+对于 Qwen，`sync` 会根据当前工作流形态生成不同工件：
+
+- `superpowers` workflow mode：生成 OMS wrapper commands 与 wrapper agents，并继续依赖 upstream skills。
+- direct mode：生成 `ai-<intent>` commands 与 `rt-<intent>` agents，不依赖 upstream skills。
+
 ## 兼容性监控
 
 `oh-my-superagents` 内置了对 upstream `superpowers` 的宿主级兼容性监控。
@@ -440,10 +490,16 @@ oh-my-superagents sync --host qwen
 - `plugins/oh-my-superagents-codex/.codex-plugin/plugin.json`
 - `plugins/oh-my-superagents-codex/skills/*/SKILL.md`
 
+在 `superpowers` workflow mode 下，这些 agent 是固定的 `oms-*` phase agents。
+在 direct mode 下，这些 agent 会变成 `rt-<intent>.toml`，并额外生成对应的 repo-local `ai-<intent>` bootstrap skills。
+
 ### Qwen
 
 - `.qwen/agents/*.md`
 - `.qwen/commands/*.md`
+
+在 `superpowers` workflow mode 下，这些是 OMS wrapper agents 与 wrapper commands，并依赖 upstream skills。
+在 direct mode 下，这些会变成 `rt-<intent>.md` 与 `ai-<intent>.md`，不依赖 upstream skills。
 
 ## 切换回英文
 
