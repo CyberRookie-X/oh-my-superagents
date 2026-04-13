@@ -241,6 +241,27 @@ describe("buildCodexBootstrapFiles", () => {
     )
   })
 
+  it("omits direct-mode Codex use and disable entrypoints", () => {
+    const result = buildCodexBootstrapFiles({
+      packageVersion: "0.1.0",
+      includeConfig: false,
+      routerConfig: {
+        workflow: { kind: "direct", intents: { plan: { label: "Plan" } } },
+        profiles: { planner: { model: "openai/gpt-5" } },
+        routes: { plan: "planner" },
+        defaultRoute: "planner",
+      } as never,
+      controlPlaneSettings: createDefaultControlPlaneConfig().settings,
+    })
+
+    const filePaths = result.files.map((file) => file.path)
+
+    expect(filePaths).not.toContain("plugins/oh-my-superagents-codex/skills/oms-use/SKILL.md")
+    expect(filePaths).not.toContain("plugins/oh-my-superagents-codex/skills/oms-u/SKILL.md")
+    expect(filePaths).not.toContain("plugins/oh-my-superagents-codex/skills/oms-off/SKILL.md")
+    expect(filePaths).not.toContain("plugins/oh-my-superagents-codex/skills/oms-o/SKILL.md")
+  })
+
   it("includes the starter config only when requested", () => {
     const result = buildCodexBootstrapFiles({
       packageVersion: "0.1.0",

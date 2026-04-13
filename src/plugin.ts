@@ -11,6 +11,7 @@ import {
 import { detectOpenCodeSuperpowers } from "./superpowers-detectors.js"
 
 const SERVICE_NAME = "oh-my-superagents"
+const CONFIG_FILE_NAME = "oh-my-superagents.config.jsonc"
 
 type LogLevel = "info" | "warn" | "error"
 type PluginClient = {
@@ -31,7 +32,7 @@ type RuntimeAgentMetadata = {
 
 export const OhMySuperpowersPlugin: Plugin = async ({ client, directory, worktree }) => {
   const log = createPluginLogger(client as PluginClient)
-  const rootDirectory = worktree ?? directory
+  const rootDirectory = await resolvePluginRootDirectory(directory, worktree)
   let compatibilityMode: SuperpowersCompatibilityMode = "warn"
   let shouldReportCompatibility = true
 
@@ -99,6 +100,30 @@ async function readRuntimeAgentMetadata(cwd: string): Promise<RuntimeAgentMetada
   } catch {
     return undefined
   }
+}
+
+async function fileExists(filePath: string) {
+  try {
+    await readFile(filePath, "utf8")
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function resolvePluginRootDirectory(directory: string, worktree?: string) {
+  if (!worktree || directory === worktree) {
+    return directory
+  }
+
+  const localConfigPath = path.join(directory, CONFIG_FILE_NAME)
+  const localRuntimeMetadataPath = path.join(directory, RUNTIME_AGENT_METADATA_DIRECTORY, RUNTIME_AGENT_METADATA_FILE)
+
+  if (await fileExists(localConfigPath) || await fileExists(localRuntimeMetadataPath)) {
+    return directory
+  }
+
+  return worktree
 }
 
 async function reportCompatibilityDiagnostics(input: {

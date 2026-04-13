@@ -235,6 +235,129 @@ describe("OhMySuperpowersPlugin", () => {
     expect(output.options.serviceTier).toBe("fast")
   })
 
+  it("prefers package-local config and runtime metadata in a nested session", async () => {
+    const logs: unknown[] = []
+
+    mocks.loadRouterConfig.mockImplementation(async ({ cwd }: { cwd: string }) => {
+      expect(cwd).toBe("/workspace/project/packages/app")
+      return {
+        path: "/workspace/project/packages/app/oh-my-superagents.config.jsonc",
+        config: createDefaultConfig().config,
+      }
+    })
+    mocks.detectOpenCodeSuperpowers.mockImplementation(async ({ cwd }: { cwd: string }) => {
+      expect(cwd).toBe("/workspace/project/packages/app")
+      return createDetectionResult()
+    })
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (filePath === "/workspace/project/packages/app/oh-my-superagents.config.jsonc") {
+        return JSON.stringify({ local: true })
+      }
+
+      if (filePath === "/workspace/project/packages/app/.opencode/oh-my-superagents/runtime-agent-metadata.json") {
+        return JSON.stringify({
+          agents: {
+            "spr-build": {
+              profile: "build",
+              profiles: ["build"],
+              codexFast: true,
+            },
+          },
+        })
+      }
+
+      throw new Error(`unexpected read: ${filePath}`)
+    })
+
+    const hooks = await OhMySuperpowersPlugin(createPluginInput(logs, {
+      directory: "/workspace/project/packages/app",
+      worktree: "/workspace/project",
+    }))
+    await waitForBackgroundWork()
+
+    const output = {
+      temperature: 0,
+      topP: 1,
+      topK: 40,
+      maxOutputTokens: undefined,
+      options: {},
+    }
+
+    await hooks["chat.params"]?.(
+      {
+        sessionID: "s1",
+        agent: "spr-build",
+        model: {} as never,
+        provider: { source: "config", info: {} as never, options: {} },
+        message: {} as never,
+      },
+      output,
+    )
+
+    expect(output.options.serviceTier).toBe("fast")
+  })
+
+  it("falls back to worktree-root config and runtime metadata when the subdirectory has neither", async () => {
+    mocks.loadRouterConfig.mockImplementation(async ({ cwd }: { cwd: string }) => {
+      expect(cwd).toBe("/workspace/project")
+      return createDefaultConfig()
+    })
+    mocks.detectOpenCodeSuperpowers.mockImplementation(async ({ cwd }: { cwd: string }) => {
+      expect(cwd).toBe("/workspace/project")
+      return createDetectionResult()
+    })
+    mocks.readFile.mockImplementation(async (filePath: string) => {
+      if (filePath === "/workspace/project/packages/app/oh-my-superagents.config.jsonc") {
+        throw new Error("missing local config")
+      }
+
+      if (filePath === "/workspace/project/packages/app/.opencode/oh-my-superagents/runtime-agent-metadata.json") {
+        throw new Error("missing local metadata")
+      }
+
+      if (filePath === "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json") {
+        return JSON.stringify({
+          agents: {
+            "spr-build": {
+              profile: "build",
+              profiles: ["build"],
+              codexFast: true,
+            },
+          },
+        })
+      }
+
+      throw new Error(`unexpected read: ${filePath}`)
+    })
+
+    const hooks = await OhMySuperpowersPlugin(createPluginInput([], {
+      directory: "/workspace/project/packages/app",
+      worktree: "/workspace/project",
+    }))
+    await waitForBackgroundWork()
+
+    const output = {
+      temperature: 0,
+      topP: 1,
+      topK: 40,
+      maxOutputTokens: undefined,
+      options: {},
+    }
+
+    await hooks["chat.params"]?.(
+      {
+        sessionID: "s1",
+        agent: "spr-build",
+        model: {} as never,
+        provider: { source: "config", info: {} as never, options: {} },
+        message: {} as never,
+      },
+      output,
+    )
+
+    expect(output.options.serviceTier).toBe("fast")
+  })
+
   it("does not patch chat params when the current agent is not codexFast-enabled", async () => {
     mocks.readFile.mockResolvedValueOnce(
       JSON.stringify({

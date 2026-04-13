@@ -32,6 +32,7 @@ const PHASE_TO_SKILL = {
 } as const satisfies Record<BuiltInPhase, string>
 
 const SAFE_NAME_PATTERN = /^[a-z0-9-]+$/
+const DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "sync", "doctor"])
 
 export type QwenSkillName = (typeof PHASE_TO_SKILL)[BuiltInPhase]
 
@@ -187,11 +188,18 @@ function renderQwenControlPlaneCommandFile(input: {
   ].join("\n")
 }
 
-function buildQwenCommandArtifacts(settings: QwenControlPlaneSettings): GeneratedArtifact[] {
+function buildQwenCommandArtifacts(
+  settings: QwenControlPlaneSettings,
+  supportedCommands: ReadonlySet<ControlPlaneCommandKey> = new Set(CONTROL_PLANE_COMMAND_KEYS),
+): GeneratedArtifact[] {
   const ownerPrefix = `${settings.commandPrefix}-`
   const seenFileNames = new Map<string, string>()
 
   return CONTROL_PLANE_COMMAND_KEYS.flatMap((commandKey) => {
+    if (!supportedCommands.has(commandKey)) {
+      return []
+    }
+
     const command = settings.commands[commandKey]
     const renderedNames = [command.name, ...command.aliases]
 
@@ -231,7 +239,14 @@ function appendQwenCommandArtifact(commands: GeneratedArtifact[], command: Gener
 }
 
 export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenArtifactsOptions) {
-  const commands = input.controlPlaneSettings ? buildQwenCommandArtifacts(input.controlPlaneSettings) : []
+  const commands = input.controlPlaneSettings
+    ? buildQwenCommandArtifacts(
+        input.controlPlaneSettings,
+        config.workflow?.kind === "direct"
+          ? DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS
+          : new Set(CONTROL_PLANE_COMMAND_KEYS),
+      )
+    : []
 
   if (config.workflow?.kind === "direct") {
     const agents: GeneratedArtifact[] = []

@@ -208,6 +208,36 @@ describe("buildQwenArtifacts", () => {
     expect(artifacts.commands.map((item) => item.fileName)).toContain("ai-plan.md")
   })
 
+  it("omits direct-mode qwen use and disable entrypoints", async () => {
+    const artifacts = await buildQwenArtifacts(
+      {
+        workflow: {
+          kind: "direct",
+          intents: {
+            plan: { label: "Plan" },
+          },
+        },
+        profiles: {
+          planner: { model: "openai/gpt-5" },
+        },
+        routes: { plan: "planner" },
+        defaultRoute: "planner",
+      } as never,
+      {
+        cwd: "/workspace/project",
+        homeDir: "/home/test",
+        controlPlaneSettings,
+      },
+    )
+
+    const fileNames = artifacts.commands.map((item) => item.fileName)
+
+    expect(fileNames).not.toContain("oms-use.md")
+    expect(fileNames).not.toContain("oms-u.md")
+    expect(fileNames).not.toContain("oms-off.md")
+    expect(fileNames).not.toContain("oms-o.md")
+  })
+
   it("fails fast when a direct-mode command collides with a control-plane command", async () => {
     await expect(
       buildQwenArtifacts(

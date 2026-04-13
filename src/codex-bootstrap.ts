@@ -46,6 +46,7 @@ type CodexBootstrapControlPlaneSettings = Pick<ControlPlaneConfig["settings"], "
 
 const SAFE_CODEX_SKILL_SEGMENT_PATTERN = /^[a-z0-9-]+$/
 const CODEX_DIRECT_SKILL_MARKER_PREFIX = "oms-direct:"
+const DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "sync", "doctor"])
 
 const CODEX_CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string> = {
   status: "Show OMS status for Codex in this project.",
@@ -244,10 +245,15 @@ function buildControlPlaneSkillFiles(
   controlPlaneSettings: CodexBootstrapControlPlaneSettings,
   configArtifactPath: string,
   seenSkillNames: Map<string, string>,
+  supportedCommands: ReadonlySet<ControlPlaneCommandKey> = new Set(CONTROL_PLANE_COMMAND_KEYS),
 ) {
   assertSafeCodexSkillSegment(controlPlaneSettings.commandPrefix, "commandPrefix")
 
   return CONTROL_PLANE_COMMAND_KEYS.flatMap((commandKey) => {
+    if (!supportedCommands.has(commandKey)) {
+      return []
+    }
+
     const command = controlPlaneSettings.commands[commandKey]
     const renderedNames = [command.name, ...command.aliases]
 
@@ -367,7 +373,15 @@ export function buildCodexBootstrapFiles(input: {
   const configArtifactPath = input.configArtifactPath ?? buildStarterCodexConfig().path
   const controlPlaneSettings = input.controlPlaneSettings ?? createDefaultControlPlaneConfig().settings
   const seenSkillNames = new Map<string, string>()
-  const controlPlaneSkillFiles = buildControlPlaneSkillFiles(controlPlaneSettings, configArtifactPath, seenSkillNames)
+  const supportedCommands = input.routerConfig?.workflow.kind === "direct"
+    ? DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS
+    : new Set(CONTROL_PLANE_COMMAND_KEYS)
+  const controlPlaneSkillFiles = buildControlPlaneSkillFiles(
+    controlPlaneSettings,
+    configArtifactPath,
+    seenSkillNames,
+    supportedCommands,
+  )
   const directModeSkillFiles = buildDirectModeSkillFiles(input.routerConfig, seenSkillNames)
   const files: CodexBootstrapFile[] = [
     {
