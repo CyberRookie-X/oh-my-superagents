@@ -110,6 +110,33 @@ describe("buildQwenArtifacts", () => {
     expect(planCommand?.content).toContain("- arguments: {{args}}")
   })
 
+  it("rejects invalid direct intent ids before generating Qwen artifacts", async () => {
+    await expect(
+      buildQwenArtifacts(
+        {
+          workflow: {
+            kind: "direct",
+            intents: {
+              "foo/bar": { label: "Foo" },
+            },
+          },
+          profiles: {
+            planner: { model: "openai/gpt-5" },
+          },
+          routes: {
+            "foo/bar": "planner",
+          },
+          defaultRoute: "planner",
+        } as never,
+        {
+          cwd: "/workspace/project",
+          homeDir: "/home/test",
+          controlPlaneSettings,
+        },
+      ),
+    ).rejects.toThrow(/invalid direct intent id|foo\/bar/i)
+  })
+
   it("skips upstream skill discovery and fail-closed behavior in direct mode", async () => {
     await expect(
       buildQwenArtifacts(

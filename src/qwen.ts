@@ -31,6 +31,8 @@ const PHASE_TO_SKILL = {
   "webapp-testing": "webapp-testing",
 } as const satisfies Record<BuiltInPhase, string>
 
+const SAFE_NAME_PATTERN = /^[a-z0-9-]+$/
+
 export type QwenSkillName = (typeof PHASE_TO_SKILL)[BuiltInPhase]
 
 export type DiscoverQwenUpstreamSkillsInput = {
@@ -235,6 +237,10 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
     const agents: GeneratedArtifact[] = []
 
     for (const [intent, intentConfig] of Object.entries(config.workflow.intents)) {
+      if (!SAFE_NAME_PATTERN.test(intent)) {
+        throw new Error(`Invalid direct intent id: ${intent}`)
+      }
+
       const agentName = `rt-${intent}`
       const commandName = `ai-${intent}`
       const intentDescription = intentConfig.description
