@@ -4,6 +4,7 @@ import { runCli } from "../src/cli.js"
 import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-plane.js"
 import { explainCodexPhase } from "../src/codex.js"
 import { buildArtifacts as buildOpenCodeArtifacts, MARKER_TEXT } from "../src/opencode.js"
+import { buildQwenArtifacts } from "../src/qwen.js"
 import { explainPhase } from "../src/router.js"
 
 const baseConfig = {
@@ -4354,6 +4355,58 @@ describe("runCli", () => {
     ]))
   })
 
+  it("uses direct-mode expected artifacts in qwen status", async () => {
+    const inspectedPaths: string[] = []
+
+    const result = await runCli(["status", "--host", "qwen"], createDirectCliDeps({
+      buildQwenArtifacts,
+      artifactExists: async (filePath: string) => {
+        inspectedPaths.push(filePath)
+        return (
+          filePath === "/workspace/project/.qwen/agents/rt-plan.md"
+          || filePath === "/workspace/project/.qwen/commands/ai-plan.md"
+          || filePath === "/workspace/project/.qwen/commands/oms-status.md"
+        )
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.host).toBe("qwen")
+    expect(inspectedPaths).toEqual(expect.arrayContaining([
+      "/workspace/project/.qwen/agents/rt-plan.md",
+      "/workspace/project/.qwen/commands/ai-plan.md",
+    ]))
+    expect(inspectedPaths).not.toContain("/workspace/project/.qwen/agents/oms-review.md")
+  })
+
+  it("uses direct-mode expected artifacts in qwen doctor", async () => {
+    const inspectedPaths: string[] = []
+
+    const result = await runCli(["doctor", "--host", "qwen"], createDirectCliDeps({
+      buildQwenArtifacts,
+      artifactExists: async (filePath: string) => {
+        inspectedPaths.push(filePath)
+        return (
+          filePath === "/workspace/project/.qwen/agents/rt-plan.md"
+          || filePath === "/workspace/project/.qwen/commands/ai-plan.md"
+          || filePath === "/workspace/project/.qwen/commands/oms-doctor.md"
+        )
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.host).toBe("qwen")
+    expect(inspectedPaths).toEqual(expect.arrayContaining([
+      "/workspace/project/.qwen/agents/rt-plan.md",
+      "/workspace/project/.qwen/commands/ai-plan.md",
+    ]))
+    expect(inspectedPaths).not.toContain("/workspace/project/.qwen/agents/oms-review.md")
+  })
+
   it("supports sync --host qwen and materializes OMS-managed Qwen commands plus agents", async () => {
     let materializedPaths: string[] = []
 
@@ -4451,6 +4504,82 @@ describe("runCli", () => {
       "/workspace/project/.qwen/agents/rt-plan.md",
       "/workspace/project/.qwen/commands/ai-plan.md",
     ])
+  })
+
+  it("inspects direct-mode Codex bootstrap skills in status and doctor", async () => {
+    const inspectedPaths: string[] = []
+
+    const deps = createDirectCliDeps({
+      buildCodexArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".codex/agents",
+            fileName: "rt-plan.toml",
+            ownerPrefix: "rt-",
+            content: 'name = "rt-plan"',
+          },
+        ],
+      }),
+      artifactExists: async (filePath: string) => {
+        inspectedPaths.push(filePath)
+        return (
+          filePath === "/workspace/project/.codex/agents/rt-plan.toml"
+          || filePath === "/workspace/project/.agents/plugins/marketplace.json"
+          || filePath === "/workspace/project/plugins/oh-my-superagents-codex/.codex-plugin/plugin.json"
+          || filePath === "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md"
+        )
+      },
+    })
+
+    const status = await runCli(["status", "--host", "codex"], deps)
+    const doctor = await runCli(["doctor", "--host", "codex"], deps)
+
+    expect(status.exitCode).toBe(0)
+    expect(doctor.exitCode).toBe(0)
+    expect(inspectedPaths).toEqual(expect.arrayContaining([
+      "/workspace/project/.codex/agents/rt-plan.toml",
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    ]))
+  })
+
+  it("materializes direct-mode Codex bootstrap skills during sync", async () => {
+    let materializedPaths: string[] = []
+
+    const result = await runCli(["sync", "--host", "codex"], createDirectCliDeps({
+      buildCodexArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".codex/agents",
+            fileName: "rt-plan.toml",
+            ownerPrefix: "rt-",
+            content: 'name = "rt-plan"',
+          },
+        ],
+      }),
+      materializeArtifacts: async ({ artifacts }: { artifacts: Array<{ directory: string; fileName: string }> }) => {
+        materializedPaths = artifacts.map((artifact) => `${artifact.directory}/${artifact.fileName}`)
+        return {
+          exitCode: 0 as const,
+          warnings: [],
+          written: artifacts.map((artifact) => path.join("/workspace/project", artifact.directory, artifact.fileName)),
+          removed: [],
+        }
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(materializedPaths).toEqual(expect.arrayContaining([
+      ".codex/agents/rt-plan.toml",
+      "plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    ]))
+    expect(parsed.written).toEqual(expect.arrayContaining([
+      "/workspace/project/.codex/agents/rt-plan.toml",
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    ]))
   })
 
   it("reconciles the full OMS Codex Stage 1 surface during sync", async () => {

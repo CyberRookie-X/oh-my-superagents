@@ -842,6 +842,7 @@ async function getExpectedArtifacts(
       packageVersion: "0.0.0",
       includeConfig: false,
       configArtifactPath: toProjectRelativePath(cwd, path.join(cwd, "oh-my-superagents.config.jsonc")),
+      routerConfig,
       controlPlaneSettings: config.settings,
     }).files
 
@@ -852,6 +853,17 @@ async function getExpectedArtifacts(
   }
 
   if (host === "qwen") {
+    if (routerConfig.workflow.kind === "direct") {
+      const built = await deps.buildQwenArtifacts(routerConfig, {
+        cwd,
+        controlPlaneSettings: config.settings,
+      })
+
+      return [...built.agents, ...built.commands]
+        .map((artifact) => path.join(cwd, artifact.directory, artifact.fileName))
+        .sort()
+    }
+
     const built = await deps.buildQwenArtifacts(routerConfig, {
       cwd,
       controlPlaneSettings: config.settings,
@@ -930,6 +942,7 @@ function removeCodexMarketplaceEntry(content: string) {
 async function buildCodexLifecycleFiles(
   cwd: string,
   configPath: string,
+  routerConfig: Awaited<ReturnType<typeof loadRouterConfig>>["config"],
   controlPlaneSettings: ResolvedControlPlane["config"]["settings"],
   deps: CliDeps,
 ) {
@@ -942,6 +955,7 @@ async function buildCodexLifecycleFiles(
     includeConfig: false,
     configArtifactPath: toProjectRelativePath(cwd, configPath),
     existingMarketplaceContent,
+    routerConfig,
     controlPlaneSettings,
   }).files
 }
@@ -1248,7 +1262,7 @@ async function materializeCodexLifecycle(
   controlPlaneSettings: ResolvedControlPlane["config"]["settings"],
   deps: CliDeps,
 ) {
-  const lifecycleFiles = await buildCodexLifecycleFiles(cwd, configPath, controlPlaneSettings, deps)
+  const lifecycleFiles = await buildCodexLifecycleFiles(cwd, configPath, routerConfig, controlPlaneSettings, deps)
   const controlPlaneSkillFiles = lifecycleFiles.filter((file) => file.path.endsWith("/SKILL.md"))
   const scaffoldFiles = lifecycleFiles.filter((file) => !file.path.endsWith("/SKILL.md"))
   const scaffoldWrites = await writeLifecycleFiles(cwd, scaffoldFiles, deps)
