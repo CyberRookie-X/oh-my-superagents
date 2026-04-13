@@ -63,6 +63,7 @@ type CliHost = SupportedSuperpowersHost | "qwen"
 const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
 const CODEX_PLUGIN_MANIFEST_PATH = "plugins/oh-my-superagents-codex/.codex-plugin/plugin.json"
 const CODEX_SKILLS_ROOT = "plugins/oh-my-superagents-codex/skills"
+const DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS = ["status", "sync", "doctor"] as const
 const QWEN_MANAGED_AGENT_FILE_NAMES = [
   "oms-brainstorm.md",
   "oms-plan.md",
@@ -1168,7 +1169,11 @@ async function inspectArtifacts(cwd: string, filePaths: string[], host: CliHost,
         )
       }
 
-      return state.present
+      return state.present && (
+        ownedPresent.has(state.filePath)
+        || unverifiedDirectories.has(path.dirname(state.filePath))
+        || unverifiedFiles.has(state.filePath)
+      )
     })
     .map((state) => state.filePath)
   const present = new Set(expectedPresent)
@@ -1202,6 +1207,19 @@ function formatArtifactInspection(artifacts: Awaited<ReturnType<typeof inspectAr
     missing: artifacts.missing,
     ...(artifacts.discoveryWarnings ? { discoveryWarnings: artifacts.discoveryWarnings } : {}),
   }
+}
+
+function filterRenderedOpenCodeCommandsForWorkflow(
+  rendered: Record<string, string[]>,
+  workflow: ResolvedControlPlane["config"]["workflow"],
+) {
+  if (workflow.kind !== "direct") {
+    return rendered
+  }
+
+  return Object.fromEntries(
+    DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS.map((commandKey) => [commandKey, rendered[commandKey]]),
+  )
 }
 
 async function writePreparedConfig(
@@ -1434,7 +1452,10 @@ async function buildControlPlaneDoctor(
       prefix: resolved.config.settings.commandPrefix,
       ...(host === "opencode"
         ? {
-          rendered: listRenderedOpenCodeControlPlaneCommands(resolved.config.settings),
+          rendered: filterRenderedOpenCodeCommandsForWorkflow(
+            listRenderedOpenCodeControlPlaneCommands(resolved.config.settings),
+            resolved.config.workflow,
+          ),
         }
         : resolved.config.settings.commands),
     },

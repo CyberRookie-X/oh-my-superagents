@@ -3888,6 +3888,19 @@ describe("runCli", () => {
     expect(output.subagentExecution).toBeUndefined()
   })
 
+  it("lists only supported control-plane wrappers in direct-mode OpenCode doctor output", async () => {
+    const result = await runCli(["doctor", "--host", "opencode"], createDirectCliDeps())
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.commands.rendered).toEqual({
+      status: ["oms-status", "oms-st"],
+      sync: ["oms-sync", "oms-sy"],
+      doctor: ["oms-doctor", "oms-dr"],
+    })
+  })
+
   it("counts lane-only profiles as used in OpenCode doctor output", async () => {
     const routedConfig = {
       ...controlPlaneConfig,
@@ -4262,7 +4275,10 @@ describe("runCli", () => {
   })
 
   it("supports status --host qwen and inspects OMS-managed Qwen commands plus agents", async () => {
-    const inspectedPaths: string[] = []
+    const files = {
+      "/workspace/project/.qwen/agents/oms-review.md": renderOwnedMarkdownArtifact("oms-review"),
+      "/workspace/project/.qwen/commands/oms-status.md": renderOwnedMarkdownArtifact("oms-status"),
+    }
 
     const result = await runCli(["status", "--host", "qwen"], createCliDeps({
       buildQwenArtifacts: async () => ({
@@ -4285,13 +4301,7 @@ describe("runCli", () => {
           },
         ],
       }),
-      artifactExists: async (filePath: string) => {
-        inspectedPaths.push(filePath)
-        return (
-          filePath === "/workspace/project/.qwen/commands/oms-status.md"
-          || filePath === "/workspace/project/.qwen/agents/oms-review.md"
-        )
-      },
+      ...createArtifactFs(files),
     }))
 
     const parsed = JSON.parse(result.stdout)
@@ -4302,14 +4312,43 @@ describe("runCli", () => {
       "/workspace/project/.qwen/agents/oms-review.md",
       "/workspace/project/.qwen/commands/oms-status.md",
     ])
-    expect(inspectedPaths).toEqual(expect.arrayContaining([
-      "/workspace/project/.qwen/agents/oms-review.md",
-      "/workspace/project/.qwen/commands/oms-status.md",
-    ]))
+  })
+
+  it("does not count an unowned expected Codex file as present in status", async () => {
+    const files = {
+      "/workspace/project/.codex/agents/oms-review.toml": renderUserMarkdownArtifact("user-codex-agent"),
+      "/workspace/project/.agents/plugins/marketplace.json": renderCodexMarketplace(),
+      "/workspace/project/plugins/oh-my-superagents-codex/.codex-plugin/plugin.json": renderCodexPluginManifest(),
+      "/workspace/project/plugins/oh-my-superagents-codex/skills/oms-status/SKILL.md": renderOwnedCodexSkill("oms-status", "status"),
+    }
+
+    const result = await runCli(["status", "--host", "codex"], createCliDeps({
+      buildCodexArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".codex/agents",
+            fileName: "oms-review.toml",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+      }),
+      ...createArtifactFs(files),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.artifacts.present).not.toContain("/workspace/project/.codex/agents/oms-review.toml")
+    expect(output.artifacts.missing).toContain("/workspace/project/.codex/agents/oms-review.toml")
   })
 
   it("supports doctor --host qwen and reports OMS-managed Qwen commands plus agents", async () => {
-    const inspectedPaths: string[] = []
+    const files = {
+      "/workspace/project/.qwen/agents/oms-review.md": renderOwnedMarkdownArtifact("oms-review"),
+      "/workspace/project/.qwen/commands/oms-doctor.md": renderOwnedMarkdownArtifact("oms-doctor"),
+    }
 
     const result = await runCli(["doctor", "--host", "qwen"], createCliDeps({
       buildQwenArtifacts: async () => ({
@@ -4332,13 +4371,7 @@ describe("runCli", () => {
           },
         ],
       }),
-      artifactExists: async (filePath: string) => {
-        inspectedPaths.push(filePath)
-        return (
-          filePath === "/workspace/project/.qwen/commands/oms-doctor.md"
-          || filePath === "/workspace/project/.qwen/agents/oms-review.md"
-        )
-      },
+      ...createArtifactFs(files),
     }))
 
     const parsed = JSON.parse(result.stdout)
@@ -4349,10 +4382,43 @@ describe("runCli", () => {
       "/workspace/project/.qwen/agents/oms-review.md",
       "/workspace/project/.qwen/commands/oms-doctor.md",
     ])
-    expect(inspectedPaths).toEqual(expect.arrayContaining([
-      "/workspace/project/.qwen/agents/oms-review.md",
-      "/workspace/project/.qwen/commands/oms-doctor.md",
-    ]))
+  })
+
+  it("does not count an unowned expected Qwen file as present in doctor", async () => {
+    const files = {
+      "/workspace/project/.qwen/agents/oms-review.md": renderUserMarkdownArtifact("user-qwen-agent"),
+      "/workspace/project/.qwen/commands/oms-doctor.md": renderOwnedMarkdownArtifact("oms-doctor"),
+    }
+
+    const result = await runCli(["doctor", "--host", "qwen"], createCliDeps({
+      buildQwenArtifacts: async () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".qwen/agents",
+            fileName: "oms-review.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+        commands: [
+          {
+            kind: "command" as const,
+            directory: ".qwen/commands",
+            fileName: "oms-doctor.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+      }),
+      ...createArtifactFs(files),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.artifacts.present).not.toContain("/workspace/project/.qwen/agents/oms-review.md")
+    expect(output.artifacts.missing).toContain("/workspace/project/.qwen/agents/oms-review.md")
   })
 
   it("uses direct-mode expected artifacts in qwen status", async () => {
