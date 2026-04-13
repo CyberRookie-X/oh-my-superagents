@@ -42,6 +42,7 @@ const CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string>
   sync: "Sync OMS artifacts for OpenCode.",
   doctor: "Inspect OMS diagnostics for OpenCode.",
 }
+const DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "sync", "doctor"])
 const TEMPORARY_DISABLE_COMMAND_FILE = "oms-no-superpowers.md"
 const TEMPORARY_DISABLE_COMMAND_OWNER_PREFIX = TEMPORARY_DISABLE_COMMAND_FILE
 export const RUNTIME_AGENT_METADATA_DIRECTORY = ".opencode/oh-my-superagents"
@@ -262,11 +263,18 @@ export function listRenderedOpenCodeControlPlaneCommands(settings: OpenCodeContr
   ) as Record<ControlPlaneCommandKey, string[]>
 }
 
-function buildControlPlaneCommandArtifacts(settings: OpenCodeControlPlaneSettings): GeneratedArtifact[] {
+function buildControlPlaneCommandArtifacts(
+  settings: OpenCodeControlPlaneSettings,
+  supportedCommands: ReadonlySet<ControlPlaneCommandKey> = new Set(CONTROL_PLANE_COMMAND_KEYS),
+): GeneratedArtifact[] {
   const ownerPrefix = `${settings.commandPrefix}-`
   const seenFileNames = new Map<string, string>()
 
   return CONTROL_PLANE_COMMAND_KEYS.flatMap((commandKey) => {
+    if (!supportedCommands.has(commandKey)) {
+      return []
+    }
+
     const renderedNames = listRenderedOpenCodeControlPlaneCommands(settings)[commandKey]
 
     return renderedNames.map((renderedName) => {
@@ -509,7 +517,12 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
   commands.push(buildRuntimeAgentMetadataArtifact(runtimeAgentMetadata))
 
   if (controlPlaneSettings) {
-    const controlPlaneArtifacts = buildControlPlaneCommandArtifacts(controlPlaneSettings)
+    const controlPlaneArtifacts = buildControlPlaneCommandArtifacts(
+      controlPlaneSettings,
+      workflow?.kind === "direct"
+        ? DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS
+        : new Set(CONTROL_PLANE_COMMAND_KEYS),
+    )
     assertNoOpenCodeCommandCollisions(commands, controlPlaneArtifacts)
     commands.push(...controlPlaneArtifacts)
     commands.push(buildTemporaryDisableHelperArtifact())

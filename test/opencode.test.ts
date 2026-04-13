@@ -461,41 +461,42 @@ describe("buildArtifacts", () => {
     expect(artifacts.agents.map((item) => item.fileName)).not.toContain("spr-build--review.md")
   })
 
-  it("fails when a direct-mode command collides with an OMS control-plane command path", () => {
+  it("does not materialize unsupported direct-mode control-plane wrappers that would otherwise collide", () => {
     const defaults = createDefaultControlPlaneConfig().settings
 
-    expect(() =>
-      buildArtifactsWithControlPlane(
-        {
-          workflow: {
-            kind: "direct",
-            intents: { plan: { label: "Plan" } },
-          },
-          profiles: { planner: { model: "openai/gpt-5" } },
-          lanes: {
-            frontend: {
-              label: "Frontend",
-              routes: { plan: "planner" },
-              defaultRoute: "planner",
-            },
-          },
-          routes: {},
-          defaultRoute: "planner",
-          effectiveLane: "frontend",
-        } as never,
-        {
-          ...defaults,
-          commandPrefix: "ai",
-          commands: {
-            ...defaults.commands,
-            use: {
-              name: "plan",
-              aliases: [],
-            },
+    const artifacts = buildArtifactsWithControlPlane(
+      {
+        workflow: {
+          kind: "direct",
+          intents: { plan: { label: "Plan" } },
+        },
+        profiles: { planner: { model: "openai/gpt-5" } },
+        lanes: {
+          frontend: {
+            label: "Frontend",
+            routes: { plan: "planner" },
+            defaultRoute: "planner",
           },
         },
-      ),
-    ).toThrow(/collision|ai-plan/i)
+        routes: {},
+        defaultRoute: "planner",
+        effectiveLane: "frontend",
+      } as never,
+      {
+        ...defaults,
+        commandPrefix: "ai",
+        commands: {
+          ...defaults.commands,
+          use: {
+            name: "plan",
+            aliases: [],
+          },
+        },
+      },
+    )
+
+    expect(artifacts.commands.map((item) => item.fileName)).toContain("ai-plan.md")
+    expect(artifacts.commands.map((item) => item.fileName)).not.toContain("ai-plan.md.md")
   })
 
   it("renders one .opencode/commands file per primary OMS command", () => {
@@ -538,6 +539,28 @@ describe("buildArtifacts", () => {
       "oms-u.md",
       "oms-use.md",
     ])
+  })
+
+  it("omits direct-mode OpenCode use and disable wrappers", () => {
+    const settings = createDefaultControlPlaneConfig().settings
+    const artifacts = buildArtifactsWithControlPlane({
+      workflow: {
+        kind: "direct",
+        intents: { plan: { label: "Plan" } },
+      },
+      profiles: { planner: { model: "openai/gpt-5" } },
+      routes: { plan: "planner" },
+      defaultRoute: "planner",
+    } as never, settings)
+
+    const commandFileNames = artifacts.commands
+      .filter((item) => item.directory === ".opencode/commands")
+      .map((item) => item.fileName)
+
+    expect(commandFileNames).not.toContain("oms-use.md")
+    expect(commandFileNames).not.toContain("oms-u.md")
+    expect(commandFileNames).not.toContain("oms-off.md")
+    expect(commandFileNames).not.toContain("oms-o.md")
   })
 
   it("respects the configured OMS command prefix", () => {

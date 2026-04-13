@@ -117,9 +117,7 @@ async function resolvePluginRootDirectory(directory: string, worktree?: string) 
   }
 
   const localConfigPath = path.join(directory, CONFIG_FILE_NAME)
-  const localRuntimeMetadataPath = path.join(directory, RUNTIME_AGENT_METADATA_DIRECTORY, RUNTIME_AGENT_METADATA_FILE)
-
-  if (await fileExists(localConfigPath) || await fileExists(localRuntimeMetadataPath)) {
+  if (await fileExists(localConfigPath)) {
     return directory
   }
 
