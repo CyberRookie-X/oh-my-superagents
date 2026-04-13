@@ -4,14 +4,14 @@
 
 Architecture: [English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, and Qwen, with first-class `superpowers` support and an experimental OpenCode-first direct mode.
+Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, and Qwen, with first-class `superpowers` support and an experimental host-native direct mode on all three hosts.
 
 ## Support Matrix
 
 | Capability | OpenCode | Codex | Qwen | Claude Code |
 | --- | --- | --- | --- | --- |
 | `superpowers` workflow routing | Full | Full | Partial | Not planned |
-| Direct mode | Experimental | None yet | None yet | Not planned |
+| Direct mode | Experimental | Experimental | Experimental | Not planned |
 | OMS control plane | Full | Full | Full | Not planned |
 | Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | Not planned |
 | Compatibility monitor | Full | Full | None yet | Not planned |
@@ -31,6 +31,7 @@ Feature notes:
 
 - The temporary disable helper is host-local, conversation-scoped, and does not change persistent OMS state.
 - `codexFast` is full on OpenCode and Codex. Qwen does not support it yet.
+- Direct mode stays host-native: OpenCode renders commands plus agents, Codex renders agent TOMLs plus local bootstrap skills, and Qwen renders project-local commands plus agents.
 
 ## Implementation Footprint
 
@@ -56,22 +57,22 @@ How to read this:
 ## Scope
 
 `oh-my-superagents` is evolving into a broader routing and control-plane product.
-Today it still ships first-class `superpowers` support across the supported hosts, and the first generic slice is an experimental OpenCode direct mode.
+Today it still ships first-class `superpowers` support across the supported hosts, and the first generic slice now includes an experimental host-native direct mode on OpenCode, Codex, and Qwen.
 
 It is not a cross-host configuration sync tool.
-The supported surface for this release is the CLI, generated host artifacts, packaged plugin entrypoints, the Stage 1 OMS control plane, the Stage 2 Qwen adapter, the experimental OpenCode direct-mode slice, and the current `oh-my-superagents/library` export surface.
+The supported surface for this release is the CLI, generated host artifacts, packaged plugin entrypoints, the Stage 1 OMS control plane, the Stage 2 Qwen adapter, the experimental direct-mode slices on OpenCode, Codex, and Qwen, and the current `oh-my-superagents/library` export surface.
 
 Today that means:
 
 - OpenCode: supported for `superpowers` workflow routing and the experimental direct-mode slice
-- Codex: supported for `superpowers` workflow routing
-- Qwen: supported with a limited Stage 2 surface for `superpowers` workflow routing
+- Codex: supported for `superpowers` workflow routing and the experimental direct-mode slice
+- Qwen: supported with a limited Stage 2 surface for `superpowers` workflow routing plus an experimental direct-mode slice
 - Claude Code: intentionally out of scope for now because Claude already provides strong native subagents, per-agent model selection, effort controls, and plugin distribution
 
 ## What It Does
 
 - Reads layered `oh-my-superagents.config.jsonc` from global and project locations
-- Resolves built-in `superpowers` phases across supported hosts and user-defined direct intents for OpenCode
+- Resolves built-in `superpowers` phases across supported hosts and user-defined direct intents for OpenCode, Codex, and Qwen
 - Generates `.opencode/agents/*.md` and `.opencode/commands/*.md`
 - Generates `.codex/agents/*.toml`
 - Generates `.qwen/agents/*.md` and `.qwen/commands/*.md`
@@ -79,20 +80,23 @@ Today that means:
 - Exposes `author routing`, `status`, `use`, `disable`, `sync`, `doctor`, `explain`, and `bootstrap` CLIs
 - Ships a minimal OpenCode plugin entrypoint for startup diagnostics
 
-## OpenCode Direct Mode
+## Direct Mode
 
-The first generic-routing slice is an experimental direct workflow on OpenCode.
+The first generic-routing slice is now an experimental direct workflow on OpenCode, Codex, and Qwen.
 
-- It uses user-defined intents and renders OpenCode-native `ai-<intent>` commands plus `rt-<intent>` agents.
-- Direct intent ids must use lowercase letters, digits, and `-` only so the generated OpenCode filenames stay valid.
-- It currently applies only to `--host opencode`.
-- The supported direct-mode control-plane surface is `status`, `doctor`, `explain`, and `sync`.
-- It does not require upstream `superpowers` to render or explain direct-mode OpenCode artifacts.
+- It uses user-defined intents and keeps the rendered shape host-native instead of forcing identical files everywhere.
+- OpenCode renders `ai-<intent>` commands plus `rt-<intent>` agents.
+- Codex renders `rt-<intent>.toml` agents plus repo-local `ai-<intent>` bootstrap skills in `plugins/oh-my-superagents-codex/skills/`.
+- Qwen renders project-local `.qwen/commands/ai-<intent>.md` commands plus `.qwen/agents/rt-<intent>.md` agents.
+- Direct intent ids must use lowercase letters, digits, and `-` only so the generated host filenames stay valid.
+- The supported direct-mode control-plane surface is `status`, `doctor`, and `sync` on OpenCode, Codex, and Qwen.
+- `explain --intent` is currently supported on OpenCode and Codex, but not yet on Qwen.
+- Direct mode does not require upstream `superpowers`, while first-party `superpowers` workflow routing remains supported and unchanged.
 
 ## Install
 
 For `superpowers` workflow mode, install upstream `superpowers` separately, then use the host-specific flow you need.
-For the experimental OpenCode direct mode, upstream `superpowers` is not required.
+For the experimental direct mode on OpenCode, Codex, or Qwen, upstream `superpowers` is not required.
 
 Host-specific flow:
 
@@ -351,7 +355,7 @@ This renders OpenCode/Qwen command files such as `team-state.md`, `team-health.m
 
 ## Qwen Support
 
-Stage 2 Qwen support is intentionally narrow:
+Stage 2 Qwen support is intentionally narrow in `superpowers` workflow mode:
 
 - no heavy bootstrap flow
 - no `.qwen/skills` output from OMS
@@ -370,6 +374,9 @@ Qwen wrapper agent names are fixed:
 - `oms-web-test`
 
 Qwen command files are generated from the same control-plane prefix and alias settings used by OpenCode.
+
+For direct mode on Qwen, OMS keeps the same project-local host shape but swaps in `ai-<intent>` commands and `rt-<intent>` agents.
+That direct-mode path does not require upstream skill discovery, supports `status`, `doctor`, and `sync`, and still leaves `explain` unsupported on Qwen.
 
 ## Bootstrap
 
@@ -413,7 +420,7 @@ Use `--config /absolute/or/relative/path.jsonc` to override config discovery.
 
 For Codex, `sync` and `use` reconcile the full OMS-owned Stage 1 surface: `.codex/agents/*.toml`, the OMS marketplace entry, `plugins/oh-my-superagents-codex/.codex-plugin/plugin.json`, and OMS control-plane skills under `plugins/oh-my-superagents-codex/skills/*/SKILL.md`.
 
-For Qwen in Stage 2, `sync` materializes both OMS command wrappers in `.qwen/commands/` and OMS wrapper agents in `.qwen/agents/` when the required upstream skills are available. It does not run a Codex-style bootstrap or install upstream skills for you.
+For Qwen in Stage 2, `sync` materializes either OMS command wrappers plus OMS wrapper agents for `superpowers` workflow mode, or direct-mode `ai-<intent>` commands plus `rt-<intent>` agents for direct workflows. Only the `superpowers` workflow path requires upstream skills. It does not run a Codex-style bootstrap or install upstream skills for you.
 
 ## Explain
 
@@ -486,6 +493,8 @@ When the OMS control plane is enabled, OpenCode also generates command wrappers 
 
 ## Generated Codex Agents
 
+For `superpowers` workflow mode, Codex generates these OMS phase agents:
+
 - `oms-brainstorm`
 - `oms-plan`
 - `oms-execute`
@@ -493,6 +502,8 @@ When the OMS control plane is enabled, OpenCode also generates command wrappers 
 - `oms-verify`
 - `oms-visual`
 - `oms-web-test`
+
+In direct mode, Codex instead generates `rt-<intent>.toml` agents and matching repo-local `ai-<intent>` bootstrap skills under `plugins/oh-my-superagents-codex/skills/`.
 
 Run `oh-my-superagents sync --host codex` to materialize these into `.codex/agents/`, and to reconcile the OMS-owned marketplace entry, plugin manifest, and Codex control-plane skill bundle.
 Then ask Codex to use a specific phase agent, for example:
@@ -503,9 +514,10 @@ Use the oms-review agent to review the current branch
 
 ## Generated Qwen Artifacts
 
-Run `oh-my-superagents sync --host qwen` to materialize OMS-owned Qwen command wrappers into `.qwen/commands/` and OMS wrapper agents into `.qwen/agents/`.
+Run `oh-my-superagents sync --host qwen` to materialize Qwen artifacts into `.qwen/commands/` and `.qwen/agents/`.
 
-This requires the upstream skills to be available in `.qwen/skills` or `.agents/skills`.
+In `superpowers` workflow mode this renders OMS-owned wrapper commands plus wrapper agents and still requires the upstream skills to be available in `.qwen/skills` or `.agents/skills`.
+In direct mode this renders `ai-<intent>.md` commands plus `rt-<intent>.md` agents and does not require upstream skills.
 
 Stage 2 boundaries:
 
