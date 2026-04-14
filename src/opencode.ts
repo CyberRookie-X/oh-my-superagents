@@ -8,11 +8,15 @@ import {
 } from "./config.js"
 import { listLaneExecutionUnits, renderLaneSplitGuidance } from "./lane-execution.js"
 import { PHASE_TO_AGENT, PHASE_TO_COMMAND, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
+import type { CanonicalRouteId, WorkflowSourceEntry, WorkflowSourceKind } from "./workflow-sources.js"
+import { toDirectCanonicalRouteId } from "./workflow-direct.js"
+import { toSuperpowersCanonicalRouteId } from "./workflow-superpowers.js"
 
 export const MARKER_TEXT = "generated-by: oh-my-superagents; do-not-edit: true"
 export const MARKER = `<!-- ${MARKER_TEXT} -->`
 export const CONTROL_PLANE_MARKER_PREFIX = "oms-control-plane:"
 export const AUXILIARY_MARKER_PREFIX = "oms-auxiliary:"
+export const ROUTE_MARKER_PREFIX = "oms-route:"
 
 type PermissionTask = Record<string, "allow" | "deny" | "ask">
 
@@ -57,6 +61,21 @@ function yamlScalar(value: string) {
   return `'${value.replace(/'/g, "''")}'`
 }
 
+function getRouteSourceEntry(
+  sourceEntry: WorkflowSourceEntry | undefined,
+  fallback: WorkflowSourceEntry,
+) {
+  return sourceEntry ?? fallback
+}
+
+function formatWorkflowEntryName(sourceEntry: WorkflowSourceEntry, fallbackEntryName: string) {
+  return `${sourceEntry.source}/${sourceEntry.entryName ?? fallbackEntryName}`
+}
+
+const SHARED_OPENCODE_AGENT_NAMES = new Set(
+  Object.values(PHASE_TO_AGENT).filter((agentName, index, values) => values.indexOf(agentName) !== index),
+)
+
 export function renderControlPlaneOwnershipMetadata(input: {
   host: "opencode" | "codex"
   artifact: "command" | "skill"
@@ -75,6 +94,16 @@ export function renderAuxiliaryOwnershipMetadata(input: {
   return `<!-- ${AUXILIARY_MARKER_PREFIX} stage=1; host=${input.host}; artifact=${input.artifact}; helper=${input.helper}; rendered-name=${input.renderedName} -->`
 }
 
+export function renderRouteOwnershipMetadata(input: {
+  host: "opencode" | "codex" | "qwen"
+  source: WorkflowSourceKind
+  route: CanonicalRouteId
+  projection: "agent" | "command"
+  renderedName: string
+}) {
+  return `<!-- ${ROUTE_MARKER_PREFIX} stage=${input.host === "qwen" ? "2" : "1"}; host=${input.host}; source=${input.source}; route=${input.route}; projection=${input.projection}; rendered-name=${input.renderedName} -->`
+}
+
 export function renderAgentFile(input: {
   agentName: string
   description: string
@@ -82,7 +111,13 @@ export function renderAgentFile(input: {
   variant?: string
   temperature?: number
   permissionTask?: PermissionTask
+  sourceEntry?: WorkflowSourceEntry
+  workflowEntryName?: string
 }) {
+  const sourceEntry = getRouteSourceEntry(input.sourceEntry, {
+    canonicalRoute: "phase.unknown" as CanonicalRouteId,
+    source: "superpowers",
+  })
   const permissionBlock = input.permissionTask
     ? [
         "permission:",
@@ -103,9 +138,18 @@ export function renderAgentFile(input: {
     "---",
     "",
     MARKER,
+    renderRouteOwnershipMetadata({
+      host: "opencode",
+      source: sourceEntry.source,
+      route: sourceEntry.canonicalRoute,
+      projection: "agent",
+      renderedName: input.agentName,
+    }),
     "",
     `You are the ${input.agentName} helper agent.`,
-    "Load the upstream superpowers skill named in the invoking command and follow it exactly.",
+    ...(input.workflowEntryName
+      ? [`Load and follow the upstream workflow entry \`${input.workflowEntryName}\` for \`${sourceEntry.canonicalRoute}\` exactly.`]
+      : ["Load and follow the upstream workflow entry named in the invoking command exactly."]),
     "Use the forwarded router context arguments as the task context.",
     "",
   ].join("\n")
@@ -114,11 +158,17 @@ export function renderAgentFile(input: {
 export function renderCommandFile(input: {
   description: string
   agentName: string
+  renderedName: string
   skillName: string
   phase: BuiltInPhase
   effectiveLane?: string
   splitGuidance?: string
+  sourceEntry?: WorkflowSourceEntry
 }) {
+  const sourceEntry = getRouteSourceEntry(input.sourceEntry, {
+    canonicalRoute: toSuperpowersCanonicalRouteId(input.phase),
+    source: "superpowers",
+  })
   return [
     "---",
     `description: ${yamlScalar(input.description)}`,
@@ -127,8 +177,15 @@ export function renderCommandFile(input: {
     "---",
     "",
     MARKER,
+    renderRouteOwnershipMetadata({
+      host: "opencode",
+      source: sourceEntry.source,
+      route: sourceEntry.canonicalRoute,
+      projection: "command",
+      renderedName: input.renderedName,
+    }),
     "",
-    `Load and follow the upstream skill \`${input.skillName}\` exactly.`,
+    `Load and follow the upstream workflow entry \`${input.skillName}\` for \`${sourceEntry.canonicalRoute}\` exactly.`,
     "",
     ...(input.splitGuidance ? ["## Lane Split Guidance", input.splitGuidance, ""] : []),
     "## Router Context",
@@ -146,7 +203,12 @@ function renderDirectAgentFile(input: {
   variant?: string
   temperature?: number
   intent: string
+  sourceEntry?: WorkflowSourceEntry
 }) {
+  const sourceEntry = getRouteSourceEntry(input.sourceEntry, {
+    canonicalRoute: toDirectCanonicalRouteId(input.intent),
+    source: "direct",
+  })
   return [
     "---",
     `description: ${yamlScalar(input.description)}`,
@@ -158,6 +220,13 @@ function renderDirectAgentFile(input: {
     "---",
     "",
     MARKER,
+    renderRouteOwnershipMetadata({
+      host: "opencode",
+      source: sourceEntry.source,
+      route: sourceEntry.canonicalRoute,
+      projection: "agent",
+      renderedName: input.agentName,
+    }),
     "",
     `You are the ${input.agentName} routing agent for the ${input.intent} intent.`,
     "Use the forwarded router context arguments as the task context.",
@@ -170,7 +239,13 @@ function renderDirectCommandFile(input: {
   description: string
   agentName: string
   intent: string
+  renderedName: string
+  sourceEntry?: WorkflowSourceEntry
 }) {
+  const sourceEntry = getRouteSourceEntry(input.sourceEntry, {
+    canonicalRoute: toDirectCanonicalRouteId(input.intent),
+    source: "direct",
+  })
   return [
     "---",
     `description: ${yamlScalar(input.description)}`,
@@ -179,6 +254,13 @@ function renderDirectCommandFile(input: {
     "---",
     "",
     MARKER,
+    renderRouteOwnershipMetadata({
+      host: "opencode",
+      source: sourceEntry.source,
+      route: sourceEntry.canonicalRoute,
+      projection: "command",
+      renderedName: input.renderedName,
+    }),
     "",
     "## Router Context",
     `- intent: ${input.intent}`,
@@ -377,15 +459,16 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
         directory: ".opencode/agents",
         fileName: `${agentName}.md`,
         ownerPrefix: "rt-",
-        content: renderDirectAgentFile({
-          agentName,
-          description: `${agentName} routing agent for ${intent}`,
-          model: resolved.selection.model,
-          variant: resolved.selection.variant,
-          temperature: resolved.selection.temperature,
-          intent,
-        }),
-      })
+          content: renderDirectAgentFile({
+            agentName,
+            description: `${agentName} routing agent for ${intent}`,
+            model: resolved.selection.model,
+            variant: resolved.selection.variant,
+            temperature: resolved.selection.temperature,
+            intent,
+            sourceEntry: resolved.sourceEntry,
+          }),
+        })
 
       commands.push({
         kind: "command",
@@ -395,7 +478,9 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
         content: renderDirectCommandFile({
           description: `Route ${intent} through ${agentName}`,
           agentName,
+          renderedName: `ai-${intent}`,
           intent,
+          sourceEntry: resolved.sourceEntry,
         }),
       })
     }
@@ -404,7 +489,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
       const resolved = resolvePhase(config, phase)
       const agentName = PHASE_TO_AGENT[phase]
       const commandName = PHASE_TO_COMMAND[phase].slice(1)
-      const skillName = `superpowers/${phase}`
+      const workflowEntryName = formatWorkflowEntryName(resolved.sourceEntry, phase)
       const permissionTask: PermissionTask | undefined =
         phase === "subagent-driven-development"
           ? {
@@ -418,12 +503,20 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
       registerRuntimeAgentMetadata(agentName, resolved.profileId, resolved.selection.codexFast)
 
       if (!agents.has(agentName)) {
+        const sharedAgentSourceEntry = SHARED_OPENCODE_AGENT_NAMES.has(agentName)
+          ? {
+              canonicalRoute: `phase.shared-${agentName}` as CanonicalRouteId,
+              source: resolved.sourceEntry.source,
+            }
+          : resolved.sourceEntry
+
         agentSelections.set(
           agentName,
           JSON.stringify({
             model: resolved.selection.model,
             variant: resolved.selection.variant,
             temperature: resolved.selection.temperature,
+            resolvedSource: resolved.sourceEntry.source,
           }),
         )
 
@@ -439,6 +532,8 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
             variant: resolved.selection.variant,
             temperature: resolved.selection.temperature,
             permissionTask,
+            sourceEntry: sharedAgentSourceEntry,
+            workflowEntryName: SHARED_OPENCODE_AGENT_NAMES.has(agentName) ? undefined : workflowEntryName,
           }),
         })
       } else {
@@ -446,6 +541,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
           model: resolved.selection.model,
           variant: resolved.selection.variant,
           temperature: resolved.selection.temperature,
+          resolvedSource: resolved.sourceEntry.source,
         })
         if (agentSelections.get(agentName) !== nextSelection) {
           throw new Error(`Shared agent conflict for ${agentName}`)
@@ -457,12 +553,14 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
         directory: ".opencode/commands",
         fileName: `${commandName}.md`,
         ownerPrefix: "sp-",
-        content: renderCommandFile({
-          description: `Route ${phase} through ${agentName}`,
-          agentName,
-          skillName,
-          phase,
-          splitGuidance:
+          content: renderCommandFile({
+            description: `Route ${phase} through ${agentName}`,
+            agentName,
+            renderedName: commandName,
+            skillName: workflowEntryName,
+            phase,
+            sourceEntry: resolved.sourceEntry,
+            splitGuidance:
             phase === "subagent-driven-development" && laneExecutionUnits.length > 0
               ? `If the task spans multiple lanes, ${renderLaneSplitGuidance({
                   mode: controlPlaneSettings?.subagentExecution.mode ?? "suggest",
@@ -494,6 +592,8 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
             variant: laneResolved.selection.variant,
             temperature: laneResolved.selection.temperature,
             permissionTask: SUBAGENT_EXECUTION_BASE_PERMISSION_TASK,
+            sourceEntry: laneResolved.sourceEntry,
+            workflowEntryName,
           }),
         })
 
@@ -505,9 +605,11 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
           content: renderCommandFile({
             description: `Route ${phase} through ${laneAgentName}`,
             agentName: laneAgentName,
-            skillName,
+            renderedName: unit.commandFileName.replace(/\.md$/, ""),
+            skillName: workflowEntryName,
             phase,
             effectiveLane: unit.lane,
+            sourceEntry: laneResolved.sourceEntry,
           }),
         })
       }

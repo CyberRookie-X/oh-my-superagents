@@ -5,7 +5,7 @@ import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-pl
 import { explainCodexPhase } from "../src/codex.js"
 import { buildArtifacts as buildOpenCodeArtifacts, MARKER_TEXT } from "../src/opencode.js"
 import { buildQwenArtifacts } from "../src/qwen.js"
-import { explainPhase } from "../src/router.js"
+import { explainPhase, resolvePhase } from "../src/router.js"
 
 const baseConfig = {
   workflow: { kind: "superpowers" as const },
@@ -250,6 +250,16 @@ function renderCodexMarketplace(hasOmsEntry = true) {
         : []),
     ],
   }, null, 2)
+}
+
+function renderOwnedClaudeSkill(renderedName: string) {
+  return [
+    `# ${MARKER_TEXT}`,
+    `<!-- oms-route: stage=1; host=claude; source=superpowers; route=phase.writing-plans; projection=skill; rendered-name=${renderedName} -->`,
+    "",
+    `# Skill: ${renderedName}`,
+    "",
+  ].join("\n")
 }
 
 function renderCodexPluginManifest() {
@@ -546,8 +556,15 @@ describe("runCli", () => {
     }))
 
     expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("opencode or --host codex")
+    expect(result.stderr).toContain("opencode, --host codex, or --host claude")
     expect(explainCalled).toBe(false)
+  })
+
+  it("fails closed for direct workflow status on Claude", async () => {
+    const result = await runCli(["status", "--host", "claude"], createDirectCliDeps())
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Direct workflow is not yet supported for status --host claude")
   })
 
   it("explains a direct workflow intent on Codex", async () => {
@@ -572,6 +589,260 @@ describe("runCli", () => {
     expect(output.routeSource).toBe("explicit_route")
     expect(output.configSource).toBe("project")
     expect(output.reuseRelationship).toBe("none")
+  })
+
+  it("shows resolved source information in explain output", async () => {
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      explainPhaseForHost: (config: any, host: "opencode" | "codex", phase: "brainstorming") => {
+        if (host === "codex") {
+          return explainCodexPhase(config, phase)
+        }
+
+        return explainPhase(config, phase)
+      },
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourceRoutes: {
+                "phase.brainstorming": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourceRoutes: {
+              "phase.brainstorming": "gstack" as const,
+            },
+          },
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.brainstorming": "gstack" as const,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.canonicalRoute).toBe("phase.brainstorming")
+    expect(output.resolvedSource).toBe("gstack")
+  })
+
+  it("reports gstack source and source entry for planning explain output", async () => {
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "writing-plans"], createCliDeps({
+      explainPhaseForHost: (config: any, host: "opencode" | "codex", phase: "writing-plans") => {
+        if (host === "codex") {
+          return explainCodexPhase(config, phase)
+        }
+
+        return explainPhase(config, phase)
+      },
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourceRoutes: {
+                "phase.plan": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourceRoutes: {
+              "phase.plan": "gstack" as const,
+            },
+          },
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.plan": "gstack" as const,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.resolvedSource).toBe("gstack")
+    expect(output.sourceEntry).toEqual({
+      canonicalRoute: "phase.writing-plans",
+      source: "gstack",
+      entryName: "plan-eng-review",
+    })
+  })
+
+  it("includes gstack source entry diagnostics in status output", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourceRoutes: {
+                "phase.plan": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourceRoutes: {
+              "phase.plan": "gstack" as const,
+            },
+          },
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.plan": "gstack" as const,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.effectiveSourceEntries).toEqual({
+      "phase.writing-plans": {
+        canonicalRoute: "phase.writing-plans",
+        source: "gstack",
+        entryName: "plan-eng-review",
+      },
+    })
+  })
+
+  it("includes effective source information in status output", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          sourcePresets: {
+            foundation: {
+              routes: {
+                "phase.brainstorming": "superpowers" as const,
+              },
+            },
+          },
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourcePreset: "foundation",
+              sourceRoutes: {
+                "phase.brainstorming": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourcePreset: "foundation",
+            sourceRoutes: {
+              "phase.brainstorming": "gstack" as const,
+            },
+          },
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.brainstorming": "gstack" as const,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.effectiveSources).toEqual({
+      "phase.brainstorming": "gstack",
+    })
+  })
+
+  it("includes effective source information in doctor output", async () => {
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourceRoutes: {
+                "phase.brainstorming": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourceRoutes: {
+              "phase.brainstorming": "gstack" as const,
+            },
+          },
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.brainstorming": "gstack" as const,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.effectiveSources).toEqual({
+      "phase.brainstorming": "gstack",
+    })
   })
 
   it("routes explain through the control-plane effective lane", async () => {
@@ -1318,6 +1589,52 @@ describe("runCli", () => {
     expect(materializeCalled).toBe(false)
   })
 
+  it("does not write a bootstrap config before blocking first-run strict sync", async () => {
+    let wroteConfig = false
+    let preparedWrites = 0
+
+    const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async ({ command }: { command: string }) => {
+        if (command === "sync") {
+          throw new Error("Command sync requires a real config source")
+        }
+
+        return {
+          source: { kind: "default" as const, hasRealSource: false, sources: [] },
+          config: {
+            ...controlPlaneConfig,
+            settings: {
+              ...controlPlaneConfig.settings,
+              superpowersCompatibility: { mode: "strict" as const },
+            },
+          },
+          activePreset: { key: "default", preset: controlPlaneConfig.presets.default },
+          laneState: defaultLaneState,
+          effectiveSources: {},
+        }
+      },
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => {
+        preparedWrites += 1
+        return {
+          path: "/home/tester/.config/oh-my-superagents/config.jsonc",
+          content: JSON.stringify({ settings: nextState }, null, 2),
+          config: controlPlaneConfig,
+        }
+      },
+      writeFile: async () => {
+        wroteConfig = true
+      },
+      evaluateSuperpowersCompatibility: () => incompatibleOpencodeStrict,
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(1)
+    expect(parsed.compatibility).toEqual(incompatibleOpencodeStrict)
+    expect(preparedWrites).toBe(0)
+    expect(wroteConfig).toBe(false)
+  })
+
   it("syncs OpenCode artifacts for a direct workflow config", async () => {
     let materializeCalled = false
 
@@ -1392,6 +1709,154 @@ describe("runCli", () => {
         }),
       ]),
     )
+  })
+
+  it("supports claude explain output", async () => {
+    const result = await runCli(["explain", "--host", "claude", "--phase", "writing-plans"], createCliDeps())
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed).toMatchObject({
+      phase: "writing-plans",
+      canonicalRoute: "phase.writing-plans",
+      profileId: "build",
+      model: "openai/gpt-5",
+      skillName: "oms-plan",
+      compatibility: null,
+    })
+  })
+
+  it("supports sync --host claude and materializes Claude skills", async () => {
+    let materializedPaths: string[] = []
+
+    const result = await runCli(["sync", "--host", "claude"], createCliDeps({
+      materializeArtifacts: async ({ artifacts }: { artifacts: Array<{ directory: string; fileName: string }> }) => {
+        materializedPaths = artifacts.map((artifact) => `${artifact.directory}/${artifact.fileName}`)
+        return {
+          exitCode: 0 as const,
+          warnings: [],
+          written: artifacts.map((artifact) => path.join("/workspace/project", artifact.directory, artifact.fileName)),
+          removed: [],
+        }
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(materializedPaths).toContain(".claude/skills/oms-plan/SKILL.md")
+    expect(parsed.written).toContain("/workspace/project/.claude/skills/oms-plan/SKILL.md")
+  })
+
+  it("supports use --host claude and rewrites Claude skills for the selected preset", async () => {
+    let materializedPaths: string[] = []
+
+    const claudeConfig = {
+      ...controlPlaneConfig,
+      presets: {
+        ...controlPlaneConfig.presets,
+        review: {
+          ...controlPlaneConfig.presets.review,
+          routes: {
+            brainstorming: "review",
+          },
+        },
+      },
+    }
+
+    const result = await runCli(["use", "review", "--host", "claude"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: claudeConfig,
+        activePreset: {
+          key: "default",
+          preset: claudeConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {},
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({ settings: nextState }, null, 2),
+        config: {
+          ...claudeConfig,
+          settings: {
+            ...claudeConfig.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+      materializeArtifacts: async ({ artifacts }: { artifacts: Array<{ directory: string; fileName: string }> }) => {
+        materializedPaths = artifacts.map((artifact) => `${artifact.directory}/${artifact.fileName}`)
+        return { exitCode: 0 as const, warnings: [], written: [], removed: [] }
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(materializedPaths).toContain(".claude/skills/oms-plan/SKILL.md")
+  })
+
+  it("supports disable --host claude and removes managed Claude skills", async () => {
+    const removedPaths: string[] = []
+
+    const result = await runCli(["disable", "--host", "claude"], createCliDeps({
+      ...createArtifactFs({
+        "/workspace/project/.claude/skills/oms-plan/SKILL.md": renderOwnedClaudeSkill("oms-plan"),
+      }),
+      unlink: async (filePath: string) => {
+        removedPaths.push(filePath)
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.removed).toContain("/workspace/project/.claude/skills/oms-plan/SKILL.md")
+    expect(removedPaths).toContain("/workspace/project/.claude/skills/oms-plan/SKILL.md")
+  })
+
+  it("does not report missing Claude skills in status when Claude is disabled", async () => {
+    const deps = createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          settings: {
+            ...controlPlaneConfig.settings,
+            enabled: false,
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {},
+      }),
+      ...createArtifactFs({
+        "/workspace/project/.claude/skills/oms-plan/SKILL.md": renderOwnedClaudeSkill("oms-plan"),
+      }),
+    })
+
+    const status = await runCli(["status", "--host", "claude"], deps)
+    const doctor = await runCli(["doctor", "--host", "claude"], deps)
+
+    expect(status.exitCode).toBe(0)
+    expect(doctor.exitCode).toBe(0)
+    expect(JSON.parse(status.stdout).artifacts.missing).toEqual([])
+    expect(JSON.parse(doctor.stdout).artifacts.missing).toEqual([])
   })
 
   it("returns exit code 0 for sync --host codex", async () => {
@@ -2581,6 +3046,188 @@ describe("runCli", () => {
     expect(output.routeImpact.changedPhases).toContain("writing-plans")
   })
 
+  it("marks a phase as changed when only the resolved profile changes", async () => {
+    const profileOnlyConfig = {
+      ...controlPlaneConfig,
+      presets: {
+        ...controlPlaneConfig.presets,
+        review: {
+          ...controlPlaneConfig.presets.review,
+          profiles: {
+            review: {
+              model: "openai/gpt-5",
+              effort: "balanced" as const,
+            },
+          },
+          routes: {},
+          defaultRoute: "review",
+        },
+      },
+    }
+
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: profileOnlyConfig,
+        activePreset: {
+          key: "default",
+          preset: profileOnlyConfig.presets.default,
+        },
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({ settings: nextState }, null, 2),
+        config: {
+          ...profileOnlyConfig,
+          settings: {
+            ...profileOnlyConfig.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.routeImpact.changedPhases).toContain("writing-plans")
+  })
+
+  it("marks a phase as changed when only codexFast changes", async () => {
+    const codexFastOnlyConfig = {
+      ...controlPlaneConfig,
+      profiles: {
+        build: {
+          model: "openai/gpt-5",
+          effort: "balanced" as const,
+        },
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          profiles: undefined,
+          routes: {},
+          defaultRoute: "build",
+        },
+        review: {
+          ...controlPlaneConfig.presets.review,
+          profiles: {
+            build: {
+              model: "openai/gpt-5",
+              effort: "balanced" as const,
+              codexFast: true,
+            },
+          },
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: codexFastOnlyConfig,
+        activePreset: {
+          key: "default",
+          preset: codexFastOnlyConfig.presets.default,
+        },
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({ settings: nextState }, null, 2),
+        config: {
+          ...codexFastOnlyConfig,
+          settings: {
+            ...codexFastOnlyConfig.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.routeImpact.changedPhases).toContain("writing-plans")
+  })
+
+  it("marks a phase as changed when only the resolved source entry changes", async () => {
+    const sourceOnlyConfig = {
+      ...controlPlaneConfig,
+      profiles: {
+        build: {
+          model: "openai/gpt-5",
+          effort: "balanced" as const,
+        },
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          profiles: undefined,
+          routes: {},
+          defaultRoute: "build",
+        },
+        review: {
+          ...controlPlaneConfig.presets.review,
+          profiles: undefined,
+          routes: {},
+          defaultRoute: "build",
+          sourceRoutes: {
+            "phase.plan": "gstack" as const,
+          },
+        },
+      },
+    }
+
+    const result = await runCli(["use", "review", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: sourceOnlyConfig,
+        activePreset: {
+          key: "default",
+          preset: sourceOnlyConfig.presets.default,
+        },
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({ settings: nextState }, null, 2),
+        config: {
+          ...sourceOnlyConfig,
+          settings: {
+            ...sourceOnlyConfig.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.routeImpact.changedPhases).toContain("writing-plans")
+  })
+
   it("does not mark a phase as changed when only effort vs explicit variant differ but OpenCode rendering stays the same", async () => {
     const equivalentVariantConfig = {
       ...controlPlaneConfig,
@@ -2826,6 +3473,33 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(parsed.removed).toEqual([])
     expect(removedPaths).toEqual([])
+  })
+
+  it("preserves a copied-metadata OpenCode file with a custom name during disable cleanup", async () => {
+    const removedPaths: string[] = []
+
+    const result = await runCli(["disable", "--host", "opencode"], createCliDeps({
+      ...createArtifactFs({
+        "/workspace/project/.opencode/commands/custom-status.md": [
+          "---",
+          "description: 'Copied metadata'",
+          "---",
+          "",
+          "<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
+          "<!-- oms-control-plane: stage=1; host=opencode; artifact=command; logical-command=status; rendered-name=oms-status -->",
+          "",
+        ].join("\n"),
+      }),
+      unlink: async (filePath: string) => {
+        removedPaths.push(filePath)
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.removed).not.toContain("/workspace/project/.opencode/commands/custom-status.md")
+    expect(removedPaths).not.toContain("/workspace/project/.opencode/commands/custom-status.md")
   })
 
   it("removes OMS-owned artifacts for the invoking host only during disabled sync", async () => {
@@ -3091,6 +3765,7 @@ describe("runCli", () => {
         path: "/workspace/project/oh-my-superagents.config.jsonc",
         sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
       },
+      effectiveSourceEntries: {},
       host: "opencode",
       compatibility: compatibleOpencode,
       allowedLanes: [],
@@ -3111,6 +3786,7 @@ describe("runCli", () => {
           "/workspace/project/.opencode/agents/spr-strategy.md",
         ],
         missing: [],
+        stale: [],
       },
       state: {
         code: "healthy",
@@ -3145,6 +3821,25 @@ describe("runCli", () => {
     expect(output.state.code).toBe("missing_config")
     expect(output.state.category).toBe("oms")
     expect(output.nextAction.command).toBe("oh-my-superagents sync --host opencode")
+  })
+
+  it("prefers doctor guidance over first-run sync when upstream is already incompatible", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: { kind: "default" as const, hasRealSource: false, sources: [] },
+        config: controlPlaneConfig,
+        activePreset: { key: "default", preset: controlPlaneConfig.presets.default },
+        laneState: defaultLaneState,
+        effectiveSources: {},
+      }),
+      evaluateSuperpowersCompatibility: () => incompatibleOpencodeWarn,
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.state.code).toBe("upstream_incompatible")
+    expect(output.nextAction.command).toBe("oh-my-superagents doctor --host opencode")
   })
 
   it("reports missing expected OpenCode artifacts as a sync-needed state", async () => {
@@ -3432,6 +4127,7 @@ describe("runCli", () => {
         path: "/workspace/project/oh-my-superagents.config.jsonc",
         sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
       },
+      effectiveSourceEntries: {},
       host: "opencode",
       commands: {
         prefix: "oms",
@@ -3462,6 +4158,7 @@ describe("runCli", () => {
           "/workspace/project/.opencode/agents/spr-strategy.md",
         ],
         missing: [],
+        stale: [],
       },
       artifactSummary: {
         expected: 2,
@@ -3734,6 +4431,59 @@ describe("runCli", () => {
 
     expect(result.exitCode).toBe(0)
     expect(syncedAvailableLanes).toEqual(["frontend"])
+  })
+
+  it("propagates effective source overrides into the router config used by host builders", async () => {
+    let resolvedSource: string | undefined
+
+    const sourceAwareControlPlaneConfig = {
+      ...controlPlaneConfig,
+      sourcePresets: {
+        foundation: {
+          routes: {
+            "phase.brainstorming": "superpowers" as const,
+          },
+        },
+      },
+      presets: {
+        ...controlPlaneConfig.presets,
+        default: {
+          ...controlPlaneConfig.presets.default,
+          sourcePreset: "foundation",
+          sourceRoutes: {
+            "phase.brainstorming": "gstack" as const,
+          },
+        },
+      },
+    }
+
+    const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: sourceAwareControlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: sourceAwareControlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.brainstorming": "gstack" as const,
+        },
+      }),
+      buildArtifacts: (config: Parameters<typeof buildOpenCodeArtifacts>[0]) => {
+        resolvedSource = resolvePhase(config, "brainstorming").resolvedSource
+        return { agents: [], commands: [] }
+      },
+      materializeArtifacts: async () => ({ exitCode: 0 as const, warnings: [], written: [], removed: [] }),
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(resolvedSource).toBe("gstack")
   })
 
   it("summarizes expected, present, missing, and stale OpenCode artifacts in doctor output", async () => {
@@ -4384,6 +5134,53 @@ describe("runCli", () => {
     ])
   })
 
+  it("supports status and doctor --host claude and inspects OMS-managed Claude skills", async () => {
+    const files = {
+      "/workspace/project/.claude/skills/oms-plan/SKILL.md": renderOwnedClaudeSkill("oms-plan"),
+    }
+
+    const deps = createCliDeps({
+      ...createArtifactFs(files),
+    })
+
+    const status = await runCli(["status", "--host", "claude"], deps)
+    const doctor = await runCli(["doctor", "--host", "claude"], deps)
+
+    expect(status.exitCode).toBe(0)
+    expect(doctor.exitCode).toBe(0)
+
+    expect(JSON.parse(status.stdout)).toMatchObject({
+      host: "claude",
+      artifacts: {
+        present: [
+          "/workspace/project/.claude/skills/oms-plan/SKILL.md",
+        ],
+      },
+    })
+    expect(JSON.parse(doctor.stdout)).toMatchObject({
+      host: "claude",
+      artifacts: {
+        present: [
+          "/workspace/project/.claude/skills/oms-plan/SKILL.md",
+        ],
+      },
+    })
+  })
+
+  it("surfaces stale Claude skills in doctor output", async () => {
+    const result = await runCli(["doctor", "--host", "claude"], createCliDeps({
+      ...createArtifactFs({
+        "/workspace/project/.claude/skills/oms-plan/SKILL.md": renderOwnedClaudeSkill("oms-plan"),
+        "/workspace/project/.claude/skills/oms-legacy/SKILL.md": renderOwnedClaudeSkill("oms-legacy"),
+      }),
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.artifacts.stale).toContain("/workspace/project/.claude/skills/oms-legacy/SKILL.md")
+  })
+
   it("does not count an unowned expected Qwen file as present in doctor", async () => {
     const files = {
       "/workspace/project/.qwen/agents/oms-review.md": renderUserMarkdownArtifact("user-qwen-agent"),
@@ -4466,6 +5263,7 @@ describe("runCli", () => {
 
     expect(result.exitCode).toBe(0)
     expect(parsed.host).toBe("qwen")
+    expect(Object.keys(parsed.commands)).toEqual(["prefix", "status", "sync", "doctor"])
     expect(inspectedPaths).toEqual(expect.arrayContaining([
       "/workspace/project/.qwen/agents/rt-plan.md",
       "/workspace/project/.qwen/commands/ai-plan.md",
@@ -4522,6 +5320,137 @@ describe("runCli", () => {
       ".qwen/agents/oms-review.md",
       ".qwen/commands/oms-sync.md",
     ])
+  })
+
+  it("fails clearly when sync --host qwen is asked to project a gstack route", async () => {
+    let buildCalled = false
+
+    const result = await runCli(["sync", "--host", "qwen"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourceRoutes: {
+                "phase.plan": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourceRoutes: {
+              "phase.plan": "gstack" as const,
+            },
+          },
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.plan": "gstack" as const,
+        },
+      }),
+      buildQwenArtifacts: async () => {
+        buildCalled = true
+        throw new Error("buildQwenArtifacts should not run")
+      },
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(buildCalled).toBe(false)
+    expect(result.stderr).toContain("Qwen cannot project gstack routes in this slice")
+    expect(result.stderr).toContain("gstack/plan-eng-review")
+  })
+
+  it("fails clearly when status --host qwen is asked to inspect a gstack route", async () => {
+    const result = await runCli(["status", "--host", "qwen"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourceRoutes: {
+                "phase.plan": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourceRoutes: {
+              "phase.plan": "gstack" as const,
+            },
+          },
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.plan": "gstack" as const,
+        },
+      }),
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Qwen cannot project gstack routes in this slice")
+  })
+
+  it("fails clearly when doctor --host qwen is asked to inspect a gstack route", async () => {
+    const result = await runCli(["doctor", "--host", "qwen"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourceRoutes: {
+                "phase.plan": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourceRoutes: {
+              "phase.plan": "gstack" as const,
+            },
+          },
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.plan": "gstack" as const,
+        },
+      }),
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Qwen cannot project gstack routes in this slice")
   })
 
   it("syncs direct workflow artifacts for Qwen without requiring upstream skills", async () => {
@@ -4603,6 +5532,7 @@ describe("runCli", () => {
 
     expect(status.exitCode).toBe(0)
     expect(doctor.exitCode).toBe(0)
+    expect(Object.keys(JSON.parse(doctor.stdout).commands)).toEqual(["prefix", "status", "sync", "doctor"])
     expect(inspectedPaths).toEqual(expect.arrayContaining([
       "/workspace/project/.codex/agents/rt-plan.toml",
       "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",

@@ -144,6 +144,23 @@ describe("buildCodexArtifacts", () => {
     expect(agent?.content).toContain('service_tier = "fast"')
   })
 
+  it("uses gstack developer instructions and the plan-eng-review source entry for planning agents", () => {
+    const artifacts = buildCodexArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: { build: { model: "gpt-5.4", effort: "balanced" } },
+      routes: {},
+      defaultRoute: "build",
+      effectiveSources: {
+        "phase.plan": "gstack",
+      },
+    } as never)
+
+    const agent = artifacts.agents.find((item) => item.fileName === "oms-plan.toml")
+
+    expect(agent?.content).toContain("Use the gstack developer instructions")
+    expect(agent?.content).toContain("gstack/plan-eng-review")
+  })
+
   it("keeps the explained Codex service tier typed as the native fast literal", () => {
     const explained = explainCodexPhase(
       {

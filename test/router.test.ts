@@ -83,6 +83,64 @@ describe("resolvePhase", () => {
       variant: "high",
     })
   })
+
+  it("resolves canonical route, source, and source entry for a superpowers phase", () => {
+    const resolved = resolvePhase(
+      {
+        workflow: { kind: "superpowers" as const },
+        profiles: {
+          build: { model: "openai/gpt-5" },
+          review: { model: "anthropic/claude-sonnet-4-5" },
+        },
+        routes: {
+          brainstorming: "review",
+        },
+        defaultRoute: "build",
+        effectiveSources: {
+          "phase.brainstorming": "gstack",
+        },
+      } as never,
+      "brainstorming",
+    )
+
+    expect(resolved).toMatchObject({
+      canonicalRoute: "phase.brainstorming",
+      resolvedSource: "gstack",
+      sourceEntry: {
+        canonicalRoute: "phase.brainstorming",
+        source: "gstack",
+      },
+      sourceResolution: "explicit",
+    })
+  })
+
+  it("resolves the gstack source entry when the generic planning route is overridden to gstack", () => {
+    const resolved = resolvePhase(
+      {
+        workflow: { kind: "superpowers" as const },
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        routes: {},
+        defaultRoute: "build",
+        effectiveSources: {
+          "phase.plan": "gstack",
+        },
+      } as never,
+      "writing-plans",
+    )
+
+    expect(resolved).toMatchObject({
+      canonicalRoute: "phase.writing-plans",
+      resolvedSource: "gstack",
+      sourceResolution: "explicit",
+    })
+    expect(resolved.sourceEntry).toMatchObject({
+      canonicalRoute: "phase.writing-plans",
+      source: "gstack",
+      entryName: "plan-eng-review",
+    })
+  })
 })
 
 describe("resolveRoute", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { materializeArtifacts } from "../src/materialize.js"
+import { isOmsOwnedSkillFile, materializeArtifacts } from "../src/materialize.js"
 import {
   RUNTIME_AGENT_METADATA_DIRECTORY,
   RUNTIME_AGENT_METADATA_FILE,
@@ -197,6 +197,19 @@ function renderOwnedQwenAgent(name: string) {
   ].join("\n")
 }
 
+function renderSourceTaggedOpenCodeWrapper(renderedName: string) {
+  return [
+    "---",
+    "---",
+    "",
+    OWNERSHIP_MARKER,
+    `<!-- oms-route: stage=1; host=opencode; source=gstack; route=phase.brainstorming; projection=command; rendered-name=${renderedName} -->`,
+    "",
+    "Load and follow the upstream workflow entry `gstack/brainstorming` exactly.",
+    "",
+  ].join("\n")
+}
+
 function renderOwnedQwenDirectCommand(name: string) {
   return [
     "---",
@@ -206,6 +219,16 @@ function renderOwnedQwenDirectCommand(name: string) {
     OWNERSHIP_MARKER,
     "",
     `Use the \`rt-${name.replace(/^ai-/, "")}\` direct-mode agent for this intent.`,
+    "",
+  ].join("\n")
+}
+
+function renderOwnedClaudeSkill(renderedName: string) {
+  return [
+    "# generated-by: oh-my-superagents; do-not-edit: true",
+    `<!-- oms-route: stage=1; host=claude; source=superpowers; route=phase.writing-plans; projection=skill; rendered-name=${renderedName} -->`,
+    "",
+    `# Skill: ${renderedName}`,
     "",
   ].join("\n")
 }
@@ -227,6 +250,22 @@ function renderOwnedOpenCodeRuntimeMetadata() {
 }
 
 describe("materializeArtifacts", () => {
+  it("recognizes Claude SKILL.md wrappers through the shared ownership path", () => {
+    expect(
+      isOmsOwnedSkillFile(
+        "/workspace/project/.claude/skills/oms-plan/SKILL.md",
+        renderOwnedClaudeSkill("oms-plan"),
+      ),
+    ).toBe(true)
+
+    expect(
+      isOmsOwnedSkillFile(
+        "/workspace/project/.claude/skills/oms-plan/SKILL.md",
+        "# user-authored skill\n",
+      ),
+    ).toBe(false)
+  })
+
   it("writes agents and commands into fixed .opencode directories", async () => {
     const writes: string[] = []
 
@@ -383,6 +422,124 @@ describe("materializeArtifacts", () => {
 
     expect(result.removed).toEqual([
       "/workspace/project/.opencode/oh-my-superagents/runtime-agent-metadata.json",
+    ])
+    expect(removedPaths).toEqual(result.removed)
+  })
+
+  it("treats a source-tagged OpenCode wrapper as OMS-owned and cleans it up", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.opencode/commands/brainstorm.md": renderSourceTaggedOpenCodeWrapper("brainstorm"),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "command",
+          directory: ".opencode/commands",
+          fileName: "sp-review.md",
+          ownerPrefix: "sp-",
+          content: "---\n---\n\n<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
+        },
+      ],
+      fs,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.removed).toEqual([
+      "/workspace/project/.opencode/commands/brainstorm.md",
+    ])
+    expect(removedPaths).toEqual(result.removed)
+  })
+
+  it("allows a same-name OpenCode route artifact to be rewritten when the source changes", async () => {
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          directory: ".opencode/commands",
+          fileName: "sp-plan.md",
+          ownerPrefix: "sp-",
+          content: [
+            "---",
+            "description: 'Route writing-plans through spr-plan'",
+            "agent: 'spr-plan'",
+            "subtask: true",
+            "---",
+            "",
+            "<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
+            "<!-- oms-route: stage=1; host=opencode; source=gstack; route=phase.writing-plans; projection=command; rendered-name=sp-plan -->",
+            "",
+          ].join("\n"),
+        },
+      ],
+      fs: createMemoryFs({
+        "/workspace/project/.opencode/commands/sp-plan.md": [
+          "---",
+          "description: 'Route writing-plans through spr-plan'",
+          "agent: 'spr-plan'",
+          "subtask: true",
+          "---",
+          "",
+          "<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
+          "<!-- oms-route: stage=1; host=opencode; source=superpowers; route=phase.writing-plans; projection=command; rendered-name=sp-plan -->",
+          "",
+        ].join("\n"),
+      }).fs,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.warnings).toEqual([])
+  })
+
+  it("allows a same-name Claude skill artifact to be rewritten when the source changes", async () => {
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          directory: ".claude/skills/oms-plan",
+          fileName: "SKILL.md",
+          ownerPrefix: "oms-",
+          content: [
+            "# generated-by: oh-my-superagents; do-not-edit: true",
+            "<!-- oms-route: stage=1; host=claude; source=gstack; route=phase.writing-plans; projection=skill; rendered-name=oms-plan -->",
+            "",
+            "# Skill: oms-plan",
+            "",
+          ].join("\n"),
+        },
+      ],
+      fs: createMemoryFs({
+        "/workspace/project/.claude/skills/oms-plan/SKILL.md": renderOwnedClaudeSkill("oms-plan"),
+      }).fs,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.warnings).toEqual([])
+  })
+
+  it("treats Claude skill wrappers as OMS-owned and cleans up stale neighbors", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.claude/skills/oms-plan/SKILL.md": renderOwnedClaudeSkill("oms-plan"),
+      "/workspace/project/.claude/skills/oms-old/SKILL.md": renderOwnedClaudeSkill("oms-old"),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          directory: ".claude/skills/oms-plan",
+          fileName: "SKILL.md",
+          ownerPrefix: "oms-",
+          content: renderOwnedClaudeSkill("oms-plan"),
+        },
+      ],
+      fs,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.removed).toEqual([
+      "/workspace/project/.claude/skills/oms-old/SKILL.md",
     ])
     expect(removedPaths).toEqual(result.removed)
   })

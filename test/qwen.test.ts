@@ -427,6 +427,36 @@ describe("buildQwenArtifacts", () => {
     ).rejects.toThrow(/webapp-testing|Qwen-usable superpowers skills are not installed/i)
   })
 
+  it("fails closed when a route resolves to gstack on qwen", async () => {
+    await expect(
+      buildQwenArtifacts(
+        {
+          workflow: { kind: "superpowers" },
+          profiles: { build: { model: "qwen/qwen3-coder-480b" } },
+          routes: {},
+          defaultRoute: "build",
+          effectiveSources: {
+            "phase.writing-plans": "gstack",
+          },
+        } as never,
+        {
+          cwd: "/workspace/project",
+          homeDir: "/home/test",
+          controlPlaneSettings,
+          readDirectoryBasenames: async () => [
+            "brainstorming",
+            "writing-plans",
+            "subagent-driven-development",
+            "requesting-code-review",
+            "verification-before-completion",
+            "frontend-design",
+            "webapp-testing",
+          ],
+        },
+      ),
+    ).rejects.toThrow(/gstack is not yet supported on qwen/i)
+  })
+
   it("resolves each wrapper agent using the mapped upstream skill key and defaultRoute", async () => {
     const resolutionCalls: string[] = []
     const renderCalls: unknown[] = []
@@ -490,8 +520,12 @@ describe("buildQwenArtifacts", () => {
       name: "oms-brainstorm",
       description: "Qwen wrapper agent for the brainstorming phase",
       model: "qwen/qwen3-coder-480b",
-      skillName: "brainstorming",
+      skillName: "superpowers/brainstorming",
       skillPath: "/workspace/project/.qwen/skills/brainstorming",
+      sourceEntry: {
+        canonicalRoute: "phase.brainstorming",
+        source: "superpowers",
+      },
     })
   })
 
@@ -535,8 +569,12 @@ describe("buildQwenArtifacts", () => {
       name: "oms-brainstorm",
       description: "Qwen wrapper agent for the brainstorming phase",
       model: "qwen/qwen3-coder-480b",
-      skillName: "brainstorming",
+      skillName: "superpowers/brainstorming",
       skillPath: "/workspace/project/.qwen/skills/brainstorming",
+      sourceEntry: {
+        canonicalRoute: "phase.brainstorming",
+        source: "superpowers",
+      },
     })
   })
 })

@@ -4,20 +4,20 @@
 
 架构说明：[English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖这三个宿主的实验性、宿主原生 direct mode。
+`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Claude Code 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen 的实验性、宿主原生 direct mode。
 
 ## 支持矩阵
 
 | 能力 | OpenCode | Codex | Qwen | Claude Code |
 | --- | --- | --- | --- | --- |
-| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 暂不计划 |
-| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂不计划 |
-| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 暂不计划 |
-| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂不计划 |
-| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂不计划 |
-| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | 无 |
-| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂不计划 |
-| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂不计划 |
+| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 |
+| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 |
+| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 |
+| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 |
+| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
+| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills |
+| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
+| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
 
 支持等级说明：
 
@@ -32,6 +32,7 @@
 - 临时停用 helper 是宿主本地、会话级的提示便捷功能，不会改变持久化的 OMS 状态。
 - `codexFast` 在 OpenCode 和 Codex 上都属于完整支持；Qwen 目前还不支持。
 - Direct mode 会保持宿主原生形态：OpenCode 生成 commands + agents，Codex 生成 agent TOML + 本地 bootstrap skills，Qwen 生成项目内 commands + agents。
+- `gstack` 是一等公民级别的 first-party workflow source。当前这个切片里，gstack 路由投影支持 OpenCode、Codex、Claude Code，Qwen 暂不支持。
 
 ## 实现厚度
 
@@ -40,13 +41,13 @@
 
 | 层 | 主要文件 | 大致源码行数 | 厚度 |
 | --- | --- | ---: | --- |
-| OMS 控制平面核心 | `src/control-plane.ts`、`src/config.ts`、`src/cli.ts` | 3213 | 中等 |
-| 工作流适配层 | `src/router.ts`、`src/workflow-superpowers.ts` | 152 | 薄 |
-| OpenCode 适配层 | `src/opencode.ts` | 399 | 薄 |
-| Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 624 | 中等 |
-| Qwen 适配层 | `src/qwen.ts` | 220 | 薄 |
+| OMS 控制平面核心 | `src/control-plane.ts`、`src/config.ts`、`src/cli.ts` | 3972 | 中等 |
+| 工作流适配层 | `src/router.ts`、`src/workflow-superpowers.ts`、`src/workflow-gstack.ts`、`src/workflow-sources.ts`、`src/workflow-direct.ts` | 348 | 薄到中等 |
+| OpenCode 适配层 | `src/opencode.ts` | 637 | 中等 |
+| Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 760 | 中等 |
+| Qwen 适配层 | `src/qwen.ts` | 400 | 薄到中等 |
 | 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1051 | 中等 |
-| 共享工件协调层 | `src/materialize.ts` | 429 | 薄到中等 |
+| 共享工件协调层 | `src/materialize.ts` | 689 | 中等 |
 
 理解方式：
 
@@ -57,7 +58,7 @@
 ## 项目边界
 
 `oh-my-superagents` 正在演进成一个更广义的路由与控制平面产品。
-当前它仍然在已支持宿主上提供一等公民级别的 `superpowers` 支持，而首个通用切片现在已经扩展为覆盖 OpenCode、Codex、Qwen 的实验性宿主原生 direct mode。
+当前它仍然在已支持宿主上提供一等公民级别的 `superpowers` 支持，而首个通用切片现在已经扩展为覆盖 OpenCode、Codex、Qwen 的实验性宿主原生 direct mode；Claude Code 当前只支持 `superpowers` 这条 slice。
 
 它不是：
 
@@ -80,7 +81,7 @@
 - OpenCode：支持 `superpowers` 工作流路由，也支持实验性的 direct mode 切片
 - Codex：支持 `superpowers` 工作流路由，也支持实验性的 direct mode 切片
 - Qwen：支持，但目前仍是有边界的 Stage 2 `superpowers` 工作流形态，同时也支持实验性的 direct mode 切片
-- Claude Code：暂不计划，因为原生能力已经足够强
+- Claude Code：当前已经以薄宿主适配层的方式支持 `superpowers` slice，并支持 source-aware route projection，但 direct workflow 投影暂未支持
 
 ## 它能做什么
 
@@ -89,6 +90,7 @@
 - 生成 `.opencode/agents/*.md` 与 `.opencode/commands/*.md`
 - 生成 `.codex/agents/*.toml`
 - 生成 `.qwen/agents/*.md` 与 `.qwen/commands/*.md`
+- 生成 `.claude/skills/*/SKILL.md`
 - 通过 `author routing` 基于仓库信号和用户提供的模型清单生成路由配置提案
 - 提供 `author routing`、`status`、`use`、`disable`、`sync`、`doctor`、`explain`、`bootstrap` CLI
 - 提供最小 OpenCode plugin 入口用于启动诊断
@@ -103,7 +105,7 @@
 - Qwen 生成项目内的 `.qwen/commands/ai-<intent>.md` commands 与 `.qwen/agents/rt-<intent>.md` agents。
 - Direct intent id 只能包含小写字母、数字和 `-`，这样生成的宿主文件名才合法。
 - 当前 direct mode 在 OpenCode、Codex、Qwen 上都支持 `status`、`doctor`、`sync`。
-- `explain --intent` 目前只在 OpenCode 和 Codex 上支持，Qwen 还没有接上。
+- `explain --intent` 目前只在 OpenCode 和 Codex 上支持，Qwen 和 Claude Code 还没有接上。
 - direct mode 不依赖 upstream `superpowers`；与此同时，一等公民级别的 `superpowers` 工作流支持保持不变。
 
 ## 安装
@@ -209,7 +211,7 @@ Lane-aware 路由会继续把 `phase` 固定为 upstream `superpowers` 的工作
 - `preset` 仍然负责选择工作模式，`usesLanes` 用来限制该 preset 可使用的全局 lane。
 - `settings.defaultLane` 是当前 active preset 的持久化基线 lane。
 - `laneSelection.mode` 支持 `manual`、`suggest`、`auto`。
-- `--lane <name>` 是 `status`、`doctor`、`explain`、`sync` 的单次运行时 lane 覆盖，不会被持久化。
+- `--lane <name>` 是 `status`、`doctor`、`explain`、`sync` 的单次运行时 lane 覆盖，不会写回配置；但 `sync` 会按这次 lane 生成工件，直到下一次 sync 再次重建。
 
 其中 `manual` 只走持久化/默认 lane 路径，`suggest` 会把运行时 lane 作为 Stage 1 的非应用型建议暴露出来，`auto` 则可以在当前会话里直接应用一个 `effectiveLane`，但不会静默写回配置。
 
@@ -285,11 +287,11 @@ Lane-aware subagent execution 是 `superpowers` 下面的执行层增强，不�
 
 Stage 1 新增了宿主本地控制平面命令：
 
-- `oh-my-superagents status --host <opencode|codex|qwen>`
+- `oh-my-superagents status --host <opencode|codex|qwen|claude>`
 - `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen>`
 - `oh-my-superagents disable --host <opencode|codex|qwen>`
-- `oh-my-superagents sync --host <opencode|codex|qwen>`
-- `oh-my-superagents doctor --host <opencode|codex|qwen>`
+- `oh-my-superagents sync --host <opencode|codex|qwen|claude>`
+- `oh-my-superagents doctor --host <opencode|codex|qwen|claude>`
 
 行为说明：
 
@@ -299,6 +301,7 @@ Stage 1 新增了宿主本地控制平面命令：
 - `use` 先按 preset key 匹配，再按唯一 `short` 匹配
 - `disable` 和禁用状态下的 `sync` 只清理**当前宿主**的 OMS 工件，不会去动别的宿主
 - `status` 与 `doctor` 的工件检查也只针对当前宿主
+- `--host claude` 当前管理的工件面是项目级 `.claude/skills/*/SKILL.md`
 
 ## AI 辅助路由编写
 
@@ -388,6 +391,11 @@ Stage 2 的 Qwen 支持在 `superpowers` workflow mode 下刻意保持很薄：
 
 如果是 Qwen direct mode，OMS 会继续沿用项目内宿主原生形态，但改为生成 `ai-<intent>` commands 与 `rt-<intent>` agents。
 这条 direct-mode 路径不要求 upstream skill discovery，当前支持 `status`、`doctor`、`sync`，但 `explain` 在 Qwen 上仍未支持。
+如果是 gstack-backed 的 `superpowers` 路由，当前这个切片里 Qwen 不支持投影；请改用 OpenCode 或 Codex。
+
+对于 Claude Code，当前这个切片里的 `sync` 会为 `superpowers` surface 生成项目级 `.claude/skills/*/SKILL.md` wrappers。Claude 上的 direct workflow 投影当前仍然故意不支持。
+
+`explain --host claude --phase <phase>` 当前已支持，用于当前 Claude `superpowers` slice。
 
 ## Bootstrap
 
@@ -444,6 +452,8 @@ oh-my-superagents sync --host qwen
 
 - `superpowers` workflow mode：生成 OMS wrapper commands 与 wrapper agents，并继续依赖 upstream skills。
 - direct mode：生成 `ai-<intent>` commands 与 `rt-<intent>` agents，不依赖 upstream skills。
+
+当前这个切片里，Qwen 故意不支持 gstack-backed 路由投影。
 
 ## 兼容性监控
 

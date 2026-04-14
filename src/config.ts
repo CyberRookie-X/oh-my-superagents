@@ -8,7 +8,17 @@ import {
   SUPERPOWERS_COMPATIBILITY_MODES,
   type SuperpowersCompatibilityMode,
 } from "./superpowers-compatibility.js"
-import { SUPERPOWERS_ROUTE_CATALOG } from "./workflow-superpowers.js"
+import {
+  CANONICAL_ROUTE_ID_PATTERN,
+  WORKFLOW_SOURCE_KINDS,
+  normalizeWorkflowSourceRoutes,
+  type CanonicalRouteId,
+  type SourcePresetConfig,
+  type WorkflowSourceKind,
+} from "./workflow-sources.js"
+import { toDirectCanonicalRouteId } from "./workflow-direct.js"
+import { getGstackSourceEntry, GSTACK_SOURCE_CATALOG } from "./workflow-gstack.js"
+import { SUPERPOWERS_ROUTE_CATALOG, toSuperpowersCanonicalRouteId } from "./workflow-superpowers.js"
 
 export { SUPERPOWERS_ROUTE_CATALOG as BUILT_IN_PHASES } from "./workflow-superpowers.js"
 
@@ -82,6 +92,16 @@ const DirectWorkflowSchema = z
 
 const WorkflowSchema = z.discriminatedUnion("kind", [SuperpowersWorkflowSchema, DirectWorkflowSchema])
 
+const CanonicalRouteIdSchema = z.string().regex(CANONICAL_ROUTE_ID_PATTERN)
+
+export const WorkflowSourceKindSchema = z.enum(WORKFLOW_SOURCE_KINDS)
+
+export const SourcePresetSchema = z
+  .object({
+    routes: z.record(CanonicalRouteIdSchema, WorkflowSourceKindSchema),
+  })
+  .strict()
+
 const LegacyRouterConfigSchema = z
   .object({
     workflow: WorkflowSchema.optional(),
@@ -131,6 +151,8 @@ const ControlPlanePresetSchema = z
     profiles: z.record(z.string().min(1), ProfileSchema).optional(),
     usesLanes: z.array(z.string().min(1)).optional(),
     defaultLane: z.string().min(1).optional(),
+    sourcePreset: z.string().min(1).optional(),
+    sourceRoutes: z.record(CanonicalRouteIdSchema, WorkflowSourceKindSchema).optional(),
     routes: z.record(z.string().min(1), z.string().min(1)),
     defaultRoute: z.string().min(1),
   })
@@ -140,6 +162,7 @@ const LayeredControlPlaneConfigSchema = z
   .object({
     workflow: WorkflowSchema.optional(),
     settings: LayeredSettingsSchema.optional(),
+    sourcePresets: z.record(z.string().min(1), SourcePresetSchema).optional(),
     profiles: z.record(z.string().min(1), ProfileSchema).optional(),
     lanes: z.record(z.string().min(1), LaneSchema).optional(),
     presets: z.record(z.string().min(1), ControlPlanePresetSchema),
@@ -174,6 +197,7 @@ export type RouterConfig = {
   profiles: Record<string, ControlPlaneProfile>
   lanes?: Record<string, ControlPlaneLane>
   availableLanes?: string[]
+  effectiveSources?: Partial<Record<CanonicalRouteId, WorkflowSourceKind>>
   routes: Record<string, string>
   defaultRoute: string
   effectiveLane?: string
@@ -195,6 +219,7 @@ export type ControlPlaneLaneSelection = z.infer<typeof LaneSelectionSchema>
 export type ControlPlaneSubagentExecution = z.infer<typeof SubagentExecutionSchema>
 export type ControlPlaneLane = z.infer<typeof LaneSchema>
 export type ControlPlanePreset = z.infer<typeof ControlPlanePresetSchema>
+export type ControlPlaneSourcePreset = SourcePresetConfig
 export type ControlPlaneConfig = {
   workflow: WorkflowConfig
   settings: {
@@ -205,8 +230,9 @@ export type ControlPlaneConfig = {
     subagentExecution: ControlPlaneSubagentExecution
     commandPrefix: string
     commands: Record<ControlPlaneCommandKey, ControlPlaneCommandConfig>
-    superpowersCompatibility: SuperpowersCompatibilityConfig
-  }
+      superpowersCompatibility: SuperpowersCompatibilityConfig
+    }
+  sourcePresets: Record<string, ControlPlaneSourcePreset>
   profiles: Record<string, ControlPlaneProfile>
   lanes: Record<string, ControlPlaneLane>
   presets: Record<string, ControlPlanePreset>
@@ -358,6 +384,7 @@ export function createDefaultControlPlaneConfig(): ControlPlaneConfig {
       commands: synthesizeCommands(undefined),
       superpowersCompatibility: { mode: "warn" },
     },
+    sourcePresets: {},
     profiles: cloneProfiles(defaultPreset.profiles) ?? {},
     lanes: {},
     presets: {
@@ -439,6 +466,10 @@ function mergeLayeredConfigs(
   return {
     workflow: higherPriority.workflow ?? lowerPriority.workflow,
     settings: mergedSettings,
+    sourcePresets: {
+      ...lowerPriority.sourcePresets,
+      ...higherPriority.sourcePresets,
+    },
     profiles: {
       ...lowerPriority.profiles,
       ...higherPriority.profiles,
@@ -483,6 +514,7 @@ function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneCon
       commands: synthesizeCommands(merged.settings?.commands),
       superpowersCompatibility: merged.settings?.superpowersCompatibility ?? { mode: "warn" },
     },
+    sourcePresets: merged.sourcePresets ?? {},
     profiles: cloneProfiles(merged.profiles) ?? {},
     lanes: cloneLanes(merged.lanes ?? {}),
     presets: merged.presets,
@@ -498,6 +530,7 @@ function clonePreset(preset: ControlPlanePreset): ControlPlanePreset {
     ...preset,
     profiles: cloneProfiles(preset.profiles),
     usesLanes: preset.usesLanes ? [...preset.usesLanes] : undefined,
+    sourceRoutes: preset.sourceRoutes ? { ...preset.sourceRoutes } : undefined,
     routes: { ...preset.routes },
   }
 }
@@ -542,6 +575,58 @@ function validateLaneTargets(config: ControlPlaneConfig) {
   }
 }
 
+function getValidCanonicalRouteIds(workflow: WorkflowConfig): Set<string> {
+  return new Set<string>(
+    workflow.kind === "direct"
+      ? Object.keys(workflow.intents).map((intentId) => toDirectCanonicalRouteId(intentId))
+      : [
+          ...SUPERPOWERS_ROUTE_CATALOG.map((phase) => toSuperpowersCanonicalRouteId(phase)),
+          ...Object.keys(GSTACK_SOURCE_CATALOG),
+        ],
+  )
+}
+
+function validateSourceRouting(config: ControlPlaneConfig) {
+  const validCanonicalRouteIds = getValidCanonicalRouteIds(config.workflow)
+  const validateSourceKindForRoute = (scope: string, routeId: string, source: WorkflowSourceKind) => {
+    if (routeId.startsWith("phase.") && source === "direct") {
+      throw new Error(`${scope} cannot route ${routeId} through direct source`)
+    }
+
+    if (routeId.startsWith("intent.") && source !== "direct") {
+      throw new Error(`${scope} cannot route ${routeId} through non-direct source ${source}`)
+    }
+
+    if (source === "gstack" && !getGstackSourceEntry(routeId as CanonicalRouteId)) {
+      throw new Error(`${scope} cannot route unsupported canonical route ${routeId} through gstack source`)
+    }
+  }
+
+  for (const [sourcePresetKey, sourcePreset] of Object.entries(config.sourcePresets)) {
+    for (const [routeId, source] of Object.entries(sourcePreset.routes) as Array<[string, WorkflowSourceKind]>) {
+      if (!validCanonicalRouteIds.has(routeId)) {
+        throw new Error(`Source preset ${sourcePresetKey} references unknown canonical route: ${routeId}`)
+      }
+
+      validateSourceKindForRoute(`Source preset ${sourcePresetKey}`, routeId, source)
+    }
+  }
+
+  for (const [presetKey, preset] of Object.entries(config.presets)) {
+    if (preset.sourcePreset && !config.sourcePresets[preset.sourcePreset]) {
+      throw new Error(`Preset ${presetKey} references unknown sourcePreset: ${preset.sourcePreset}`)
+    }
+
+    for (const [routeId, source] of Object.entries(preset.sourceRoutes ?? {}) as Array<[string, WorkflowSourceKind]>) {
+      if (!validCanonicalRouteIds.has(routeId as string)) {
+        throw new Error(`Preset ${presetKey} references unknown canonical route: ${routeId}`)
+      }
+
+      validateSourceKindForRoute(`Preset ${presetKey}`, routeId, source)
+    }
+  }
+}
+
 export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConfig {
   const visiting = new Set<string>()
   const resolved = new Map<string, ControlPlanePreset>()
@@ -582,6 +667,7 @@ export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConf
       nextPreset = {
         ...preset,
         defaultLane: preset.defaultLane ?? resolvedParent.defaultLane,
+        sourcePreset: preset.sourcePreset ?? resolvedParent.sourcePreset,
         profiles:
           resolvedParent.profiles || preset.profiles
             ? {
@@ -598,6 +684,13 @@ export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConf
           ...resolvedParent.routes,
           ...preset.routes,
         },
+        sourceRoutes:
+          resolvedParent.sourceRoutes || preset.sourceRoutes
+            ? {
+                ...(resolvedParent.sourceRoutes ?? {}),
+                ...(preset.sourceRoutes ?? {}),
+              }
+            : undefined,
       }
     }
 
@@ -730,6 +823,7 @@ export async function loadControlPlaneConfig(
   }
 
   const config = resolvePresetReuse(finalizeConfig(merged ?? { presets: {} }))
+  validateSourceRouting(config)
   validateLaneTargets(config)
 
   return {
@@ -749,6 +843,11 @@ export async function loadRouterConfig(input: LoadRouterConfigInput): Promise<Lo
     throw new Error(`Unknown preset: ${loaded.config.settings.activePreset}`)
   }
 
+  const effectiveSources = normalizeWorkflowSourceRoutes(loaded.config.workflow, {
+    ...(activePreset.sourcePreset ? (loaded.config.sourcePresets[activePreset.sourcePreset]?.routes ?? {}) : {}),
+    ...(activePreset.sourceRoutes ?? {}),
+  })
+
   const config: LoadedRouterConfig["config"] = {
     workflow: loaded.config.workflow,
     profiles: {
@@ -757,6 +856,7 @@ export async function loadRouterConfig(input: LoadRouterConfigInput): Promise<Lo
     },
     lanes: loaded.config.lanes,
     availableLanes: activePreset.usesLanes,
+    effectiveSources,
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
     effectiveLane: loaded.config.settings.defaultLane ?? activePreset.defaultLane,
