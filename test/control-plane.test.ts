@@ -4,6 +4,7 @@ import path from "node:path"
 import { parse } from "jsonc-parser"
 import { describe, expect, it } from "vitest"
 import {
+  buildControlPlaneExplainTrace,
   prepareControlPlaneStateWrite,
   resolveControlPlane,
   summarizeSubagentExecutionDiagnostics,
@@ -422,6 +423,50 @@ describe("resolveControlPlane", () => {
 
     expect(result.activePreset.key).toBe("default")
     expect(result.config.profiles.strategy.model).toBe("anthropic/claude-sonnet-4-5")
+  })
+
+  it("expands sourcePreset and sourceRoutes into an effective source table", async () => {
+    const result = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "sourcePresets": {
+          "foundation": {
+            "routes": {
+              "phase.brainstorming": "superpowers",
+              "phase.verification-before-completion": "gstack"
+            }
+          }
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "sourcePreset": "foundation",
+            "sourceRoutes": {
+              "phase.plan": "gstack"
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.effectiveSources).toEqual({
+      "phase.brainstorming": "superpowers",
+      "phase.writing-plans": "gstack",
+      "phase.verification-before-completion": "gstack",
+    })
   })
 
   it("resolves settings.defaultLane when allowed by the active preset", async () => {
@@ -1332,6 +1377,60 @@ describe("resolveControlPlane", () => {
     })
   })
 
+  it("preserves sourcePresets when preparing a state write", async () => {
+    const files = {
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "sourcePresets": {
+          "foundation": {
+            "routes": {
+              "phase.plan": "gstack"
+            }
+          }
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "sourcePreset": "foundation",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await prepareControlPlaneStateWrite({
+      command: "disable",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+      isWritable: createIsWritable(["/workspace/project/oh-my-superagents.config.jsonc"]),
+      nextState: {
+        activePreset: "default",
+        enabled: false,
+      },
+    })
+
+    const serialized = parse(result.content) as {
+      sourcePresets?: Record<string, { routes: Record<string, string> }>
+    }
+
+    expect(serialized.sourcePresets).toEqual({
+      foundation: {
+        routes: {
+          "phase.plan": "gstack",
+        },
+      },
+    })
+  })
+
   it("clears a persisted settings.defaultLane when switching presets", async () => {
     const files = {
       "/workspace/project/oh-my-superagents.config.jsonc": `{
@@ -1735,6 +1834,85 @@ describe("summarizeSubagentExecutionDiagnostics", () => {
         frontend: "sp-execute-frontend",
         backend: "sp-execute-backend",
       },
+    })
+  })
+})
+
+describe("buildControlPlaneExplainTrace", () => {
+  it("includes the resolved source and source entry for gstack planning routes", () => {
+    const trace = buildControlPlaneExplainTrace({
+      cwd: "/workspace/project",
+      resolved: {
+        source: {
+          kind: "file",
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          workflow: { kind: "superpowers" },
+          settings: {
+            enabled: true,
+            activePreset: "default",
+            laneSelection: { mode: "suggest" },
+            subagentExecution: { mode: "suggest" },
+            commandPrefix: "oms",
+            commands: {
+              status: { name: "status", aliases: ["st"] },
+              use: { name: "use", aliases: ["u"] },
+              disable: { name: "off", aliases: ["o"] },
+              sync: { name: "sync", aliases: ["sy"] },
+              doctor: { name: "doctor", aliases: ["dr"] },
+            },
+            superpowersCompatibility: { mode: "warn" },
+          },
+          profiles: {
+            build: { model: "openai/gpt-5" },
+          },
+          presets: {
+            default: {
+              label: "Default",
+              short: "def",
+              routes: {},
+              defaultRoute: "build",
+              sourceRoutes: {
+                "phase.plan": "gstack",
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            label: "Default",
+            short: "def",
+            routes: {},
+            defaultRoute: "build",
+            sourceRoutes: {
+              "phase.plan": "gstack",
+            },
+          },
+        },
+        laneState: {
+          allowedLanes: [],
+          defaultLane: undefined,
+          effectiveLane: undefined,
+          presetDefaultLane: undefined,
+          runtimeLane: undefined,
+          mode: "suggest",
+        },
+        effectiveSources: {
+          "phase.plan": "gstack",
+        },
+      },
+      phase: "writing-plans",
+    })
+
+    expect(trace.resolvedSource).toBe("gstack")
+    expect(trace.sourceEntry).toEqual({
+      canonicalRoute: "phase.writing-plans",
+      source: "gstack",
+      entryName: "plan-eng-review",
     })
   })
 })

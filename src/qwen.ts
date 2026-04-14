@@ -8,8 +8,10 @@ import {
   type ControlPlaneConfig,
   type RouterConfig,
 } from "./config.js"
-import { CONTROL_PLANE_MARKER_PREFIX, MARKER, type GeneratedArtifact } from "./opencode.js"
+import { CONTROL_PLANE_MARKER_PREFIX, MARKER, renderRouteOwnershipMetadata, type GeneratedArtifact } from "./opencode.js"
 import { resolvePhase, resolveRoute, type BuiltInPhase, type ResolvedRoute } from "./router.js"
+import { toDirectCanonicalRouteId } from "./workflow-direct.js"
+import { toSuperpowersCanonicalRouteId } from "./workflow-superpowers.js"
 
 const PHASE_TO_QWEN_AGENT = {
   brainstorming: "oms-brainstorm",
@@ -52,6 +54,7 @@ type RenderQwenAgentInput = {
   model: string
   skillName: string
   skillPath: string
+  sourceEntry?: ResolvedRoute["sourceEntry"]
 }
 
 type RenderQwenDirectAgentInput = {
@@ -60,6 +63,26 @@ type RenderQwenDirectAgentInput = {
   model: string
   intent: string
   intentDescription: string
+  sourceEntry?: ResolvedRoute["sourceEntry"]
+}
+
+function getSourceEntry(
+  sourceEntry: ResolvedRoute["sourceEntry"] | undefined,
+  fallback: ResolvedRoute["sourceEntry"],
+) {
+  return sourceEntry ?? fallback
+}
+
+function formatWorkflowEntryName(source: string, entryName: string) {
+  return `${source}/${entryName}`
+}
+
+function getQwenWorkflowEntryName(sourceEntry: ResolvedRoute["sourceEntry"], fallbackEntryName: string) {
+  if (sourceEntry.source === "gstack") {
+    return fallbackEntryName
+  }
+
+  return formatWorkflowEntryName(sourceEntry.source, sourceEntry.entryName ?? fallbackEntryName)
 }
 
 export type BuildQwenArtifactsOptions = BuildQwenArtifactsInput & {
@@ -120,6 +143,11 @@ export async function discoverQwenUpstreamSkills(input: DiscoverQwenUpstreamSkil
 }
 
 export function renderQwenAgentFile(input: RenderQwenAgentInput) {
+  const sourceEntry = getSourceEntry(input.sourceEntry, {
+    canonicalRoute: toSuperpowersCanonicalRouteId(input.skillName as BuiltInPhase),
+    source: "superpowers",
+  })
+
   return [
     "---",
     `name: ${input.name}`,
@@ -128,14 +156,26 @@ export function renderQwenAgentFile(input: RenderQwenAgentInput) {
     "---",
     "",
     MARKER,
+    renderRouteOwnershipMetadata({
+      host: "qwen",
+      source: sourceEntry.source,
+      route: sourceEntry.canonicalRoute,
+      projection: "agent",
+      renderedName: input.name,
+    }),
     "",
-    `Use the upstream \`${input.skillName}\` superpowers skill if it is available at \`${input.skillPath}\`.`,
-    "If that upstream skill is unavailable, stop and report that Qwen-usable superpowers skills are not installed.",
+    `Use the upstream workflow entry \`${input.skillName}\` for \`${sourceEntry.canonicalRoute}\` if it is available at \`${input.skillPath}\`.`,
+    `If that ${sourceEntry.source} entry is unavailable, stop and report that the required Qwen workflow source is not installed.`,
     "",
   ].join("\n")
 }
 
 function renderQwenDirectAgentFile(input: RenderQwenDirectAgentInput) {
+  const sourceEntry = getSourceEntry(input.sourceEntry, {
+    canonicalRoute: toDirectCanonicalRouteId(input.intent),
+    source: "direct",
+  })
+
   return [
     "---",
     `name: ${input.name}`,
@@ -144,6 +184,13 @@ function renderQwenDirectAgentFile(input: RenderQwenDirectAgentInput) {
     "---",
     "",
     MARKER,
+    renderRouteOwnershipMetadata({
+      host: "qwen",
+      source: sourceEntry.source,
+      route: sourceEntry.canonicalRoute,
+      projection: "agent",
+      renderedName: input.name,
+    }),
     "",
     `You are the ${input.name} routing agent for the \`${input.intent}\` intent.`,
     `Handle requests that match this intent: ${input.intentDescription}.`,
@@ -286,14 +333,15 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
         directory: ".qwen/agents",
         fileName: `${agentName}.md`,
         ownerPrefix: "rt-",
-        content: renderQwenDirectAgentFile({
-          name: agentName,
-          description: `${agentName} routing agent for ${intent}`,
-          model: resolved.selection.model,
-          intent,
-          intentDescription,
-        }),
-      })
+          content: renderQwenDirectAgentFile({
+            name: agentName,
+            description: `${agentName} routing agent for ${intent}`,
+            model: resolved.selection.model,
+            intent,
+            intentDescription,
+            sourceEntry: resolved.sourceEntry,
+          }),
+        })
     }
 
     return { agents, commands }
@@ -312,15 +360,25 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
 
   if (missingSkills.length > 0) {
     throw new Error(
-      `Qwen-usable superpowers skills are not installed. Missing required upstream skills: ${missingSkills.join(", ")}`,
+      `Required Qwen workflow entries are not installed. Missing required upstream entries: ${missingSkills.join(", ")}`,
     )
   }
 
   const agents: GeneratedArtifact[] = []
 
   for (const phase of BUILT_IN_PHASES) {
-    const skillName = PHASE_TO_SKILL[phase]
-    const resolved = resolveMappedRoute(config, skillName)
+    const upstreamSkillName = PHASE_TO_SKILL[phase]
+    const resolved = resolveMappedRoute(config, upstreamSkillName)
+    const sourceEntry = getSourceEntry(resolved.sourceEntry, {
+      canonicalRoute: toSuperpowersCanonicalRouteId(phase),
+      source: "superpowers",
+    })
+
+    if (sourceEntry.source === "gstack") {
+      throw new Error(`gstack is not yet supported on qwen for canonical route ${sourceEntry.canonicalRoute}`)
+    }
+
+    const workflowEntryName = getQwenWorkflowEntryName(sourceEntry, upstreamSkillName)
 
     agents.push({
       kind: "agent",
@@ -329,10 +387,11 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
       ownerPrefix: "oms-",
       content: renderAgentFile({
         name: PHASE_TO_QWEN_AGENT[phase],
-        description: `Qwen wrapper agent for the ${skillName} phase`,
+        description: `Qwen wrapper agent for the ${upstreamSkillName} phase`,
         model: resolved.selection.model,
-        skillName,
-        skillPath: upstreamSkills[skillName]!,
+        skillName: workflowEntryName,
+        skillPath: upstreamSkills[upstreamSkillName]!,
+        sourceEntry,
       }),
     })
   }

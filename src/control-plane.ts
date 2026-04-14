@@ -21,6 +21,13 @@ import {
 import { listLaneExecutionUnits } from "./lane-execution.js"
 import { resolveRoute, type BuiltInPhase } from "./router.js"
 import type { SuperpowersCompatibilityResult, SupportedSuperpowersHost } from "./superpowers-compatibility.js"
+import {
+  getWorkflowSourceEntry,
+  normalizeWorkflowSourceRoutes,
+  type CanonicalRouteId,
+  type WorkflowSourceEntry,
+  type WorkflowSourceKind,
+} from "./workflow-sources.js"
 
 const READ_ONLY_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "doctor"])
 const NAME_PATTERN = /^[a-z0-9-]+$/
@@ -67,6 +74,7 @@ export type ResolvedControlPlane = {
     mode: ControlPlaneConfig["settings"]["laneSelection"]["mode"]
     nonApplyingReason?: string
   }
+  effectiveSources: Partial<Record<CanonicalRouteId, WorkflowSourceKind>>
 }
 
 export type OpenCodeStatusState = {
@@ -97,6 +105,8 @@ export type ExplainTrace = {
   routeSource: "explicit_route" | "default_route"
   configSource: "project" | "global" | "default"
   reuseRelationship: "none" | "extends"
+  resolvedSource: WorkflowSourceKind
+  sourceEntry: WorkflowSourceEntry
 }
 
 export type LaneExplainability = ResolvedControlPlane["laneState"] & {
@@ -200,22 +210,6 @@ export function buildOpenCodeStatusState(input: {
   compatibility: SuperpowersCompatibilityResult | null
   artifactSummary: ControlPlaneArtifactSummary
 }): OpenCodeStatusState {
-  if (input.host === "opencode" && !input.source.hasRealSource) {
-    return {
-      code: "missing_config",
-      category: "oms",
-      reason: "No OMS config file was found, so OpenCode is using synthesized defaults.",
-    }
-  }
-
-  if (!input.enabled) {
-    return {
-      code: "disabled",
-      category: "oms",
-      reason: "OMS is currently disabled for this workspace.",
-    }
-  }
-
   if (input.compatibility?.status === "not_detected") {
     return {
       code: "upstream_not_detected",
@@ -229,6 +223,22 @@ export function buildOpenCodeStatusState(input: {
       code: "upstream_incompatible",
       category: "upstream",
       reason: input.compatibility.reason,
+    }
+  }
+
+  if (input.host === "opencode" && !input.source.hasRealSource) {
+    return {
+      code: "missing_config",
+      category: "oms",
+      reason: "No OMS config file was found, so OpenCode is using synthesized defaults.",
+    }
+  }
+
+  if (!input.enabled) {
+    return {
+      code: "disabled",
+      category: "oms",
+      reason: "OMS is currently disabled for this workspace.",
     }
   }
 
@@ -262,6 +272,7 @@ export function buildControlPlaneRouteExplainTrace(input: {
     lanes: input.resolved.config.lanes,
     routes: input.resolved.activePreset.preset.routes,
     defaultRoute: input.resolved.activePreset.preset.defaultRoute,
+    effectiveSources: input.resolved.effectiveSources,
     effectiveLane: laneState.effectiveLane,
     superpowersCompatibility: input.resolved.config.settings.superpowersCompatibility,
   }
@@ -295,7 +306,22 @@ export function buildControlPlaneRouteExplainTrace(input: {
       ? "default"
       : chooseMostLocalConfigSource([decisivePath, selectedProfilePath], input.cwd),
     reuseRelationship: input.resolved.activePreset.preset.extends ? "extends" : "none",
+    resolvedSource: resolvedRoute.resolvedSource,
+    sourceEntry: resolvedRoute.sourceEntry,
   }
+}
+
+export function summarizeEffectiveSourceEntries(resolved: ResolvedControlPlane) {
+  const effectiveSources = normalizeWorkflowSourceRoutes(resolved.config.workflow, resolved.effectiveSources)
+
+  return Object.fromEntries(
+    Object.entries(effectiveSources)
+      .filter((entry): entry is [string, WorkflowSourceKind] => entry[1] !== undefined)
+      .map(([canonicalRoute, source]) => [
+        canonicalRoute,
+        getWorkflowSourceEntry(canonicalRoute as CanonicalRouteId, source),
+      ]),
+  ) as Partial<Record<CanonicalRouteId, WorkflowSourceEntry>>
 }
 
 export function buildControlPlaneExplainTrace(input: {
@@ -432,6 +458,13 @@ function getEffectiveProfiles(config: ControlPlaneConfig, preset: ControlPlanePr
     ...config.profiles,
     ...(preset.profiles ?? {}),
   }
+}
+
+function getEffectiveSources(config: ControlPlaneConfig, preset: ControlPlanePreset) {
+  return normalizeWorkflowSourceRoutes(config.workflow, {
+    ...(preset.sourcePreset ? (config.sourcePresets[preset.sourcePreset]?.routes ?? {}) : {}),
+    ...(preset.sourceRoutes ?? {}),
+  })
 }
 
 function resolvePresetDefinitionFromLayers(
@@ -695,6 +728,11 @@ function cloneLayeredConfig(config: LayeredControlPlaneConfigInput): LayeredCont
             : undefined,
         }
       : undefined,
+    sourcePresets: config.sourcePresets
+      ? Object.fromEntries(
+          Object.entries(config.sourcePresets).map(([key, sourcePreset]) => [key, { routes: { ...sourcePreset.routes } }]),
+        )
+      : undefined,
     profiles: cloneProfiles(config.profiles),
     lanes: cloneLanes(config.lanes),
     presets: Object.fromEntries(
@@ -721,6 +759,12 @@ function toLayeredDocument(config: ControlPlaneConfig): LayeredControlPlaneConfi
       ),
       superpowersCompatibility: { ...config.settings.superpowersCompatibility },
     },
+    sourcePresets: Object.fromEntries(
+      Object.entries(config.sourcePresets).map(([key, sourcePreset]) => [
+        key,
+        { routes: Object.fromEntries(Object.entries(sourcePreset.routes)) as Record<string, "superpowers" | "gstack" | "direct"> },
+      ]),
+    ),
     profiles: cloneProfiles(config.profiles),
     lanes: cloneLanes(config.lanes),
     presets: Object.fromEntries(
@@ -874,6 +918,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
   try {
     const loaded = await loadControlPlaneConfig(input)
     const { activePreset, laneState } = validateControlPlaneConfig(loaded.config, input.runtimeLane)
+    const effectiveSources = getEffectiveSources(loaded.config, activePreset.preset)
     const activePresetDefinition = resolvePresetDefinitionFromLayers(loaded.layers, activePreset.key)
     const parentPresetDefinition = activePreset.preset.extends
       ? resolvePresetDefinitionFromLayers(loaded.layers, activePreset.preset.extends)
@@ -890,6 +935,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       activePreset,
       layers: loaded.layers,
       laneState,
+      effectiveSources,
       trace: {
         activePresetDefinition,
         parentPresetDefinition,
@@ -917,6 +963,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       activePreset,
       layers: [],
       laneState,
+      effectiveSources: getEffectiveSources(config, activePreset.preset),
     }
   }
 }

@@ -203,6 +203,26 @@ describe("buildArtifacts", () => {
     ).toThrow(/spr-visual/)
   })
 
+  it("keeps shared OpenCode agents route-agnostic when multiple phases reuse the same agent", () => {
+    const artifacts = buildArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: {
+        visual: { model: "google/gemini-2.5-pro", variant: "high" },
+      },
+      routes: {
+        "frontend-design": "visual",
+        "webapp-testing": "visual",
+      },
+      defaultRoute: "visual",
+    } as never)
+
+    const sharedAgent = artifacts.agents.find((item) => item.fileName === "spr-visual.md")
+
+    expect(sharedAgent?.content).toContain("named in the invoking command")
+    expect(sharedAgent?.content).not.toContain("superpowers/frontend-design")
+    expect(sharedAgent?.content).not.toContain("superpowers/webapp-testing")
+  })
+
   it("fails when a built-in phase has no route and no defaultRoute", () => {
     expect(() =>
       buildArtifacts({
@@ -249,6 +269,28 @@ describe("buildArtifacts", () => {
     const strategyAgent = artifacts.agents.find((item) => item.fileName === "spr-strategy.md")
 
     expect(strategyAgent?.content).toContain("google/gemini-2.5-pro")
+  })
+
+  it("keeps the stable plan command name while gstack planning content uses plan-eng-review", () => {
+    const artifacts = buildArtifacts({
+      workflow: { kind: "superpowers" },
+      profiles: { build: { model: "openai/gpt-5" } },
+      routes: {},
+      defaultRoute: "build",
+      effectiveSources: {
+        "phase.plan": "gstack",
+      },
+    } as never)
+
+    const planCommand = artifacts.commands.find((item) => item.fileName === "sp-plan.md")
+    const planAgent = artifacts.agents.find((item) => item.fileName === "spr-plan.md")
+
+    expect(planCommand?.fileName).toBe("sp-plan.md")
+    expect(planAgent?.fileName).toBe("spr-plan.md")
+    expect(planCommand?.content).toContain("gstack")
+    expect(planCommand?.content).toContain("gstack/plan-eng-review")
+    expect(planAgent?.content).toContain("gstack")
+    expect(planAgent?.content).toContain("plan-eng-review")
   })
 
   it("renders direct-mode OpenCode commands for workflow intents", () => {

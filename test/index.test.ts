@@ -5,8 +5,10 @@ describe("library exports", () => {
   it("exports Stage 1 control-plane and Stage 2 Qwen helpers", () => {
     expect(library.resolveControlPlane).toBeTypeOf("function")
     expect(library.prepareControlPlaneStateWrite).toBeTypeOf("function")
+    expect(library.buildClaudeArtifacts).toBeTypeOf("function")
     expect(library.buildQwenArtifacts).toBeTypeOf("function")
     expect(library.discoverQwenUpstreamSkills).toBeTypeOf("function")
+    expect(library.renderClaudeSkillFile).toBeTypeOf("function")
     expect(library.renderQwenAgentFile).toBeTypeOf("function")
   })
 

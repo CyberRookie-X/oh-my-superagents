@@ -57,6 +57,16 @@
         "superpowersCompatibility": { "$ref": "#/$defs/compatibility" }
       }
     },
+    "sourcePresets": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/sourcePreset"
+      }
+    },
     "presets": {
       "type": "object",
       "propertyNames": {
@@ -87,6 +97,10 @@
             "items": { "type": "string", "minLength": 1 }
           },
           "defaultLane": { "type": "string", "minLength": 1 },
+          "sourcePreset": { "type": "string", "minLength": 1 },
+          "sourceRoutes": {
+            "$ref": "#/$defs/sourceRoutes"
+          },
           "routes": {
             "$ref": "#/$defs/routes"
           },
@@ -130,6 +144,101 @@
     "defaultRoute": { "type": "string", "minLength": 1 },
     "superpowersCompatibility": { "$ref": "#/$defs/compatibility" }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "workflow": {
+            "type": "object",
+            "properties": {
+              "kind": { "const": "direct" }
+            },
+            "required": ["kind"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "sourcePresets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "routes": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "pattern": "^intent\\..+$"
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/workflowSourceKind"
+                  }
+                }
+              }
+            }
+          },
+          "presets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "sourceRoutes": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "pattern": "^intent\\..+$"
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/workflowSourceKind"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "sourcePresets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "routes": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "pattern": "^phase\\..+$"
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/nonDirectWorkflowSourceKind"
+                  }
+                }
+              }
+            }
+          },
+          "presets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "sourceRoutes": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "pattern": "^phase\\..+$"
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/nonDirectWorkflowSourceKind"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "anyOf": [
     {
       "type": "object",
@@ -188,6 +297,16 @@
               }
             },
             "superpowersCompatibility": { "$ref": "#/$defs/compatibility" }
+          }
+        },
+        "sourcePresets": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/sourcePreset"
           }
         },
         "profiles": {
@@ -273,6 +392,10 @@
                 "items": { "type": "string", "minLength": 1 }
               },
               "defaultLane": { "type": "string", "minLength": 1 },
+              "sourcePreset": { "type": "string", "minLength": 1 },
+              "sourceRoutes": {
+                "$ref": "#/$defs/sourceRoutes"
+              },
               "routes": {
                 "$ref": "#/$defs/routes"
               },
@@ -329,6 +452,22 @@
       },
       "additionalProperties": { "type": "string", "minLength": 1 }
     },
+    "sourceRoutes": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^(phase|intent)\\..+$"
+      },
+      "patternProperties": {
+        "^phase\\..+$": {
+          "enum": ["superpowers", "gstack"]
+        },
+        "^intent\\..+$": {
+          "$ref": "#/$defs/workflowSourceKind"
+        }
+      },
+      "additionalProperties": false
+    },
     "workflow": {
       "anyOf": [
         {
@@ -368,6 +507,22 @@
         "label": { "type": "string", "minLength": 1 },
         "description": { "type": "string", "minLength": 1 }
       }
+    },
+    "sourcePreset": {
+      "type": "object",
+      "required": ["routes"],
+      "additionalProperties": false,
+      "properties": {
+        "routes": {
+          "$ref": "#/$defs/sourceRoutes"
+        }
+      }
+    },
+    "workflowSourceKind": {
+      "enum": ["superpowers", "gstack", "direct"]
+    },
+    "nonDirectWorkflowSourceKind": {
+      "enum": ["superpowers", "gstack"]
     },
     "compatibility": {
       "type": "object",

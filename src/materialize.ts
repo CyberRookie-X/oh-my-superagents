@@ -4,9 +4,9 @@ import {
   AUXILIARY_MARKER_PREFIX,
   CONTROL_PLANE_MARKER_PREFIX,
   MARKER_TEXT,
+  ROUTE_MARKER_PREFIX,
   RUNTIME_AGENT_METADATA_DIRECTORY,
   RUNTIME_AGENT_METADATA_FILE,
-  type GeneratedArtifact,
 } from "./opencode.js"
 
 type StatsLike = {
@@ -25,7 +25,12 @@ type MaterializeFs = {
 
 export type MaterializeArtifactsInput = {
   cwd: string
-  artifacts: GeneratedArtifact[]
+  artifacts: Array<{
+    directory: string
+    fileName: string
+    ownerPrefix: string
+    content: string
+  }>
   fs: MaterializeFs
 }
 
@@ -36,7 +41,7 @@ export type MaterializeArtifactsResult = {
   removed: string[]
 }
 
-const CODEX_SKILL_FILE_NAME = "SKILL.md"
+const SKILL_FILE_NAME = "SKILL.md"
 const CONTROL_PLANE_LOGICAL_COMMANDS = new Set<ControlPlaneCommandKey>(CONTROL_PLANE_COMMAND_KEYS)
 const AUXILIARY_HELPER_NAME = "temporary-disable"
 const CODEX_DIRECT_SKILL_MARKER_PREFIX = "oms-direct:"
@@ -231,6 +236,82 @@ function parseCodexDirectSkillOwnership(content: string) {
   }
 }
 
+function parseRouteOwnership(content: string) {
+  if (!hasArtifactOwnershipMarker(content)) {
+    return undefined
+  }
+
+  const escapedPrefix = ROUTE_MARKER_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const match = content.match(
+    new RegExp(
+      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen|claude); source=([a-z-]+); route=([a-z0-9.-]+); projection=(agent|command|skill); rendered-name=([a-z0-9-]+) -->`,
+    ),
+  )
+
+  if (!match) {
+    return undefined
+  }
+
+  return {
+    stage: match[1] as "1" | "2",
+    host: match[2] as "opencode" | "codex" | "qwen" | "claude",
+    source: match[3],
+    route: match[4],
+    projection: match[5] as "agent" | "command" | "skill",
+    renderedName: match[6],
+  }
+}
+
+function isSameRouteOwnership(leftContent: string, rightContent: string) {
+  const left = parseRouteOwnership(leftContent)
+  const right = parseRouteOwnership(rightContent)
+
+  return (
+    left !== undefined
+    && right !== undefined
+    && left.host === right.host
+    && left.source === right.source
+    && left.route === right.route
+    && left.projection === right.projection
+  )
+}
+
+function isRouteOwnedFile(filePath: string, content: string) {
+  const ownership = parseRouteOwnership(content)
+  if (!ownership) {
+    return false
+  }
+
+  if (ownership.host === "claude") {
+    return (
+      ownership.projection === "skill"
+      && path.basename(filePath) === "SKILL.md"
+      && filePath.includes(`${path.sep}.claude${path.sep}skills${path.sep}`)
+      && path.basename(path.dirname(filePath)) === ownership.renderedName
+    )
+  }
+
+  if (path.basename(filePath, ".md") !== ownership.renderedName) {
+    return false
+  }
+
+  if (ownership.host === "opencode") {
+    return ownership.projection === "command"
+      ? filePath.includes(`${path.sep}.opencode${path.sep}commands${path.sep}`)
+      : filePath.includes(`${path.sep}.opencode${path.sep}agents${path.sep}`)
+  }
+
+  if (ownership.host === "codex") {
+    return ownership.projection === "agent" && filePath.includes(`${path.sep}.codex${path.sep}agents${path.sep}`)
+  }
+
+  return ownership.projection === "agent" && filePath.includes(`${path.sep}.qwen${path.sep}agents${path.sep}`)
+}
+
+function isRouteOwnedArtifact(artifact: MaterializeArtifactsInput["artifacts"][number]) {
+  return parseRouteOwnership(artifact.content) !== undefined
+}
+
 function isSameControlPlaneOwnership(leftContent: string, rightContent: string) {
   const left = parseControlPlaneOwnership(leftContent)
   const right = parseControlPlaneOwnership(rightContent)
@@ -291,7 +372,7 @@ function isCodexOmsControlPlaneSkillFile(filePath: string, content: string) {
   const ownership = parseControlPlaneOwnership(content)
 
   return (
-    path.basename(filePath) === CODEX_SKILL_FILE_NAME
+    path.basename(filePath) === SKILL_FILE_NAME
     && filePath.includes(`${path.sep}plugins${path.sep}oh-my-superagents-codex${path.sep}skills${path.sep}`)
     && isCodexOmsControlPlaneSkillContent(content)
     && path.basename(path.dirname(filePath)) === ownership?.renderedName
@@ -302,7 +383,7 @@ function isCodexOmsAuxiliarySkillFile(filePath: string, content: string) {
   const ownership = parseAuxiliaryOwnership(content)
 
   return (
-    path.basename(filePath) === CODEX_SKILL_FILE_NAME
+    path.basename(filePath) === SKILL_FILE_NAME
     && filePath.includes(`${path.sep}plugins${path.sep}oh-my-superagents-codex${path.sep}skills${path.sep}`)
     && isCodexOmsAuxiliarySkillContent(content)
     && path.basename(path.dirname(filePath)) === ownership?.renderedName
@@ -313,39 +394,87 @@ function isCodexDirectSkillFile(filePath: string, content: string) {
   const ownership = parseCodexDirectSkillOwnership(content)
 
   return (
-    path.basename(filePath) === CODEX_SKILL_FILE_NAME
+    path.basename(filePath) === SKILL_FILE_NAME
     && filePath.includes(`${path.sep}plugins${path.sep}oh-my-superagents-codex${path.sep}skills${path.sep}`)
     && isCodexDirectSkillContent(content)
     && path.basename(path.dirname(filePath)) === ownership?.renderedName
   )
 }
 
-function isCodexOmsControlPlaneSkillArtifact(artifact: GeneratedArtifact) {
+export function isOmsOwnedSkillFile(filePath: string, content: string) {
   return (
-    artifact.fileName === CODEX_SKILL_FILE_NAME
+    isCodexOmsControlPlaneSkillFile(filePath, content)
+    || isCodexOmsAuxiliarySkillFile(filePath, content)
+    || isCodexDirectSkillFile(filePath, content)
+    || (
+      path.basename(filePath) === SKILL_FILE_NAME
+      && isRouteOwnedFile(filePath, content)
+    )
+  )
+}
+
+export function isOmsOwnedArtifactFile(filePath: string, content: string) {
+  const directory = path.dirname(filePath)
+  const fileName = path.basename(filePath)
+
+  return (
+    isOpenCodeOmsControlPlaneFile(filePath, content)
+    || isQwenOmsControlPlaneFile(filePath, content)
+    || isOmsOwnedSkillFile(filePath, content)
+    || isOpenCodeRouterOwnedFile(directory, fileName, content)
+    || isCodexRouterOwnedFile(directory, fileName, content)
+    || isQwenRouterOwnedFile(directory, fileName, content)
+    || isRouteOwnedFile(filePath, content)
+    || (
+      hasArtifactOwnershipMarker(content)
+      && fileName.startsWith("oms-")
+      && (
+        directory.endsWith(`${path.sep}.opencode${path.sep}commands`)
+        || directory.endsWith(`${path.sep}.qwen${path.sep}commands`)
+      )
+    )
+  )
+}
+
+function isCodexOmsControlPlaneSkillArtifact(artifact: MaterializeArtifactsInput["artifacts"][number]) {
+  return (
+    artifact.fileName === SKILL_FILE_NAME
     && artifact.directory.startsWith("plugins/oh-my-superagents-codex/skills/")
     && isCodexOmsControlPlaneSkillContent(artifact.content)
   )
 }
 
-function isCodexOmsAuxiliarySkillArtifact(artifact: GeneratedArtifact) {
+function isCodexOmsAuxiliarySkillArtifact(artifact: MaterializeArtifactsInput["artifacts"][number]) {
   return (
-    artifact.fileName === CODEX_SKILL_FILE_NAME
+    artifact.fileName === SKILL_FILE_NAME
     && artifact.directory.startsWith("plugins/oh-my-superagents-codex/skills/")
     && isCodexOmsAuxiliarySkillContent(artifact.content)
   )
 }
 
-function isCodexDirectSkillArtifact(artifact: GeneratedArtifact) {
+function isCodexDirectSkillArtifact(artifact: MaterializeArtifactsInput["artifacts"][number]) {
   return (
-    artifact.fileName === CODEX_SKILL_FILE_NAME
+    artifact.fileName === SKILL_FILE_NAME
     && artifact.directory.startsWith("plugins/oh-my-superagents-codex/skills/")
     && isCodexDirectSkillContent(artifact.content)
   )
 }
 
+function isOmsOwnedSkillArtifact(artifact: MaterializeArtifactsInput["artifacts"][number]) {
+  return (
+    isCodexOmsControlPlaneSkillArtifact(artifact)
+    || isCodexOmsAuxiliarySkillArtifact(artifact)
+    || isCodexDirectSkillArtifact(artifact)
+    || (
+      artifact.fileName === SKILL_FILE_NAME
+      && artifact.directory.startsWith(".claude/skills/")
+      && isRouteOwnedArtifact(artifact)
+    )
+  )
+}
+
 function isArtifactOwnedByCurrentContract(
-  artifact: GeneratedArtifact,
+  artifact: MaterializeArtifactsInput["artifacts"][number],
   existingPath: string,
   existingContent: string,
 ) {
@@ -396,6 +525,10 @@ function isArtifactOwnedByCurrentContract(
     return isOpenCodeRuntimeMetadataFile(existingPath) && isOpenCodeRuntimeMetadataContent(existingContent)
   }
 
+  if (isRouteOwnedArtifact(artifact)) {
+    return isRouteOwnedFile(existingPath, existingContent)
+  }
+
   return isPrefixOwned(artifact.fileName, existingContent, new Set([artifact.ownerPrefix]))
 }
 
@@ -411,7 +544,7 @@ export async function materializeArtifacts(
   const opencodeOmsCommandDirectories = new Set<string>()
   const opencodeRuntimeMetadataDirectories = new Set<string>()
   const qwenOmsCommandDirectories = new Set<string>()
-  const codexSkillCleanupRoots = new Map<string, Set<string>>()
+  const ownedSkillCleanupRoots = new Map<string, Set<string>>()
   const openCodeRuntimeMetadataPath = path.join(
     input.cwd,
     RUNTIME_AGENT_METADATA_DIRECTORY,
@@ -442,15 +575,11 @@ export async function materializeArtifacts(
         qwenOmsCommandDirectories.add(targetDirectory)
       }
 
-      if (
-        isCodexOmsControlPlaneSkillArtifact(artifact)
-        || isCodexOmsAuxiliarySkillArtifact(artifact)
-        || isCodexDirectSkillArtifact(artifact)
-      ) {
+      if (isOmsOwnedSkillArtifact(artifact)) {
         const cleanupRoot = path.dirname(targetDirectory)
-        const desiredSkillDirectories = codexSkillCleanupRoots.get(cleanupRoot) ?? new Set<string>()
+        const desiredSkillDirectories = ownedSkillCleanupRoots.get(cleanupRoot) ?? new Set<string>()
         desiredSkillDirectories.add(path.basename(targetDirectory))
-        codexSkillCleanupRoots.set(cleanupRoot, desiredSkillDirectories)
+        ownedSkillCleanupRoots.set(cleanupRoot, desiredSkillDirectories)
       }
 
       const finalPath = path.join(targetDirectory, artifact.fileName)
@@ -504,6 +633,7 @@ export async function materializeArtifacts(
         || isOpenCodeRouterOwnedFile(directory, entry, content)
         || isCodexRouterOwnedFile(directory, entry, content)
         || isQwenRouterOwnedFile(directory, entry, content)
+        || isRouteOwnedFile(fullPath, content)
         || isPrefixOwned(entry, content, prefixes)
 
       if (!isOwnedByDirectoryContract) {
@@ -540,7 +670,7 @@ export async function materializeArtifacts(
     }
   }
 
-  for (const [cleanupRoot, desiredSkillDirectories] of codexSkillCleanupRoots.entries()) {
+  for (const [cleanupRoot, desiredSkillDirectories] of ownedSkillCleanupRoots.entries()) {
     let entries: string[] = []
     try {
       entries = await input.fs.readdir(cleanupRoot)
@@ -553,13 +683,9 @@ export async function materializeArtifacts(
         continue
       }
 
-      const skillPath = path.join(cleanupRoot, entry, CODEX_SKILL_FILE_NAME)
+      const skillPath = path.join(cleanupRoot, entry, SKILL_FILE_NAME)
       const content = await input.fs.readFile(skillPath).catch(() => "")
-      if (
-        !isCodexOmsControlPlaneSkillFile(skillPath, content)
-        && !isCodexOmsAuxiliarySkillFile(skillPath, content)
-        && !isCodexDirectSkillFile(skillPath, content)
-      ) {
+      if (!isOmsOwnedSkillFile(skillPath, content)) {
         continue
       }
 

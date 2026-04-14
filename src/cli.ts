@@ -24,6 +24,7 @@ import {
   buildOpenCodeStatusState,
   prepareControlPlaneStateWrite,
   resolveControlPlane,
+  summarizeEffectiveSourceEntries,
   summarizeLaneExplainability,
   summarizeSubagentExecutionDiagnostics,
   summarizeRoutingValidation,
@@ -33,8 +34,9 @@ import {
   type ResolvedControlPlane,
 } from "./control-plane.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
+import { buildClaudeArtifacts } from "./claude.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
-import { hasArtifactOwnershipMarker, isOpenCodeRuntimeMetadataContent, materializeArtifacts } from "./materialize.js"
+import { isOmsOwnedArtifactFile, isOmsOwnedSkillFile, isOpenCodeRuntimeMetadataContent, materializeArtifacts } from "./materialize.js"
 import {
   buildArtifacts,
   listRenderedOpenCodeControlPlaneCommands,
@@ -43,6 +45,7 @@ import {
 } from "./opencode.js"
 import { buildQwenArtifacts } from "./qwen.js"
 import { explainAll, explainPhase, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
+import { normalizeWorkflowSourceRoutes } from "./workflow-sources.js"
 import {
   evaluateSuperpowersCompatibility,
   type SuperpowersCompatibilityMode,
@@ -58,11 +61,13 @@ export type CliResult = {
   stderr: string
 }
 
-type CliHost = SupportedSuperpowersHost | "qwen"
+type CliHost = SupportedSuperpowersHost | "qwen" | "claude"
+type ExplainCliHost = Exclude<CliHost, "qwen">
 
 const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
 const CODEX_PLUGIN_MANIFEST_PATH = "plugins/oh-my-superagents-codex/.codex-plugin/plugin.json"
 const CODEX_SKILLS_ROOT = "plugins/oh-my-superagents-codex/skills"
+const CLAUDE_SKILLS_ROOT = ".claude/skills"
 const DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS = ["status", "sync", "doctor"] as const
 const QWEN_MANAGED_AGENT_FILE_NAMES = [
   "oms-brainstorm.md",
@@ -139,8 +144,12 @@ const defaultDeps: CliDeps = {
     try {
       await fs.stat(filePath)
       return true
-    } catch {
-      return false
+    } catch (error) {
+      if (isMissingFsError(error)) {
+        return false
+      }
+
+      throw error
     }
   },
   readdir: async (directory) => fs.readdir(directory),
@@ -497,6 +506,8 @@ function withExplainTrace(payload: Record<string, unknown>, trace: ExplainTrace)
     routeSource: typeof payload.routeSource === "string" ? payload.routeSource : trace.routeSource,
     configSource: typeof payload.configSource === "string" ? payload.configSource : trace.configSource,
     reuseRelationship: typeof payload.reuseRelationship === "string" ? payload.reuseRelationship : trace.reuseRelationship,
+    resolvedSource: typeof payload.resolvedSource === "string" ? payload.resolvedSource : trace.resolvedSource,
+    sourceEntry: isRecord(payload.sourceEntry) ? payload.sourceEntry : trace.sourceEntry,
   }
 }
 
@@ -524,18 +535,26 @@ function buildUseRouteImpact(previous: ResolvedControlPlane["config"], next: Res
     changedPhases: BUILT_IN_PHASES.filter((phase) => {
       const previousResolved = resolvePhase(previousRouter, phase)
       const nextResolved = resolvePhase(nextRouter, phase)
-      const previousVisibleSelection = {
+      const previousRouteFingerprint = {
+        profileId: previousResolved.profileId,
         model: previousResolved.selection.model,
         variant: previousResolved.selection.variant,
         temperature: previousResolved.selection.temperature,
+        codexFast: previousResolved.selection.codexFast,
+        resolvedSource: previousResolved.resolvedSource,
+        sourceEntry: previousResolved.sourceEntry,
       }
-      const nextVisibleSelection = {
+      const nextRouteFingerprint = {
+        profileId: nextResolved.profileId,
         model: nextResolved.selection.model,
         variant: nextResolved.selection.variant,
         temperature: nextResolved.selection.temperature,
+        codexFast: nextResolved.selection.codexFast,
+        resolvedSource: nextResolved.resolvedSource,
+        sourceEntry: nextResolved.sourceEntry,
       }
 
-      return JSON.stringify(previousVisibleSelection) !== JSON.stringify(nextVisibleSelection)
+      return JSON.stringify(previousRouteFingerprint) !== JSON.stringify(nextRouteFingerprint)
     }),
   }
 }
@@ -692,11 +711,11 @@ function assertWorkflowSupport(
     return
   }
 
-  if (command === "status" || command === "doctor" || command === "sync") {
+  if ((command === "status" || command === "doctor" || command === "sync") && isDirectWorkflowHostSupported(config, host)) {
     return
   }
 
-  if (command === "explain" && host !== "qwen") {
+  if (command === "explain" && (host === "opencode" || host === "codex")) {
     return
   }
 
@@ -708,9 +727,11 @@ function explainDirectIntent(config: Awaited<ReturnType<typeof loadRouterConfig>
 
   return {
     intent,
+    canonicalRoute: resolved.canonicalRoute,
     profileId: resolved.profileId,
     effectiveLane: resolved.effectiveLane,
     routeSource: resolved.routeSource,
+    resolvedSource: resolved.resolvedSource,
     model: resolved.selection.model,
     variant: resolved.selection.variant,
     commandName: `ai-${intent}`,
@@ -724,6 +745,84 @@ function explainAllDirect(config: Awaited<ReturnType<typeof loadRouterConfig>>["
   }
 
   return Object.keys(config.workflow.intents).map((intent) => explainDirectIntent(config, intent))
+}
+
+function explainClaudePhase(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"], phase: BuiltInPhase) {
+  const resolved = resolvePhase(config, phase)
+  const skill = buildClaudeArtifacts(config).skills[BUILT_IN_PHASES.indexOf(phase)]
+
+  return {
+    phase,
+    canonicalRoute: resolved.canonicalRoute,
+    profileId: resolved.profileId,
+    effectiveLane: resolved.effectiveLane,
+    routeSource: resolved.routeSource,
+    resolvedSource: resolved.resolvedSource,
+    model: resolved.selection.model,
+    variant: resolved.selection.variant,
+    skillName: skill ? path.basename(skill.directory) : undefined,
+  }
+}
+
+function explainAllClaude(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"]) {
+  const skills = buildClaudeArtifacts(config).skills
+
+  return BUILT_IN_PHASES.map((phase, index) => {
+    const resolved = resolvePhase(config, phase)
+    const skill = skills[index]
+
+    return {
+      phase,
+      canonicalRoute: resolved.canonicalRoute,
+      profileId: resolved.profileId,
+      effectiveLane: resolved.effectiveLane,
+      routeSource: resolved.routeSource,
+      resolvedSource: resolved.resolvedSource,
+      model: resolved.selection.model,
+      variant: resolved.selection.variant,
+      skillName: skill ? path.basename(skill.directory) : undefined,
+    }
+  })
+}
+
+function explainAllForCliHost(
+  config: Awaited<ReturnType<typeof loadRouterConfig>>["config"],
+  host: ExplainCliHost,
+  deps: CliDeps,
+) {
+  return host === "claude" ? explainAllClaude(config) : deps.explainAllForHost(config, host)
+}
+
+function explainPhaseForCliHost(
+  config: Awaited<ReturnType<typeof loadRouterConfig>>["config"],
+  host: ExplainCliHost,
+  phase: BuiltInPhase,
+  deps: CliDeps,
+) {
+  return host === "claude" ? explainClaudePhase(config, phase) : deps.explainPhaseForHost(config, host, phase)
+}
+
+function assertQwenProjectionSupport(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"]) {
+  if (config.workflow.kind === "direct") {
+    return
+  }
+
+  const unsupportedEntries = BUILT_IN_PHASES
+    .map((phase) => resolvePhase(config, phase).sourceEntry)
+    .filter((sourceEntry) => sourceEntry.source === "gstack")
+    .map((sourceEntry) => ({
+      canonicalRoute: sourceEntry.canonicalRoute,
+      renderedEntry: `${sourceEntry.source}/${sourceEntry.entryName ?? sourceEntry.canonicalRoute}`,
+    }))
+    .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.renderedEntry === entry.renderedEntry) === index)
+
+  if (unsupportedEntries.length === 0) {
+    return
+  }
+
+  throw new Error(
+    `Qwen cannot project gstack routes in this slice. Use --host opencode or --host codex instead. Unsupported source entries: ${unsupportedEntries.map((entry) => `${entry.renderedEntry} (${entry.canonicalRoute})`).join(", ")}`,
+  )
 }
 
 function maybeResolveCompatibility(
@@ -743,6 +842,11 @@ function toRouterConfig(
     throw new Error(`Unknown preset: ${config.settings.activePreset}`)
   }
 
+  const effectiveSources = normalizeWorkflowSourceRoutes(config.workflow, {
+    ...(activePreset.sourcePreset ? (config.sourcePresets[activePreset.sourcePreset]?.routes ?? {}) : {}),
+    ...(activePreset.sourceRoutes ?? {}),
+  })
+
   return {
     workflow: config.workflow,
     profiles: {
@@ -751,6 +855,7 @@ function toRouterConfig(
     },
     lanes: config.lanes,
     availableLanes: laneState?.allowedLanes ?? activePreset.usesLanes ?? [],
+    effectiveSources,
     routes: activePreset.routes,
     defaultRoute: activePreset.defaultRoute,
     effectiveLane: laneState?.effectiveLane ?? config.settings.defaultLane ?? activePreset.defaultLane,
@@ -821,6 +926,12 @@ async function getArtifactsForHost(
     return deps.buildCodexArtifacts(config).agents
   }
 
+  if (host === "claude") {
+    return buildClaudeArtifacts(config).skills
+  }
+
+  assertQwenProjectionSupport(config)
+
   const built = await deps.buildQwenArtifacts(config, {
     cwd,
     controlPlaneSettings,
@@ -854,6 +965,8 @@ async function getExpectedArtifacts(
   }
 
   if (host === "qwen") {
+    assertQwenProjectionSupport(routerConfig)
+
     if (routerConfig.workflow.kind === "direct") {
       const built = await deps.buildQwenArtifacts(routerConfig, {
         cwd,
@@ -895,6 +1008,7 @@ const OWNED_ARTIFACT_RULES: Record<CliHost, Array<{ directory: string; extension
     { directory: ".qwen/agents", extension: ".md" },
     { directory: ".qwen/commands", extension: ".md" },
   ],
+  claude: [],
 }
 
 function isMissingFsError(error: unknown) {
@@ -1005,10 +1119,10 @@ async function removeCodexMarketplaceEntryFile(cwd: string, deps: CliDeps) {
   }
 }
 
-async function discoverCodexControlPlaneSkills(cwd: string, deps: CliDeps) {
+async function discoverOwnedSkillFiles(cwd: string, skillsRoot: string, deps: CliDeps) {
   const discovered = new Set<string>()
   const warnings: string[] = []
-  const root = path.join(cwd, CODEX_SKILLS_ROOT)
+  const root = path.join(cwd, skillsRoot)
 
   let entries: string[] = []
   try {
@@ -1030,7 +1144,7 @@ async function discoverCodexControlPlaneSkills(cwd: string, deps: CliDeps) {
       }
 
       const content = await deps.readArtifactFile(filePath)
-      if (!hasArtifactOwnershipMarker(content)) {
+      if (!isOmsOwnedSkillFile(filePath, content)) {
         continue
       }
 
@@ -1100,7 +1214,7 @@ async function discoverOwnedArtifacts(
             continue
           }
         } else {
-          if (!hasArtifactOwnershipMarker(content)) {
+          if (!isOmsOwnedArtifactFile(filePath, content)) {
             continue
           }
         }
@@ -1126,16 +1240,28 @@ async function discoverOwnedArtifacts(
     }
 
     const pluginManifestPath = path.join(cwd, CODEX_PLUGIN_MANIFEST_PATH)
-    if (await deps.artifactExists(pluginManifestPath).catch(() => false)) {
-      specialPresent.add(pluginManifestPath)
-      discovered.add(pluginManifestPath)
+    try {
+      if (await deps.artifactExists(pluginManifestPath)) {
+        specialPresent.add(pluginManifestPath)
+        discovered.add(pluginManifestPath)
+      }
+    } catch (error) {
+      warnings.push(`Failed to inspect OMS-owned artifact ${pluginManifestPath}: ${error instanceof Error ? error.message : String(error)}`)
     }
 
-    const codexSkills = await discoverCodexControlPlaneSkills(cwd, deps)
+    const codexSkills = await discoverOwnedSkillFiles(cwd, CODEX_SKILLS_ROOT, deps)
     for (const filePath of codexSkills.paths) {
       discovered.add(filePath)
     }
     warnings.push(...codexSkills.warnings)
+  }
+
+  if (host === "claude") {
+    const claudeSkills = await discoverOwnedSkillFiles(cwd, CLAUDE_SKILLS_ROOT, deps)
+    for (const filePath of claudeSkills.paths) {
+      discovered.add(filePath)
+    }
+    warnings.push(...claudeSkills.warnings)
   }
 
   return {
@@ -1205,6 +1331,7 @@ function formatArtifactInspection(artifacts: Awaited<ReturnType<typeof inspectAr
   return {
     present: artifacts.present,
     missing: artifacts.missing,
+    stale: artifacts.stale,
     ...(artifacts.discoveryWarnings ? { discoveryWarnings: artifacts.discoveryWarnings } : {}),
   }
 }
@@ -1219,6 +1346,19 @@ function filterRenderedOpenCodeCommandsForWorkflow(
 
   return Object.fromEntries(
     DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS.map((commandKey) => [commandKey, rendered[commandKey]]),
+  )
+}
+
+function filterNamedCommandsForWorkflow<T>(
+  commands: Record<string, T>,
+  workflow: ResolvedControlPlane["config"]["workflow"],
+) {
+  if (workflow.kind !== "direct") {
+    return commands
+  }
+
+  return Object.fromEntries(
+    DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS.map((commandKey) => [commandKey, commands[commandKey]]),
   )
 }
 
@@ -1347,6 +1487,9 @@ async function buildControlPlaneStatus(
 ) {
   const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
   assertWorkflowSupport(resolved.config, "status", host)
+  const expectedArtifacts = resolved.config.settings.enabled
+    ? await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps)
+    : []
   const compatibility = await maybeResolveCompatibility(
     resolved.config,
     host,
@@ -1354,7 +1497,7 @@ async function buildControlPlaneStatus(
   )
   const artifacts = await inspectArtifacts(
     cwd,
-    await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps),
+    expectedArtifacts,
     host,
     deps,
   )
@@ -1399,6 +1542,8 @@ async function buildControlPlaneStatus(
       .map(([key, preset]) => ({ key, label: preset.label, short: preset.short, description: preset.description }))
       .sort((left, right) => left.key.localeCompare(right.key)),
     source: formatControlPlaneSource(resolved),
+    effectiveSources: resolved.effectiveSources,
+    effectiveSourceEntries: summarizeEffectiveSourceEntries(resolved),
     host,
     compatibility,
     artifacts: formattedArtifacts,
@@ -1417,6 +1562,9 @@ async function buildControlPlaneDoctor(
 ) {
   const resolved = await deps.resolveControlPlane({ command: "doctor", cwd, explicitPath, runtimeLane })
   assertWorkflowSupport(resolved.config, "doctor", host)
+  const expectedArtifacts = resolved.config.settings.enabled
+    ? await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps)
+    : []
   const compatibility = await maybeResolveCompatibility(
     resolved.config,
     host,
@@ -1424,7 +1572,7 @@ async function buildControlPlaneDoctor(
   )
   const artifacts = await inspectArtifacts(
     cwd,
-    await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps),
+    expectedArtifacts,
     host,
     deps,
   )
@@ -1447,6 +1595,8 @@ async function buildControlPlaneDoctor(
       short: resolved.activePreset.preset.short,
     },
     source: formatControlPlaneSource(resolved),
+    effectiveSources: resolved.effectiveSources,
+    effectiveSourceEntries: summarizeEffectiveSourceEntries(resolved),
     host,
     commands: {
       prefix: resolved.config.settings.commandPrefix,
@@ -1457,7 +1607,7 @@ async function buildControlPlaneDoctor(
             resolved.config.workflow,
           ),
         }
-        : resolved.config.settings.commands),
+        : filterNamedCommandsForWorkflow(resolved.config.settings.commands, resolved.config.workflow)),
     },
     compatibility,
     artifacts: formattedArtifacts,
@@ -1552,15 +1702,19 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     }
 
     if (!host) {
-      return { exitCode: 1, stdout: "", stderr: "Missing required --host (supported: opencode, codex, qwen)" }
+      return { exitCode: 1, stdout: "", stderr: "Missing required --host (supported: opencode, codex, qwen, claude)" }
     }
 
-    if (command === "explain" && host !== "opencode" && host !== "codex") {
-      return { exitCode: 1, stdout: "", stderr: "Only --host opencode or --host codex is supported for explain in v1" }
+    if (command === "explain" && host === "qwen") {
+        return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, or --host claude is supported for explain in v1" }
+      }
+
+    if (command === "explain" && host !== "opencode" && host !== "codex" && host !== "claude") {
+      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, or --host claude is supported for explain in v1" }
     }
 
-    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen") {
-      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, or --host qwen is supported in v1" }
+    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude") {
+      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, or --host claude is supported in v1" }
     }
 
     const cliHost = host as CliHost
@@ -1584,12 +1738,13 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     if (command === "explain") {
       const loaded = await deps.loadConfig({ cwd, explicitPath })
       const shouldResolveExplainControlPlane = host === "opencode"
-        || (host === "codex" && (runtimeLane !== undefined || loaded.config.workflow.kind === "direct"))
+        || runtimeLane !== undefined
+        || (host === "codex" && loaded.config.workflow.kind === "direct")
       const resolved = shouldResolveExplainControlPlane
         ? await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
         : null
       const explainConfig = resolved?.config ?? loaded.config
-      assertWorkflowSupport(explainConfig, "explain", host as SupportedSuperpowersHost)
+      assertWorkflowSupport(explainConfig, "explain", cliHost)
 
       if (explainConfig.workflow.kind === "direct") {
         const directConfig = resolved ? toRouterConfig(resolved.config, resolved.laneState) : loaded.config
@@ -1634,28 +1789,28 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         }
       }
 
-      if (flags.get("--all") === true) {
-        const compatibility = await resolveCompatibilityForHost(
-          host as SupportedSuperpowersHost,
-          loaded.config.superpowersCompatibility.mode,
-          deps,
-        )
+        if (flags.get("--all") === true) {
+          const compatibility = await resolveCompatibilityForCliHost(
+            cliHost,
+            loaded.config.superpowersCompatibility.mode,
+            deps,
+          )
 
         return {
           exitCode: 0,
           stdout: JSON.stringify(formatExplainOutput(
-            resolved
-              ? attachLaneExplainability(
-                attachExplainTrace(deps.explainAllForHost(toRouterConfig(resolved.config, resolved.laneState), host as "opencode" | "codex"), {
-                  cwd,
+              resolved
+                ? attachLaneExplainability(
+                  attachExplainTrace(explainAllForCliHost(toRouterConfig(resolved.config, resolved.laneState), cliHost as ExplainCliHost, deps), {
+                    cwd,
+                    resolved,
+                  }),
                   resolved,
-                }),
-                resolved,
-              )
-              : deps.explainAllForHost(loaded.config, host as "opencode" | "codex"),
-            compatibility,
-          ), null, 2),
-          stderr: "",
+                )
+                : explainAllForCliHost(loaded.config, cliHost as ExplainCliHost, deps),
+              compatibility,
+            ), null, 2),
+            stderr: "",
         }
       }
 
@@ -1668,8 +1823,8 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         return { exitCode: 1, stdout: "", stderr: `Unknown phase: ${phase}` }
       }
 
-      const compatibility = await resolveCompatibilityForHost(
-        host as SupportedSuperpowersHost,
+      const compatibility = await resolveCompatibilityForCliHost(
+        cliHost,
         loaded.config.superpowersCompatibility.mode,
         deps,
       )
@@ -1678,22 +1833,23 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         exitCode: 0,
         stdout: JSON.stringify(
           formatExplainOutput(
-            resolved
-              ? attachLaneExplainability(
-                attachExplainTrace(
-                  deps.explainPhaseForHost(
-                    toRouterConfig(resolved.config, resolved.laneState),
-                    host as "opencode" | "codex",
-                    phase as BuiltInPhase,
+              resolved
+                ? attachLaneExplainability(
+                  attachExplainTrace(
+                    explainPhaseForCliHost(
+                      toRouterConfig(resolved.config, resolved.laneState),
+                      cliHost as ExplainCliHost,
+                      phase as BuiltInPhase,
+                      deps,
+                    ),
+                    { cwd, resolved },
                   ),
-                  { cwd, resolved },
-                ),
-                resolved,
-              )
-              : deps.explainPhaseForHost(loaded.config, host as "opencode" | "codex", phase as BuiltInPhase),
-            compatibility,
-          ),
-          null,
+                  resolved,
+                )
+                : explainPhaseForCliHost(loaded.config, cliHost as ExplainCliHost, phase as BuiltInPhase, deps),
+              compatibility,
+            ),
+            null,
           2,
         ),
         stderr: "",
@@ -1842,6 +1998,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     if (command === "sync") {
       let resolved: ResolvedControlPlane
       let bootstrappedConfigPath: string | undefined
+      let compatibilityOverride: SuperpowersCompatibilityResult | null | undefined
 
         try {
           resolved = await deps.resolveControlPlane({ command: "sync", cwd, explicitPath, runtimeLane })
@@ -1851,6 +2008,28 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         }
 
         const fallback = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
+        compatibilityOverride = await maybeResolveCompatibility(
+          fallback.config,
+          cliHost,
+          () => resolveCompatibilityForCliHost(
+            cliHost,
+            fallback.config.settings.superpowersCompatibility.mode,
+            deps,
+          ),
+        )
+
+        if (compatibilityOverride?.shouldBlock) {
+          return {
+            exitCode: 1,
+            stdout: JSON.stringify(
+              withCompatibility({ exitCode: 1 as const, warnings: [], written: [], removed: [] }, compatibilityOverride),
+              null,
+              2,
+            ),
+            stderr: formatCompatibilityBlock(compatibilityOverride),
+          }
+        }
+
         const prepared = await deps.prepareControlPlaneStateWrite({
           command: "sync",
           cwd,
@@ -1873,6 +2052,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           config: prepared.config,
           activePreset: fallback.activePreset,
           laneState: fallback.laneState,
+          effectiveSources: fallback.effectiveSources,
         }
       }
 
@@ -1887,16 +2067,17 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           deps,
         ),
       )
+      const effectiveCompatibility = compatibilityOverride ?? compatibility
 
-      if (compatibility?.shouldBlock) {
+      if (effectiveCompatibility?.shouldBlock) {
         return {
           exitCode: 1,
           stdout: JSON.stringify(
-            withCompatibility({ exitCode: 1 as const, warnings: [], written: [], removed: [] }, compatibility),
+            withCompatibility({ exitCode: 1 as const, warnings: [], written: [], removed: [] }, effectiveCompatibility),
             null,
             2,
           ),
-          stderr: formatCompatibilityBlock(compatibility),
+          stderr: formatCompatibilityBlock(effectiveCompatibility),
         }
       }
 
@@ -1919,9 +2100,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
         return {
           exitCode: result.exitCode,
-          stdout: JSON.stringify(withCompatibility(result, compatibility), null, 2),
+          stdout: JSON.stringify(withCompatibility(result, effectiveCompatibility), null, 2),
           stderr: joinStderr([
-            formatCompatibilityWarning(compatibility),
+            formatCompatibilityWarning(effectiveCompatibility),
             ...result.warnings,
           ]),
         }
@@ -1954,9 +2135,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         stdout: JSON.stringify(withCompatibility({
           ...result,
           ...(bootstrappedConfigPath ? { written: [bootstrappedConfigPath, ...result.written] } : {}),
-        }, compatibility), null, 2),
+        }, effectiveCompatibility), null, 2),
         stderr: joinStderr([
-          formatCompatibilityWarning(compatibility),
+          formatCompatibilityWarning(effectiveCompatibility),
           ...result.warnings,
         ]),
       }

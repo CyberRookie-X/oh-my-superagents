@@ -1,3 +1,5 @@
+import type { CanonicalRouteId, WorkflowSourceKind } from "./workflow-sources.js"
+
 export const SUPERPOWERS_ROUTE_CATALOG = [
   "brainstorming",
   "writing-plans",
@@ -9,6 +11,18 @@ export const SUPERPOWERS_ROUTE_CATALOG = [
 ] as const
 
 export type BuiltInPhase = (typeof SUPERPOWERS_ROUTE_CATALOG)[number]
+
+export function toSuperpowersCanonicalRouteId(phase: BuiltInPhase): CanonicalRouteId {
+  return `phase.${phase}`
+}
+
+export const SUPERPOWERS_CANONICAL_ROUTE_CATALOG = SUPERPOWERS_ROUTE_CATALOG.map(
+  toSuperpowersCanonicalRouteId,
+) as CanonicalRouteId[]
+
+export const SUPERPOWERS_SOURCE_ENTRIES = Object.fromEntries(
+  SUPERPOWERS_ROUTE_CATALOG.map((phase) => [toSuperpowersCanonicalRouteId(phase), "superpowers"]),
+) as Partial<Record<CanonicalRouteId, WorkflowSourceKind>>
 
 export const PHASE_TO_COMMAND = {
   brainstorming: "/sp-brainstorm",
