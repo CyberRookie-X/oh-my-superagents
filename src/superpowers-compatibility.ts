@@ -93,6 +93,11 @@ export type SuperpowersCompatibilityResult = {
   shouldBlock: boolean
 }
 
+export type SuperpowersAvailabilityResult = {
+  status: "available" | "not_detected"
+  reason: string
+}
+
 type ParsedSemver = {
   normalized: string
   major: number
@@ -161,6 +166,22 @@ export function evaluateSuperpowersCompatibility(
     status: "untested",
     reason: "Version is parseable but outside tested ranges.",
   })
+}
+
+export function toSuperpowersAvailabilityResult(
+  compatibility: Pick<SuperpowersCompatibilityResult, "status" | "reason">,
+): SuperpowersAvailabilityResult {
+  if (compatibility.status === "not_detected") {
+    return {
+      status: "not_detected",
+      reason: compatibility.reason,
+    }
+  }
+
+  return {
+    status: "available",
+    reason: "Detected superpowers install can be evaluated for compatibility.",
+  }
 }
 
 function validateMatrixEntry(

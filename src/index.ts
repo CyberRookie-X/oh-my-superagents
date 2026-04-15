@@ -1,4 +1,6 @@
 export * from "./config.js"
+export * from "./capabilities.js"
+export * from "./upstream-readiness.js"
 export * from "./router.js"
 export * from "./opencode.js"
 export * from "./claude.js"

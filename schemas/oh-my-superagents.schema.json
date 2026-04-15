@@ -208,7 +208,7 @@
                   "type": "object",
                   "propertyNames": {
                     "type": "string",
-                    "pattern": "^phase\\..+$"
+                    "pattern": "^phase\\.(brainstorm|plan|execute|review|verify|visual|web-test)$"
                   },
                   "additionalProperties": {
                     "$ref": "#/$defs/nonDirectWorkflowSourceKind"
@@ -226,7 +226,7 @@
                   "type": "object",
                   "propertyNames": {
                     "type": "string",
-                    "pattern": "^phase\\..+$"
+                    "pattern": "^phase\\.(brainstorm|plan|execute|review|verify|visual|web-test)$"
                   },
                   "additionalProperties": {
                     "$ref": "#/$defs/nonDirectWorkflowSourceKind"
@@ -456,10 +456,10 @@
       "type": "object",
       "propertyNames": {
         "type": "string",
-        "pattern": "^(phase|intent)\\..+$"
+        "pattern": "^(phase\\.(brainstorm|plan|execute|review|verify|visual|web-test)|intent\\..+)$"
       },
       "patternProperties": {
-        "^phase\\..+$": {
+        "^phase\\.(brainstorm|plan|execute|review|verify|visual|web-test)$": {
           "enum": ["superpowers", "gstack"]
         },
         "^intent\\..+$": {

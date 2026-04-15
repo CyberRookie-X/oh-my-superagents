@@ -55,8 +55,8 @@ function sanitizeTomlMultilineString(value: string) {
   return value.replace(/"""/g, '\\"\\"\\"')
 }
 
-function formatWorkflowEntryName(sourceEntry: WorkflowSourceEntry, fallbackEntryName: string) {
-  return `${sourceEntry.source}/${sourceEntry.entryName ?? fallbackEntryName}`
+function formatWorkflowEntryName(sourceEntry: WorkflowSourceEntry) {
+  return `${sourceEntry.source}/${sourceEntry.entryName ?? sourceEntry.canonicalRoute}`
 }
 
 function formatCodexWorkflowGuidance(sourceEntry: WorkflowSourceEntry, workflowEntryName: string) {
@@ -163,7 +163,7 @@ export function buildCodexArtifacts(config: RouterConfig) {
     const resolved = resolvePhase(config, phase)
     const codexEffort = getCodexEffortConfig(resolved.selection)
     const agentName = PHASE_TO_CODEX_AGENT[phase]
-    const workflowEntryName = formatWorkflowEntryName(resolved.sourceEntry, PHASE_TO_SKILL[phase])
+    const workflowEntryName = formatWorkflowEntryName(resolved.sourceEntry)
 
     agents.push({
       kind: "agent",

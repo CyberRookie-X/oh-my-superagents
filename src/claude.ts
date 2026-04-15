@@ -1,6 +1,8 @@
+import { getHostProjectionDecision } from "./capabilities.js"
 import { BUILT_IN_PHASES, type RouterConfig } from "./config.js"
 import { MARKER_TEXT, ROUTE_MARKER_PREFIX } from "./opencode.js"
 import { resolvePhase, type BuiltInPhase } from "./router.js"
+import { toDirectCanonicalRouteId } from "./workflow-direct.js"
 import type { WorkflowSourceEntry } from "./workflow-sources.js"
 
 const PHASE_TO_CLAUDE_SKILL = {
@@ -38,8 +40,8 @@ function renderClaudeRouteMetadata(input: {
   return `<!-- ${ROUTE_MARKER_PREFIX} stage=1; host=claude; source=${input.source}; route=${input.route}; projection=skill; rendered-name=${input.renderedName} -->`
 }
 
-function formatWorkflowEntryName(sourceEntry: WorkflowSourceEntry, fallbackEntryName: string) {
-  return `${sourceEntry.source}/${sourceEntry.entryName ?? fallbackEntryName}`
+function formatWorkflowEntryName(sourceEntry: WorkflowSourceEntry) {
+  return `${sourceEntry.source}/${sourceEntry.entryName ?? sourceEntry.canonicalRoute}`
 }
 
 function formatClaudeWorkflowGuidance(input: { sourceEntry: WorkflowSourceEntry; workflowEntryName: string }) {
@@ -48,6 +50,22 @@ function formatClaudeWorkflowGuidance(input: { sourceEntry: WorkflowSourceEntry;
   }
 
   return `Use the workflow entry \`${input.workflowEntryName}\` for \`${input.sourceEntry.canonicalRoute}\` whenever it is relevant.`
+}
+
+function assertClaudeProjectionSupport(workflowKind: RouterConfig["workflow"]["kind"], sourceEntry: WorkflowSourceEntry) {
+  const decision = getHostProjectionDecision({
+    host: "claude",
+    workflowKind,
+    sourceEntry,
+  })
+
+  if (decision.supported) {
+    return
+  }
+
+  throw new Error(
+    `Claude projection blocked by capability policy (${decision.reasonCode}) for ${sourceEntry.source}/${sourceEntry.entryName ?? sourceEntry.canonicalRoute}`,
+  )
 }
 
 export function renderClaudeSkillFile(input: RenderClaudeSkillFileInput) {
@@ -83,12 +101,22 @@ export function renderClaudeSkillFile(input: RenderClaudeSkillFileInput) {
 
 export function buildClaudeArtifacts(config: RouterConfig) {
   if (config.workflow?.kind === "direct") {
-    throw new Error("Claude direct workflow projection is not supported yet")
+    const firstIntent = Object.keys(config.workflow.intents)[0] ?? "direct"
+    const sourceEntry = {
+      canonicalRoute: toDirectCanonicalRouteId(firstIntent),
+      source: "direct",
+    } as const
+
+    assertClaudeProjectionSupport(config.workflow.kind, sourceEntry)
+
+    throw new Error("Claude direct workflow projection is not implemented")
   }
 
   const skills = BUILT_IN_PHASES.map<ClaudeSkillArtifact>((phase) => {
     const resolved = resolvePhase(config, phase)
     const skillName = PHASE_TO_CLAUDE_SKILL[phase]
+
+    assertClaudeProjectionSupport(config.workflow.kind, resolved.sourceEntry)
 
     return {
       kind: "skill",
@@ -101,7 +129,7 @@ export function buildClaudeArtifacts(config: RouterConfig) {
         profileId: resolved.profileId,
         model: resolved.selection.model,
         sourceEntry: resolved.sourceEntry,
-        workflowEntryName: formatWorkflowEntryName(resolved.sourceEntry, phase),
+        workflowEntryName: formatWorkflowEntryName(resolved.sourceEntry),
       }),
     }
   })

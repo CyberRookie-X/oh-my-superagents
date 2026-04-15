@@ -12,11 +12,18 @@ import {
 } from "./author-routing.js"
 import {
   BUILT_IN_PHASES,
+  CONTROL_PLANE_COMMAND_KEYS,
+  type ControlPlaneCommandKey,
   discoverConfigPath,
   getProjectConfigPath,
   loadRouterConfig,
   readControlPlaneSourceDocument,
 } from "./config.js"
+import {
+  getHostProjectionDecision,
+  getControlPlaneCommandDecision,
+  type ControlPlaneCapabilityCommand,
+} from "./capabilities.js"
 import {
   buildControlPlaneExplainTrace,
   buildControlPlaneRouteExplainTrace,
@@ -25,6 +32,7 @@ import {
   prepareControlPlaneStateWrite,
   resolveControlPlane,
   summarizeEffectiveSourceEntries,
+  summarizeEffectiveSourceReadiness,
   summarizeLaneExplainability,
   summarizeSubagentExecutionDiagnostics,
   summarizeRoutingValidation,
@@ -36,6 +44,7 @@ import {
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildClaudeArtifacts } from "./claude.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
+import { detectClaudeGstackAvailability } from "./gstack-detectors.js"
 import { isOmsOwnedArtifactFile, isOmsOwnedSkillFile, isOpenCodeRuntimeMetadataContent, materializeArtifacts } from "./materialize.js"
 import {
   buildArtifacts,
@@ -43,17 +52,19 @@ import {
   RUNTIME_AGENT_METADATA_DIRECTORY,
   RUNTIME_AGENT_METADATA_FILE,
 } from "./opencode.js"
-import { buildQwenArtifacts } from "./qwen.js"
+import { buildQwenArtifacts, discoverQwenUpstreamSkills } from "./qwen.js"
 import { explainAll, explainPhase, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
-import { normalizeWorkflowSourceRoutes } from "./workflow-sources.js"
+import { normalizeWorkflowSourceRoutes, type WorkflowSourceEntry } from "./workflow-sources.js"
 import {
   evaluateSuperpowersCompatibility,
+  toSuperpowersAvailabilityResult,
   type SuperpowersCompatibilityMode,
   type SuperpowersCompatibilityResult,
   type SuperpowersDetectionResult,
   type SupportedSuperpowersHost,
 } from "./superpowers-compatibility.js"
 import { detectCodexSuperpowers, detectOpenCodeSuperpowers } from "./superpowers-detectors.js"
+import { evaluateProjectionReadiness, type ProjectionReadiness } from "./upstream-readiness.js"
 
 export type CliResult = {
   exitCode: 0 | 1 | 2
@@ -68,7 +79,6 @@ const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
 const CODEX_PLUGIN_MANIFEST_PATH = "plugins/oh-my-superagents-codex/.codex-plugin/plugin.json"
 const CODEX_SKILLS_ROOT = "plugins/oh-my-superagents-codex/skills"
 const CLAUDE_SKILLS_ROOT = ".claude/skills"
-const DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS = ["status", "sync", "doctor"] as const
 const QWEN_MANAGED_AGENT_FILE_NAMES = [
   "oms-brainstorm.md",
   "oms-plan.md",
@@ -121,6 +131,8 @@ type CliDeps = {
   unlink: (filePath: string) => Promise<void>
   detectOpenCodeSuperpowers: typeof detectOpenCodeSuperpowers
   detectCodexSuperpowers: typeof detectCodexSuperpowers
+  detectClaudeGstackAvailability: typeof detectClaudeGstackAvailability
+  discoverQwenUpstreamSkills: typeof discoverQwenUpstreamSkills
   evaluateSuperpowersCompatibility: typeof evaluateSuperpowersCompatibility
 }
 
@@ -163,6 +175,8 @@ const defaultDeps: CliDeps = {
   },
   detectOpenCodeSuperpowers,
   detectCodexSuperpowers,
+  detectClaudeGstackAvailability,
+  discoverQwenUpstreamSkills,
   evaluateSuperpowersCompatibility,
 }
 
@@ -511,6 +525,36 @@ function withExplainTrace(payload: Record<string, unknown>, trace: ExplainTrace)
   }
 }
 
+function withExplainReadiness(payload: Record<string, unknown>, readiness: ProjectionReadiness) {
+  return {
+    ...payload,
+    readiness,
+  }
+}
+
+function buildExplainTraceForPayloadItem(
+  item: Record<string, unknown>,
+  input: { cwd: string; resolved: ResolvedControlPlane },
+) {
+  if (typeof item.phase === "string" && BUILT_IN_PHASES.includes(item.phase as BuiltInPhase)) {
+    return buildControlPlaneExplainTrace({
+      cwd: input.cwd,
+      resolved: input.resolved,
+      phase: item.phase as BuiltInPhase,
+    })
+  }
+
+  if (typeof item.intent === "string") {
+    return buildControlPlaneRouteExplainTrace({
+      cwd: input.cwd,
+      resolved: input.resolved,
+      routeId: item.intent,
+    })
+  }
+
+  return null
+}
+
 function formatPostWriteControlPlaneSource(
   resolved: ResolvedControlPlane,
   prepared: Awaited<ReturnType<typeof prepareControlPlaneStateWrite>>,
@@ -563,33 +607,13 @@ function attachExplainTrace(
   payload: unknown,
   input: { cwd: string; resolved: ResolvedControlPlane },
 ) {
-  const buildTrace = (item: Record<string, unknown>) => {
-    if (typeof item.phase === "string" && BUILT_IN_PHASES.includes(item.phase as BuiltInPhase)) {
-      return buildControlPlaneExplainTrace({
-        cwd: input.cwd,
-        resolved: input.resolved,
-        phase: item.phase as BuiltInPhase,
-      })
-    }
-
-    if (typeof item.intent === "string") {
-      return buildControlPlaneRouteExplainTrace({
-        cwd: input.cwd,
-        resolved: input.resolved,
-        routeId: item.intent,
-      })
-    }
-
-    return null
-  }
-
   if (Array.isArray(payload)) {
     return payload.map((item) => {
       if (!isRecord(item)) {
         return item
       }
 
-      const trace = buildTrace(item)
+      const trace = buildExplainTraceForPayloadItem(item, input)
       if (!trace) {
         return item
       }
@@ -602,8 +626,40 @@ function attachExplainTrace(
     return payload
   }
 
-  const trace = buildTrace(payload)
+  const trace = buildExplainTraceForPayloadItem(payload, input)
   return trace ? withExplainTrace(payload, trace) : payload
+}
+
+async function attachExplainReadiness(
+  payload: unknown,
+  input: {
+    cwd: string
+    resolved: ResolvedControlPlane
+    resolveReadiness: (sourceEntry: WorkflowSourceEntry) => Promise<ProjectionReadiness>
+  },
+) {
+  const attachReadiness = async (item: Record<string, unknown>) => {
+    const trace = buildExplainTraceForPayloadItem(item, input)
+    if (!trace) {
+      return item
+    }
+
+    return withExplainReadiness(item, await input.resolveReadiness(trace.sourceEntry))
+  }
+
+  if (Array.isArray(payload)) {
+    return Promise.all(payload.map((item) => (
+      isRecord(item)
+        ? attachReadiness(item)
+        : item
+    )))
+  }
+
+  if (!isRecord(payload)) {
+    return payload
+  }
+
+  return attachReadiness(payload)
 }
 
 function withLaneExplainability(payload: Record<string, unknown>, laneExplainability: LaneExplainability) {
@@ -687,6 +743,136 @@ async function resolveCompatibilityForCliHost(
   return resolveCompatibilityForHost(host, policyMode, deps)
 }
 
+function toUpstreamCompatibilityResult(compatibility: SuperpowersCompatibilityResult) {
+  return {
+    status: compatibility.status,
+    reason: compatibility.reason,
+  } as const
+}
+
+function createProjectionReadinessResolver(input: {
+  cwd: string
+  host: CliHost
+  config: ResolvedControlPlane["config"]
+  deps: CliDeps
+  compatibility?: SuperpowersCompatibilityResult | null
+}) {
+  let compatibilityPromise: Promise<SuperpowersCompatibilityResult> | null = input.compatibility
+    ? Promise.resolve(input.compatibility)
+    : null
+  let claudeGstackAvailabilityPromise: Promise<{ status: "available" | "not_detected" | "error"; reason: string }> | null = null
+  let qwenUpstreamSkillsPromise: Promise<Record<string, string | undefined>> | null = null
+
+  return async (sourceEntry: WorkflowSourceEntry): Promise<ProjectionReadiness> => {
+    const readinessInput = {
+      host: input.host,
+      workflowKind: input.config.workflow.kind,
+      sourceEntry,
+    } as const
+    const support = getHostProjectionDecision(readinessInput)
+
+    if (!support.supported) {
+      return { support }
+    }
+
+    if (sourceEntry.source === "superpowers" && isCompatibilityHost(input.host)) {
+      compatibilityPromise ??= resolveCompatibilityForHost(
+        input.host,
+        input.config.settings.superpowersCompatibility.mode,
+        input.deps,
+      )
+      const compatibility = await compatibilityPromise
+
+      return evaluateProjectionReadiness(readinessInput, {
+        availabilityBySource: {
+          superpowers: () => toSuperpowersAvailabilityResult(compatibility),
+        },
+        compatibilityBySource: {
+          superpowers: () => toUpstreamCompatibilityResult(compatibility),
+        },
+      })
+    }
+
+    if (sourceEntry.source === "superpowers" && input.host === "qwen") {
+      let upstreamSkills: Record<string, string | undefined>
+
+      try {
+        qwenUpstreamSkillsPromise ??= input.deps.discoverQwenUpstreamSkills({ cwd: input.cwd })
+        upstreamSkills = await qwenUpstreamSkillsPromise
+      } catch (error) {
+        return {
+          support,
+          availability: {
+            status: "error",
+            reason: error instanceof Error
+              ? `Qwen upstream skill discovery failed: ${error.message}`
+              : `Qwen upstream skill discovery failed: ${String(error)}`,
+          },
+          compatibility: null,
+        }
+      }
+
+      const workflowEntryName = sourceEntry.entryName ?? sourceEntry.canonicalRoute
+      const skillPath = upstreamSkills[workflowEntryName]
+
+      return evaluateProjectionReadiness(readinessInput, {
+        availabilityBySource: {
+          superpowers: () => skillPath
+            ? {
+                status: "available",
+                reason: `Detected Qwen upstream workflow entry at ${skillPath}.`,
+              }
+            : {
+                status: "not_detected",
+                reason: `Required Qwen upstream workflow entry is not installed: ${workflowEntryName}.`,
+              },
+        },
+      })
+    }
+
+    if (sourceEntry.source === "gstack" && input.host === "claude") {
+      claudeGstackAvailabilityPromise ??= input.deps.detectClaudeGstackAvailability({ cwd: input.cwd })
+        .then((result) => ({
+          status: result.status,
+          reason: result.reason,
+        }))
+        .catch((error) => ({
+          status: "error" as const,
+          reason: error instanceof Error
+            ? `Claude gstack availability check failed: ${error.message}`
+            : `Claude gstack availability check failed: ${String(error)}`,
+        }))
+      const availability = await claudeGstackAvailabilityPromise
+
+      return evaluateProjectionReadiness(readinessInput, {
+        availabilityBySource: {
+          gstack: () => availability,
+        },
+      })
+    }
+
+    return evaluateProjectionReadiness(readinessInput)
+  }
+}
+
+function shouldSkipExpectedArtifactBuild(
+  host: CliHost,
+  effectiveSourceReadiness: Awaited<ReturnType<typeof summarizeEffectiveSourceReadiness>>,
+) {
+  return host === "qwen" && Object.values(effectiveSourceReadiness).some((entry) => (
+    entry?.readiness.support.supported === false
+  ))
+}
+
+function createEmptyArtifactInspection() {
+  return {
+    present: [] as string[],
+    missing: [] as string[],
+    expectedPresent: [] as string[],
+    stale: [] as string[],
+  }
+}
+
 function joinStderr(parts: Array<string | undefined>) {
   return parts.filter((part): part is string => Boolean(part && part.length > 0)).join("\n")
 }
@@ -704,22 +890,39 @@ function isDirectWorkflowHostSupported(
 
 function assertWorkflowSupport(
   config: { workflow: ResolvedControlPlane["config"]["workflow"] },
-  command: string,
+  command: ControlPlaneCapabilityCommand,
   host: CliHost | SupportedSuperpowersHost,
 ) {
-  if (config.workflow.kind !== "direct") {
+  const decision = getControlPlaneCommandDecision({
+    host,
+    command,
+    workflowKind: config.workflow.kind,
+  })
+
+  if (decision.supported) {
     return
   }
 
-  if ((command === "status" || command === "doctor" || command === "sync") && isDirectWorkflowHostSupported(config, host)) {
-    return
+  if (decision.reasonCode === "unsupported_workflow_mode") {
+    throw new Error(`Direct workflow is not yet supported for ${command} --host ${host}`)
   }
 
-  if (command === "explain" && (host === "opencode" || host === "codex")) {
-    return
-  }
+  throw new Error(`Command ${command} is not supported for --host ${host}`)
+}
 
-  throw new Error(`Direct workflow is not yet supported for ${command} --host ${host}`)
+function isGloballyUnsupportedControlPlaneCommand(
+  host: CliHost | SupportedSuperpowersHost,
+  command: ControlPlaneCapabilityCommand,
+) {
+  return (["superpowers", "direct"] as const).every((workflowKind) => {
+    const decision = getControlPlaneCommandDecision({
+      host,
+      command,
+      workflowKind,
+    })
+
+    return !decision.supported && decision.reasonCode === "unsupported_control_plane_command"
+  })
 }
 
 function explainDirectIntent(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"], intent: string) {
@@ -1340,25 +1543,29 @@ function filterRenderedOpenCodeCommandsForWorkflow(
   rendered: Record<string, string[]>,
   workflow: ResolvedControlPlane["config"]["workflow"],
 ) {
-  if (workflow.kind !== "direct") {
-    return rendered
-  }
-
   return Object.fromEntries(
-    DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS.map((commandKey) => [commandKey, rendered[commandKey]]),
+    getSupportedControlPlaneCommandKeys("opencode", workflow).map((commandKey) => [commandKey, rendered[commandKey]]),
   )
+}
+
+function getSupportedControlPlaneCommandKeys(
+  host: CliHost,
+  workflow: ResolvedControlPlane["config"]["workflow"],
+): ControlPlaneCommandKey[] {
+  return CONTROL_PLANE_COMMAND_KEYS.filter((commandKey) => getControlPlaneCommandDecision({
+    host,
+    command: commandKey,
+    workflowKind: workflow.kind,
+  }).supported)
 }
 
 function filterNamedCommandsForWorkflow<T>(
   commands: Record<string, T>,
   workflow: ResolvedControlPlane["config"]["workflow"],
+  host: CliHost,
 ) {
-  if (workflow.kind !== "direct") {
-    return commands
-  }
-
   return Object.fromEntries(
-    DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS.map((commandKey) => [commandKey, commands[commandKey]]),
+    getSupportedControlPlaneCommandKeys(host, workflow).map((commandKey) => [commandKey, commands[commandKey]]),
   )
 }
 
@@ -1487,20 +1694,33 @@ async function buildControlPlaneStatus(
 ) {
   const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
   assertWorkflowSupport(resolved.config, "status", host)
-  const expectedArtifacts = resolved.config.settings.enabled
-    ? await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps)
-    : []
   const compatibility = await maybeResolveCompatibility(
     resolved.config,
     host,
     () => resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps),
   )
-  const artifacts = await inspectArtifacts(
-    cwd,
-    expectedArtifacts,
-    host,
-    deps,
-  )
+  const effectiveSourceReadiness = await summarizeEffectiveSourceReadiness({
+    resolved,
+    evaluateReadiness: createProjectionReadinessResolver({
+      cwd,
+      host,
+      config: resolved.config,
+      deps,
+      compatibility,
+    }),
+  })
+  const skipExpectedArtifacts = shouldSkipExpectedArtifactBuild(host, effectiveSourceReadiness)
+  const expectedArtifacts = resolved.config.settings.enabled && !skipExpectedArtifacts
+    ? await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps)
+    : []
+  const artifacts = skipExpectedArtifacts
+    ? createEmptyArtifactInspection()
+    : await inspectArtifacts(
+      cwd,
+      expectedArtifacts,
+      host,
+      deps,
+    )
   const formattedArtifacts = formatArtifactInspection(artifacts)
   const openCodeStatus = host === "opencode"
     ? (() => {
@@ -1514,6 +1734,7 @@ async function buildControlPlaneStatus(
         source: resolved.source,
         enabled: resolved.config.settings.enabled,
         compatibility,
+        effectiveSourceReadiness,
         artifactSummary,
       })
       const nextAction = buildOpenCodeNextAction({
@@ -1544,6 +1765,7 @@ async function buildControlPlaneStatus(
     source: formatControlPlaneSource(resolved),
     effectiveSources: resolved.effectiveSources,
     effectiveSourceEntries: summarizeEffectiveSourceEntries(resolved),
+    effectiveSourceReadiness,
     host,
     compatibility,
     artifacts: formattedArtifacts,
@@ -1562,20 +1784,33 @@ async function buildControlPlaneDoctor(
 ) {
   const resolved = await deps.resolveControlPlane({ command: "doctor", cwd, explicitPath, runtimeLane })
   assertWorkflowSupport(resolved.config, "doctor", host)
-  const expectedArtifacts = resolved.config.settings.enabled
-    ? await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps)
-    : []
   const compatibility = await maybeResolveCompatibility(
     resolved.config,
     host,
     () => resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps),
   )
-  const artifacts = await inspectArtifacts(
-    cwd,
-    expectedArtifacts,
-    host,
-    deps,
-  )
+  const effectiveSourceReadiness = await summarizeEffectiveSourceReadiness({
+    resolved,
+    evaluateReadiness: createProjectionReadinessResolver({
+      cwd,
+      host,
+      config: resolved.config,
+      deps,
+      compatibility,
+    }),
+  })
+  const skipExpectedArtifacts = shouldSkipExpectedArtifactBuild(host, effectiveSourceReadiness)
+  const expectedArtifacts = resolved.config.settings.enabled && !skipExpectedArtifacts
+    ? await getExpectedArtifacts(cwd, resolved.config, resolved.laneState, host, deps)
+    : []
+  const artifacts = skipExpectedArtifacts
+    ? createEmptyArtifactInspection()
+    : await inspectArtifacts(
+      cwd,
+      expectedArtifacts,
+      host,
+      deps,
+    )
   const formattedArtifacts = formatArtifactInspection(artifacts)
   const artifactSummary = host === "opencode"
     ? summarizeControlPlaneArtifacts({
@@ -1597,6 +1832,7 @@ async function buildControlPlaneDoctor(
     source: formatControlPlaneSource(resolved),
     effectiveSources: resolved.effectiveSources,
     effectiveSourceEntries: summarizeEffectiveSourceEntries(resolved),
+    effectiveSourceReadiness,
     host,
     commands: {
       prefix: resolved.config.settings.commandPrefix,
@@ -1607,7 +1843,7 @@ async function buildControlPlaneDoctor(
             resolved.config.workflow,
           ),
         }
-        : filterNamedCommandsForWorkflow(resolved.config.settings.commands, resolved.config.workflow)),
+        : filterNamedCommandsForWorkflow(resolved.config.settings.commands, resolved.config.workflow, host)),
     },
     compatibility,
     artifacts: formattedArtifacts,
@@ -1705,11 +1941,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       return { exitCode: 1, stdout: "", stderr: "Missing required --host (supported: opencode, codex, qwen, claude)" }
     }
 
-    if (command === "explain" && host === "qwen") {
-        return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, or --host claude is supported for explain in v1" }
-      }
-
-    if (command === "explain" && host !== "opencode" && host !== "codex" && host !== "claude") {
+    if (command === "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude") {
       return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, or --host claude is supported for explain in v1" }
     }
 
@@ -1718,6 +1950,10 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     }
 
     const cliHost = host as CliHost
+
+    if (command === "explain" && isGloballyUnsupportedControlPlaneCommand(cliHost, command)) {
+      return { exitCode: 1, stdout: "", stderr: `Command ${command} is not supported for --host ${cliHost}` }
+    }
 
     if (command === "status") {
       return {
@@ -1755,7 +1991,19 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
             stdout: JSON.stringify(formatExplainOutput(
               resolved
                 ? attachLaneExplainability(
-                  attachExplainTrace(explainAllDirect(directConfig), { cwd, resolved }),
+                  await attachExplainReadiness(
+                    attachExplainTrace(explainAllDirect(directConfig), { cwd, resolved }),
+                    {
+                      cwd,
+                      resolved,
+                      resolveReadiness: createProjectionReadinessResolver({
+                        cwd,
+                        host: cliHost,
+                        config: resolved.config,
+                        deps,
+                      }),
+                    },
+                  ),
                   resolved,
                 )
                 : explainAllDirect(directConfig),
@@ -1776,7 +2024,19 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
             formatExplainOutput(
               resolved
                 ? attachLaneExplainability(
-                  attachExplainTrace(explainDirectIntent(directConfig, intent), { cwd, resolved }),
+                  await attachExplainReadiness(
+                    attachExplainTrace(explainDirectIntent(directConfig, intent), { cwd, resolved }),
+                    {
+                      cwd,
+                      resolved,
+                      resolveReadiness: createProjectionReadinessResolver({
+                        cwd,
+                        host: cliHost,
+                        config: resolved.config,
+                        deps,
+                      }),
+                    },
+                  ),
                   resolved,
                 )
                 : explainDirectIntent(directConfig, intent),
@@ -1801,10 +2061,23 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           stdout: JSON.stringify(formatExplainOutput(
               resolved
                 ? attachLaneExplainability(
-                  attachExplainTrace(explainAllForCliHost(toRouterConfig(resolved.config, resolved.laneState), cliHost as ExplainCliHost, deps), {
-                    cwd,
-                    resolved,
-                  }),
+                  await attachExplainReadiness(
+                    attachExplainTrace(explainAllForCliHost(toRouterConfig(resolved.config, resolved.laneState), cliHost as ExplainCliHost, deps), {
+                      cwd,
+                      resolved,
+                    }),
+                    {
+                      cwd,
+                      resolved,
+                      resolveReadiness: createProjectionReadinessResolver({
+                        cwd,
+                        host: cliHost,
+                        config: resolved.config,
+                        deps,
+                        compatibility,
+                      }),
+                    },
+                  ),
                   resolved,
                 )
                 : explainAllForCliHost(loaded.config, cliHost as ExplainCliHost, deps),
@@ -1835,14 +2108,27 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           formatExplainOutput(
               resolved
                 ? attachLaneExplainability(
-                  attachExplainTrace(
-                    explainPhaseForCliHost(
-                      toRouterConfig(resolved.config, resolved.laneState),
-                      cliHost as ExplainCliHost,
-                      phase as BuiltInPhase,
-                      deps,
+                  await attachExplainReadiness(
+                    attachExplainTrace(
+                      explainPhaseForCliHost(
+                        toRouterConfig(resolved.config, resolved.laneState),
+                        cliHost as ExplainCliHost,
+                        phase as BuiltInPhase,
+                        deps,
+                      ),
+                      { cwd, resolved },
                     ),
-                    { cwd, resolved },
+                    {
+                      cwd,
+                      resolved,
+                      resolveReadiness: createProjectionReadinessResolver({
+                        cwd,
+                        host: cliHost,
+                        config: resolved.config,
+                        deps,
+                        compatibility,
+                      }),
+                    },
                   ),
                   resolved,
                 )

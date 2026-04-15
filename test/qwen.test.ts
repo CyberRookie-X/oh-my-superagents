@@ -46,17 +46,35 @@ describe("discoverQwenUpstreamSkills", () => {
 })
 
 describe("renderQwenAgentFile", () => {
-  it("renders the supported Stage 2 wrapper-agent fields", () => {
+  it("renders the supported Stage 2 wrapper-agent fields using the provided canonical source entry", () => {
     const output = renderQwenAgentFile({
       name: "oms-review",
       description: "Qwen wrapper agent for the requesting-code-review phase",
       model: "qwen/qwen3-coder-480b",
-      skillName: "requesting-code-review",
+      skillName: "superpowers/requesting-code-review",
       skillPath: "/home/test/.agents/skills/requesting-code-review",
+      sourceEntry: {
+        canonicalRoute: "phase.review",
+        source: "superpowers",
+      },
     })
 
     expect(output).toContain("name: oms-review")
     expect(output).toContain("model: qwen/qwen3-coder-480b")
+    expect(output).toContain("route=phase.review")
+  })
+
+  it("resolves namespaced superpowers workflow entry names when sourceEntry is omitted", () => {
+    const output = renderQwenAgentFile({
+      name: "oms-review",
+      description: "Qwen wrapper agent for the requesting-code-review phase",
+      model: "qwen/qwen3-coder-480b",
+      skillName: "superpowers/requesting-code-review",
+      skillPath: "/home/test/.agents/skills/requesting-code-review",
+    })
+
+    expect(output).toContain("route=phase.review")
+    expect(output).toContain("Use the upstream workflow entry `superpowers/requesting-code-review`")
   })
 })
 
@@ -206,6 +224,34 @@ describe("buildQwenArtifacts", () => {
 
     expect(artifacts.agents).toEqual([])
     expect(artifacts.commands.map((item) => item.fileName)).toContain("ai-plan.md")
+  })
+
+  it("fails through the shared capability policy when direct-mode qwen resolves an unsupported source entry", async () => {
+    await expect(
+      buildQwenArtifacts(
+        {
+          workflow: {
+            kind: "direct",
+            intents: {
+              plan: { label: "Plan" },
+            },
+          },
+          profiles: {
+            planner: { model: "openai/gpt-5" },
+          },
+          effectiveSources: {
+            "intent.plan": "gstack",
+          },
+          routes: { plan: "planner" },
+          defaultRoute: "planner",
+        } as never,
+        {
+          cwd: "/workspace/project",
+          homeDir: "/home/test",
+          controlPlaneSettings,
+        },
+      ),
+    ).rejects.toThrow(/capability policy.*unsupported_source_route.*intent\.plan/i)
   })
 
   it("omits direct-mode qwen use and disable entrypoints", async () => {
@@ -427,7 +473,7 @@ describe("buildQwenArtifacts", () => {
     ).rejects.toThrow(/webapp-testing|Qwen-usable superpowers skills are not installed/i)
   })
 
-  it("fails closed when a route resolves to gstack on qwen", async () => {
+  it("fails through the shared capability policy when qwen projects a gstack-backed route", async () => {
     await expect(
       buildQwenArtifacts(
         {
@@ -436,7 +482,7 @@ describe("buildQwenArtifacts", () => {
           routes: {},
           defaultRoute: "build",
           effectiveSources: {
-            "phase.writing-plans": "gstack",
+            "phase.plan": "gstack",
           },
         } as never,
         {
@@ -454,7 +500,7 @@ describe("buildQwenArtifacts", () => {
           ],
         },
       ),
-    ).rejects.toThrow(/gstack is not yet supported on qwen/i)
+    ).rejects.toThrow(/capability policy.*unsupported_host_source_projection.*phase\.plan/i)
   })
 
   it("resolves each wrapper agent using the mapped upstream skill key and defaultRoute", async () => {
@@ -523,7 +569,8 @@ describe("buildQwenArtifacts", () => {
       skillName: "superpowers/brainstorming",
       skillPath: "/workspace/project/.qwen/skills/brainstorming",
       sourceEntry: {
-        canonicalRoute: "phase.brainstorming",
+        canonicalRoute: "phase.brainstorm",
+        entryName: "brainstorming",
         source: "superpowers",
       },
     })
@@ -572,7 +619,8 @@ describe("buildQwenArtifacts", () => {
       skillName: "superpowers/brainstorming",
       skillPath: "/workspace/project/.qwen/skills/brainstorming",
       sourceEntry: {
-        canonicalRoute: "phase.brainstorming",
+        canonicalRoute: "phase.brainstorm",
+        entryName: "brainstorming",
         source: "superpowers",
       },
     })

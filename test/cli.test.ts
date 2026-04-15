@@ -1,10 +1,10 @@
 import path from "node:path"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { runCli } from "../src/cli.js"
 import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-plane.js"
 import { explainCodexPhase } from "../src/codex.js"
 import { buildArtifacts as buildOpenCodeArtifacts, MARKER_TEXT } from "../src/opencode.js"
-import { buildQwenArtifacts } from "../src/qwen.js"
+import { buildQwenArtifacts, discoverQwenUpstreamSkills } from "../src/qwen.js"
 import { explainPhase, resolvePhase } from "../src/router.js"
 
 const baseConfig = {
@@ -14,6 +14,11 @@ const baseConfig = {
   defaultRoute: "build",
   superpowersCompatibility: { mode: "warn" as const },
 }
+
+afterEach(() => {
+  vi.doUnmock("../src/capabilities.js")
+  vi.resetModules()
+})
 
 const compatibleOpencode = {
   host: "opencode" as const,
@@ -161,6 +166,66 @@ const directControlPlaneConfig = {
   },
 }
 
+const defaultSuperpowersEffectiveSourceEntries = {
+  "phase.brainstorm": {
+    canonicalRoute: "phase.brainstorm",
+    source: "superpowers",
+    entryName: "brainstorming",
+  },
+  "phase.plan": {
+    canonicalRoute: "phase.plan",
+    source: "superpowers",
+    entryName: "writing-plans",
+  },
+  "phase.execute": {
+    canonicalRoute: "phase.execute",
+    source: "superpowers",
+    entryName: "subagent-driven-development",
+  },
+  "phase.review": {
+    canonicalRoute: "phase.review",
+    source: "superpowers",
+    entryName: "requesting-code-review",
+  },
+  "phase.verify": {
+    canonicalRoute: "phase.verify",
+    source: "superpowers",
+    entryName: "verification-before-completion",
+  },
+  "phase.visual": {
+    canonicalRoute: "phase.visual",
+    source: "superpowers",
+    entryName: "frontend-design",
+  },
+  "phase.web-test": {
+    canonicalRoute: "phase.web-test",
+    source: "superpowers",
+    entryName: "webapp-testing",
+  },
+} as const
+
+const defaultSuperpowersCompatibleReadiness = Object.fromEntries(
+  Object.entries(defaultSuperpowersEffectiveSourceEntries).map(([canonicalRoute, sourceEntry]) => ([
+    canonicalRoute,
+    {
+      ...sourceEntry,
+      readiness: {
+        support: {
+          supported: true,
+        },
+        availability: {
+          status: "available",
+          reason: "Detected superpowers install can be evaluated for compatibility.",
+        },
+        compatibility: {
+          status: "compatible",
+          reason: "Version is within a tested range.",
+        },
+      },
+    },
+  ])),
+)
+
 function createDirectCliDeps(overrides: Record<string, unknown> = {}) {
   return createCliDeps({
     loadConfig: async () => ({
@@ -255,7 +320,7 @@ function renderCodexMarketplace(hasOmsEntry = true) {
 function renderOwnedClaudeSkill(renderedName: string) {
   return [
     `# ${MARKER_TEXT}`,
-    `<!-- oms-route: stage=1; host=claude; source=superpowers; route=phase.writing-plans; projection=skill; rendered-name=${renderedName} -->`,
+    `<!-- oms-route: stage=1; host=claude; source=superpowers; route=phase.plan; projection=skill; rendered-name=${renderedName} -->`,
     "",
     `# Skill: ${renderedName}`,
     "",
@@ -398,6 +463,7 @@ function createCliDeps(overrides: Record<string, unknown> = {}) {
       commands: [],
     }),
     buildCodexArtifacts: () => ({ agents: [] }),
+    buildQwenArtifacts: async () => ({ agents: [], commands: [] }),
     buildCodexBootstrap: async () => ({
       configPath: "/workspace/project/oh-my-superagents.config.jsonc",
       createdConfig: true,
@@ -438,6 +504,15 @@ function createCliDeps(overrides: Record<string, unknown> = {}) {
       source: "test-detector",
       detectedVersion: "5.1.0",
       detectedRef: null,
+    }),
+    discoverQwenUpstreamSkills: async () => ({
+      brainstorming: "/workspace/project/.agents/skills/brainstorming",
+      "writing-plans": "/workspace/project/.agents/skills/writing-plans",
+      "subagent-driven-development": "/workspace/project/.agents/skills/subagent-driven-development",
+      "requesting-code-review": "/workspace/project/.agents/skills/requesting-code-review",
+      "verification-before-completion": "/workspace/project/.agents/skills/verification-before-completion",
+      "frontend-design": "/workspace/project/.agents/skills/frontend-design",
+      "webapp-testing": "/workspace/project/.agents/skills/webapp-testing",
     }),
     evaluateSuperpowersCompatibility: (detection: any, policyMode: "warn" | "strict") => ({
       host: detection.host,
@@ -556,8 +631,97 @@ describe("runCli", () => {
     }))
 
     expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("opencode, --host codex, or --host claude")
+    expect(result.stderr).toMatch(/explain.*qwen/i)
     expect(explainCalled).toBe(false)
+  })
+
+  it("routes qwen readiness support decisions through the capability registry", async () => {
+    vi.resetModules()
+    const getHostProjectionDecision = vi.fn(() => ({
+      supported: false as const,
+      reasonCode: "unsupported_host_source_projection" as const,
+    }))
+
+    vi.doMock("../src/capabilities.js", async () => {
+      const actual = await vi.importActual<typeof import("../src/capabilities.js")>("../src/capabilities.js")
+
+      return {
+        ...actual,
+        getHostProjectionDecision,
+      }
+    })
+
+    const { runCli: runCliWithCapabilities } = await import("../src/cli.js")
+    const result = await runCliWithCapabilities(["status", "--host", "qwen"], createCliDeps({
+      buildQwenArtifacts: async () => ({
+        agents: [],
+        commands: [],
+      }),
+    }))
+
+    expect(getHostProjectionDecision).toHaveBeenCalledWith({
+      host: "qwen",
+      workflowKind: "superpowers",
+      sourceEntry: {
+        canonicalRoute: "phase.plan",
+        source: "superpowers",
+        entryName: "writing-plans",
+      },
+    })
+    expect(result.exitCode).toBe(0)
+  })
+
+  it("routes generic command support checks through the capability registry", async () => {
+    vi.resetModules()
+    const getControlPlaneCommandDecision = vi.fn((input: {
+      host: "opencode" | "codex" | "qwen" | "claude"
+      command: "status" | "use" | "disable" | "sync" | "doctor" | "explain"
+      workflowKind: "superpowers" | "direct"
+    }) => {
+      if (input.host === "opencode" && input.command === "status" && input.workflowKind === "superpowers") {
+        return {
+          supported: false as const,
+          reasonCode: "unsupported_control_plane_command" as const,
+        }
+      }
+
+      return { supported: true as const }
+    })
+
+    vi.doMock("../src/capabilities.js", async () => {
+      const actual = await vi.importActual<typeof import("../src/capabilities.js")>("../src/capabilities.js")
+
+      return {
+        ...actual,
+        getControlPlaneCommandDecision,
+      }
+    })
+
+    const { runCli: runCliWithCapabilities } = await import("../src/cli.js")
+    const result = await runCliWithCapabilities(["status", "--host", "opencode"], createCliDeps())
+
+    expect(getControlPlaneCommandDecision).toHaveBeenCalledWith({
+      host: "opencode",
+      command: "status",
+      workflowKind: "superpowers",
+    })
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toMatch(/status.*opencode/i)
+  })
+
+  it("rejects qwen explain through the shared capability policy path before config loading", async () => {
+    let loadConfigCalled = false
+
+    const result = await runCli(["explain", "--host", "qwen", "--phase", "brainstorming"], createCliDeps({
+      loadConfig: async () => {
+        loadConfigCalled = true
+        throw new Error("Could not find oh-my-superagents.config.jsonc")
+      },
+    }))
+
+    expect(loadConfigCalled).toBe(false)
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toBe("Command explain is not supported for --host qwen")
   })
 
   it("fails closed for direct workflow status on Claude", async () => {
@@ -614,7 +778,7 @@ describe("runCli", () => {
             default: {
               ...controlPlaneConfig.presets.default,
               sourceRoutes: {
-                "phase.brainstorming": "gstack" as const,
+                "phase.brainstorm": "gstack" as const,
               },
             },
           },
@@ -624,13 +788,13 @@ describe("runCli", () => {
           preset: {
             ...controlPlaneConfig.presets.default,
             sourceRoutes: {
-              "phase.brainstorming": "gstack" as const,
+              "phase.brainstorm": "gstack" as const,
             },
           },
         },
         laneState: defaultLaneState,
         effectiveSources: {
-          "phase.brainstorming": "gstack" as const,
+          "phase.brainstorm": "gstack" as const,
         },
       }),
     }))
@@ -638,7 +802,7 @@ describe("runCli", () => {
     const output = JSON.parse(result.stdout)
 
     expect(result.exitCode).toBe(0)
-    expect(output.canonicalRoute).toBe("phase.brainstorming")
+    expect(output.canonicalRoute).toBe("phase.brainstorm")
     expect(output.resolvedSource).toBe("gstack")
   })
 
@@ -691,9 +855,32 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(output.resolvedSource).toBe("gstack")
     expect(output.sourceEntry).toEqual({
-      canonicalRoute: "phase.writing-plans",
+      canonicalRoute: "phase.plan",
       source: "gstack",
       entryName: "plan-eng-review",
+    })
+  })
+
+  it("attaches readiness context to explain traces", async () => {
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "writing-plans"], createCliDeps({
+      evaluateSuperpowersCompatibility: () => notDetectedOpencode,
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.readiness).toEqual({
+      support: {
+        supported: true,
+      },
+      availability: {
+        status: "not_detected",
+        reason: notDetectedOpencode.reason,
+      },
+      compatibility: {
+        status: "not_detected",
+        reason: notDetectedOpencode.reason,
+      },
     })
   })
 
@@ -737,11 +924,77 @@ describe("runCli", () => {
     const output = JSON.parse(result.stdout)
 
     expect(result.exitCode).toBe(0)
-    expect(output.effectiveSourceEntries).toEqual({
-      "phase.writing-plans": {
-        canonicalRoute: "phase.writing-plans",
+    expect(output.effectiveSourceEntries).toMatchObject({
+      "phase.plan": {
+        canonicalRoute: "phase.plan",
         source: "gstack",
         entryName: "plan-eng-review",
+      },
+    })
+  })
+
+  it("surfaces supported-but-unavailable readiness in status output", async () => {
+    const result = await runCli(["status", "--host", "claude"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourceRoutes: {
+                "phase.plan": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourceRoutes: {
+              "phase.plan": "gstack" as const,
+            },
+          },
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.plan": "gstack" as const,
+        },
+      }),
+      detectClaudeGstackAvailability: async () => ({
+        host: "claude" as const,
+        source: "claude-gstack-skill-root-detection" as const,
+        status: "not_detected" as const,
+        reason: "No gstack install could be detected in Claude skill roots.",
+        detectedRoot: null,
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.effectiveSourceReadiness).toMatchObject({
+      "phase.plan": {
+        canonicalRoute: "phase.plan",
+        source: "gstack",
+        entryName: "plan-eng-review",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "not_detected",
+            reason: "No gstack install could be detected in Claude skill roots.",
+          },
+          compatibility: null,
+        },
       },
     })
   })
@@ -760,7 +1013,7 @@ describe("runCli", () => {
           sourcePresets: {
             foundation: {
               routes: {
-                "phase.brainstorming": "superpowers" as const,
+                "phase.brainstorm": "superpowers" as const,
               },
             },
           },
@@ -770,7 +1023,7 @@ describe("runCli", () => {
               ...controlPlaneConfig.presets.default,
               sourcePreset: "foundation",
               sourceRoutes: {
-                "phase.brainstorming": "gstack" as const,
+                "phase.brainstorm": "gstack" as const,
               },
             },
           },
@@ -781,13 +1034,13 @@ describe("runCli", () => {
             ...controlPlaneConfig.presets.default,
             sourcePreset: "foundation",
             sourceRoutes: {
-              "phase.brainstorming": "gstack" as const,
+              "phase.brainstorm": "gstack" as const,
             },
           },
         },
         laneState: defaultLaneState,
         effectiveSources: {
-          "phase.brainstorming": "gstack" as const,
+          "phase.brainstorm": "gstack" as const,
         },
       }),
     }))
@@ -796,7 +1049,7 @@ describe("runCli", () => {
 
     expect(result.exitCode).toBe(0)
     expect(output.effectiveSources).toEqual({
-      "phase.brainstorming": "gstack",
+      "phase.brainstorm": "gstack",
     })
   })
 
@@ -816,7 +1069,7 @@ describe("runCli", () => {
             default: {
               ...controlPlaneConfig.presets.default,
               sourceRoutes: {
-                "phase.brainstorming": "gstack" as const,
+                "phase.brainstorm": "gstack" as const,
               },
             },
           },
@@ -826,13 +1079,13 @@ describe("runCli", () => {
           preset: {
             ...controlPlaneConfig.presets.default,
             sourceRoutes: {
-              "phase.brainstorming": "gstack" as const,
+              "phase.brainstorm": "gstack" as const,
             },
           },
         },
         laneState: defaultLaneState,
         effectiveSources: {
-          "phase.brainstorming": "gstack" as const,
+          "phase.brainstorm": "gstack" as const,
         },
       }),
     }))
@@ -841,7 +1094,73 @@ describe("runCli", () => {
 
     expect(result.exitCode).toBe(0)
     expect(output.effectiveSources).toEqual({
-      "phase.brainstorming": "gstack",
+      "phase.brainstorm": "gstack",
+    })
+  })
+
+  it("surfaces supported-but-unavailable readiness in doctor output", async () => {
+    const result = await runCli(["doctor", "--host", "claude"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourceRoutes: {
+                "phase.plan": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourceRoutes: {
+              "phase.plan": "gstack" as const,
+            },
+          },
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.plan": "gstack" as const,
+        },
+      }),
+      detectClaudeGstackAvailability: async () => ({
+        host: "claude" as const,
+        source: "claude-gstack-skill-root-detection" as const,
+        status: "not_detected" as const,
+        reason: "No gstack install could be detected in Claude skill roots.",
+        detectedRoot: null,
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.effectiveSourceReadiness).toMatchObject({
+      "phase.plan": {
+        canonicalRoute: "phase.plan",
+        source: "gstack",
+        entryName: "plan-eng-review",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "not_detected",
+            reason: "No gstack install could be detected in Claude skill roots.",
+          },
+          compatibility: null,
+        },
+      },
     })
   })
 
@@ -1719,7 +2038,7 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(parsed).toMatchObject({
       phase: "writing-plans",
-      canonicalRoute: "phase.writing-plans",
+      canonicalRoute: "phase.plan",
       profileId: "build",
       model: "openai/gpt-5",
       skillName: "oms-plan",
@@ -3765,7 +4084,8 @@ describe("runCli", () => {
         path: "/workspace/project/oh-my-superagents.config.jsonc",
         sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
       },
-      effectiveSourceEntries: {},
+      effectiveSourceEntries: defaultSuperpowersEffectiveSourceEntries,
+      effectiveSourceReadiness: defaultSuperpowersCompatibleReadiness,
       host: "opencode",
       compatibility: compatibleOpencode,
       allowedLanes: [],
@@ -4127,7 +4447,8 @@ describe("runCli", () => {
         path: "/workspace/project/oh-my-superagents.config.jsonc",
         sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
       },
-      effectiveSourceEntries: {},
+      effectiveSourceEntries: defaultSuperpowersEffectiveSourceEntries,
+      effectiveSourceReadiness: defaultSuperpowersCompatibleReadiness,
       host: "opencode",
       commands: {
         prefix: "oms",
@@ -4441,7 +4762,7 @@ describe("runCli", () => {
       sourcePresets: {
         foundation: {
           routes: {
-            "phase.brainstorming": "superpowers" as const,
+            "phase.brainstorm": "superpowers" as const,
           },
         },
       },
@@ -4451,7 +4772,7 @@ describe("runCli", () => {
           ...controlPlaneConfig.presets.default,
           sourcePreset: "foundation",
           sourceRoutes: {
-            "phase.brainstorming": "gstack" as const,
+            "phase.brainstorm": "gstack" as const,
           },
         },
       },
@@ -4472,7 +4793,7 @@ describe("runCli", () => {
         },
         laneState: defaultLaneState,
         effectiveSources: {
-          "phase.brainstorming": "gstack" as const,
+          "phase.brainstorm": "gstack" as const,
         },
       }),
       buildArtifacts: (config: Parameters<typeof buildOpenCodeArtifacts>[0]) => {
@@ -5134,6 +5455,56 @@ describe("runCli", () => {
     ])
   })
 
+  it("uses qwen upstream skill discovery for supported readiness in status output", async () => {
+    const result = await runCli(["status", "--host", "qwen"], createCliDeps({
+      discoverQwenUpstreamSkills: async () => ({
+        brainstorming: "/workspace/project/.agents/skills/brainstorming",
+        "writing-plans": undefined,
+        "subagent-driven-development": "/workspace/project/.agents/skills/subagent-driven-development",
+        "requesting-code-review": "/workspace/project/.agents/skills/requesting-code-review",
+        "verification-before-completion": "/workspace/project/.agents/skills/verification-before-completion",
+        "frontend-design": "/workspace/project/.agents/skills/frontend-design",
+        "webapp-testing": "/workspace/project/.agents/skills/webapp-testing",
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.effectiveSourceReadiness).toMatchObject({
+      "phase.brainstorm": {
+        canonicalRoute: "phase.brainstorm",
+        source: "superpowers",
+        entryName: "brainstorming",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "available",
+            reason: "Detected Qwen upstream workflow entry at /workspace/project/.agents/skills/brainstorming.",
+          },
+          compatibility: null,
+        },
+      },
+      "phase.plan": {
+        canonicalRoute: "phase.plan",
+        source: "superpowers",
+        entryName: "writing-plans",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "not_detected",
+            reason: "Required Qwen upstream workflow entry is not installed: writing-plans.",
+          },
+          compatibility: null,
+        },
+      },
+    })
+  })
+
   it("supports status and doctor --host claude and inspects OMS-managed Claude skills", async () => {
     const files = {
       "/workspace/project/.claude/skills/oms-plan/SKILL.md": renderOwnedClaudeSkill("oms-plan"),
@@ -5371,8 +5742,11 @@ describe("runCli", () => {
     expect(result.stderr).toContain("gstack/plan-eng-review")
   })
 
-  it("fails clearly when status --host qwen is asked to inspect a gstack route", async () => {
+  it("reports unsupported qwen gstack routes through readiness in status", async () => {
     const result = await runCli(["status", "--host", "qwen"], createCliDeps({
+      ...createArtifactFs({
+        "/workspace/project/.qwen/agents/oms-review.md": renderOwnedMarkdownArtifact("oms-review"),
+      }),
       resolveControlPlane: async () => ({
         source: {
           kind: "file" as const,
@@ -5408,12 +5782,35 @@ describe("runCli", () => {
       }),
     }))
 
-    expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("Qwen cannot project gstack routes in this slice")
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.host).toBe("qwen")
+    expect(output.artifacts).toEqual({
+      present: [],
+      missing: [],
+      stale: [],
+    })
+    expect(output.effectiveSourceReadiness).toMatchObject({
+      "phase.plan": {
+        canonicalRoute: "phase.plan",
+        source: "gstack",
+        entryName: "plan-eng-review",
+        readiness: {
+          support: {
+            supported: false,
+            reasonCode: "unsupported_host_source_projection",
+          },
+        },
+      },
+    })
   })
 
-  it("fails clearly when doctor --host qwen is asked to inspect a gstack route", async () => {
+  it("reports unsupported qwen gstack routes through readiness in doctor", async () => {
     const result = await runCli(["doctor", "--host", "qwen"], createCliDeps({
+      ...createArtifactFs({
+        "/workspace/project/.qwen/commands/oms-doctor.md": renderOwnedMarkdownArtifact("oms-doctor"),
+      }),
       resolveControlPlane: async () => ({
         source: {
           kind: "file" as const,
@@ -5449,8 +5846,143 @@ describe("runCli", () => {
       }),
     }))
 
-    expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("Qwen cannot project gstack routes in this slice")
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.host).toBe("qwen")
+    expect(output.artifacts).toEqual({
+      present: [],
+      missing: [],
+      stale: [],
+    })
+    expect(output.effectiveSourceReadiness).toMatchObject({
+      "phase.plan": {
+        canonicalRoute: "phase.plan",
+        source: "gstack",
+        entryName: "plan-eng-review",
+        readiness: {
+          support: {
+            supported: false,
+            reasonCode: "unsupported_host_source_projection",
+          },
+        },
+      },
+    })
+  })
+
+  it("skips qwen expected artifact generation for unsupported source routes in status", async () => {
+    let buildCalled = false
+
+    const result = await runCli(["status", "--host", "qwen"], createCliDeps({
+      ...createArtifactFs({
+        "/workspace/project/.qwen/agents/oms-review.md": renderOwnedMarkdownArtifact("oms-review"),
+      }),
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.unknown": "gstack" as const,
+        } as any,
+      }),
+      buildQwenArtifacts: async () => {
+        buildCalled = true
+        throw new Error("buildQwenArtifacts should not run")
+      },
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(buildCalled).toBe(false)
+    expect(output.artifacts).toEqual({
+      present: [],
+      missing: [],
+      stale: [],
+    })
+    expect(output.effectiveSourceReadiness).toMatchObject({
+      "phase.unknown": {
+        canonicalRoute: "phase.unknown",
+        source: "gstack",
+        readiness: {
+          support: {
+            supported: false,
+            reasonCode: "unsupported_source_route",
+          },
+        },
+      },
+    })
+  })
+
+  it("degrades claude gstack detector failures into readiness errors in status", async () => {
+    const result = await runCli(["status", "--host", "claude"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourceRoutes: {
+                "phase.plan": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourceRoutes: {
+              "phase.plan": "gstack" as const,
+            },
+          },
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.plan": "gstack" as const,
+        },
+      }),
+      detectClaudeGstackAvailability: async () => {
+        throw new Error("detector crashed")
+      },
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.effectiveSourceReadiness).toMatchObject({
+      "phase.plan": {
+        canonicalRoute: "phase.plan",
+        source: "gstack",
+        entryName: "plan-eng-review",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "error",
+            reason: "Claude gstack availability check failed: detector crashed",
+          },
+          compatibility: null,
+        },
+      },
+    })
   })
 
   it("syncs direct workflow artifacts for Qwen without requiring upstream skills", async () => {

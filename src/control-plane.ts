@@ -19,8 +19,9 @@ import {
   resolvePresetReuse,
 } from "./config.js"
 import { listLaneExecutionUnits } from "./lane-execution.js"
-import { resolveRoute, type BuiltInPhase } from "./router.js"
+import { resolveEffectiveSources, resolveRoute, type BuiltInPhase } from "./router.js"
 import type { SuperpowersCompatibilityResult, SupportedSuperpowersHost } from "./superpowers-compatibility.js"
+import type { ProjectionReadiness } from "./upstream-readiness.js"
 import {
   getWorkflowSourceEntry,
   normalizeWorkflowSourceRoutes,
@@ -99,6 +100,24 @@ export type ControlPlaneArtifactSummary = {
   present: string[]
   missing: string[]
   stale: string[]
+}
+
+export type EffectiveSourceReadinessEntry = WorkflowSourceEntry & {
+  readiness: ProjectionReadiness
+}
+
+export type EffectiveSourceReadiness = Partial<Record<CanonicalRouteId, EffectiveSourceReadinessEntry>>
+
+function isSupportedUnavailableReadinessEntry(
+  entry: EffectiveSourceReadinessEntry | undefined,
+): entry is EffectiveSourceReadinessEntry & {
+  readiness: Extract<ProjectionReadiness, { support: { supported: true } }>
+} {
+  if (!entry || !("availability" in entry.readiness)) {
+    return false
+  }
+
+  return entry.readiness.availability.status === "not_detected"
 }
 
 export type ExplainTrace = {
@@ -208,6 +227,7 @@ export function buildOpenCodeStatusState(input: {
   source: ResolvedControlPlane["source"]
   enabled: boolean
   compatibility: SuperpowersCompatibilityResult | null
+  effectiveSourceReadiness?: EffectiveSourceReadiness
   artifactSummary: ControlPlaneArtifactSummary
 }): OpenCodeStatusState {
   if (input.compatibility?.status === "not_detected") {
@@ -223,6 +243,16 @@ export function buildOpenCodeStatusState(input: {
       code: "upstream_incompatible",
       category: "upstream",
       reason: input.compatibility.reason,
+    }
+  }
+
+  const unavailableReadiness = Object.values(input.effectiveSourceReadiness ?? {}).find(isSupportedUnavailableReadinessEntry)
+
+  if (unavailableReadiness) {
+    return {
+      code: "upstream_not_detected",
+      category: "upstream",
+      reason: unavailableReadiness.readiness.availability.reason,
     }
   }
 
@@ -312,7 +342,13 @@ export function buildControlPlaneRouteExplainTrace(input: {
 }
 
 export function summarizeEffectiveSourceEntries(resolved: ResolvedControlPlane) {
-  const effectiveSources = normalizeWorkflowSourceRoutes(resolved.config.workflow, resolved.effectiveSources)
+  const effectiveSources = resolveEffectiveSources({
+    workflow: resolved.config.workflow,
+    effectiveSources: normalizeWorkflowSourceRoutes(
+      resolved.config.workflow,
+      resolved.effectiveSources,
+    ),
+  })
 
   return Object.fromEntries(
     Object.entries(effectiveSources)
@@ -322,6 +358,25 @@ export function summarizeEffectiveSourceEntries(resolved: ResolvedControlPlane) 
         getWorkflowSourceEntry(canonicalRoute as CanonicalRouteId, source),
       ]),
   ) as Partial<Record<CanonicalRouteId, WorkflowSourceEntry>>
+}
+
+export async function summarizeEffectiveSourceReadiness(input: {
+  resolved: ResolvedControlPlane
+  evaluateReadiness: (sourceEntry: WorkflowSourceEntry) => Promise<ProjectionReadiness>
+}): Promise<EffectiveSourceReadiness> {
+  const sourceEntries = Object.entries(summarizeEffectiveSourceEntries(input.resolved))
+    .filter((entry): entry is [string, WorkflowSourceEntry] => entry[1] !== undefined)
+  const readinessEntries = await Promise.all(
+    sourceEntries.map(async ([canonicalRoute, sourceEntry]) => ([
+      canonicalRoute as CanonicalRouteId,
+      {
+        ...sourceEntry,
+        readiness: await input.evaluateReadiness(sourceEntry),
+      },
+    ] as const)),
+  )
+
+  return Object.fromEntries(readinessEntries) as EffectiveSourceReadiness
 }
 
 export function buildControlPlaneExplainTrace(input: {
@@ -461,10 +516,13 @@ function getEffectiveProfiles(config: ControlPlaneConfig, preset: ControlPlanePr
 }
 
 function getEffectiveSources(config: ControlPlaneConfig, preset: ControlPlanePreset) {
-  return normalizeWorkflowSourceRoutes(config.workflow, {
-    ...(preset.sourcePreset ? (config.sourcePresets[preset.sourcePreset]?.routes ?? {}) : {}),
-    ...(preset.sourceRoutes ?? {}),
-  })
+  return normalizeWorkflowSourceRoutes(
+    config.workflow,
+    {
+      ...(preset.sourcePreset ? (config.sourcePresets[preset.sourcePreset]?.routes ?? {}) : {}),
+      ...(preset.sourceRoutes ?? {}),
+    },
+  )
 }
 
 function resolvePresetDefinitionFromLayers(

@@ -9,7 +9,7 @@ describe("renderClaudeSkillFile", () => {
       profileId: "planner",
       model: "anthropic/claude-sonnet-4-5",
       sourceEntry: {
-        canonicalRoute: "phase.writing-plans",
+        canonicalRoute: "phase.plan",
         source: "gstack",
         entryName: "plan-eng-review",
       },
@@ -18,10 +18,10 @@ describe("renderClaudeSkillFile", () => {
 
     expect(output).toContain("# generated-by: oh-my-superagents; do-not-edit: true")
     expect(output).toContain(
-      "<!-- oms-route: stage=1; host=claude; source=gstack; route=phase.writing-plans; projection=skill; rendered-name=oms-plan -->",
+      "<!-- oms-route: stage=1; host=claude; source=gstack; route=phase.plan; projection=skill; rendered-name=oms-plan -->",
     )
     expect(output).toContain("# Skill: oms-plan")
-    expect(output).toContain("Use the gstack workflow entry `gstack/plan-eng-review` for `phase.writing-plans` whenever it is relevant.")
+    expect(output).toContain("Use the gstack workflow entry `gstack/plan-eng-review` for `phase.plan` whenever it is relevant.")
     expect(output).toContain(
       "If that gstack entry is unavailable, say that the required workflow source is not installed for Claude and stop instead of improvising a replacement workflow.",
     )
@@ -38,7 +38,7 @@ describe("buildClaudeArtifacts", () => {
       routes: {},
       defaultRoute: "planner",
       effectiveSources: {
-        "phase.writing-plans": "gstack",
+        "phase.plan": "gstack",
       },
     } as never)
 
@@ -53,10 +53,26 @@ describe("buildClaudeArtifacts", () => {
     ])
 
     const planSkill = artifacts.skills.find((item) => item.directory === ".claude/skills/oms-plan")
+    const brainstormSkill = artifacts.skills.find((item) => item.directory === ".claude/skills/oms-brainstorm")
 
-    expect(planSkill?.content).toContain("route=phase.writing-plans")
+    expect(planSkill?.content).toContain("route=phase.plan")
     expect(planSkill?.content).toContain("source=gstack")
     expect(planSkill?.content).toContain("gstack/plan-eng-review")
+    expect(brainstormSkill?.content).toContain("Use the workflow entry `superpowers/brainstorming` for `phase.brainstorm` whenever it is relevant.")
+  })
+
+  it("fails through the shared capability policy when a Claude phase resolves to an unsupported source entry", () => {
+    expect(() =>
+      library.buildClaudeArtifacts({
+        workflow: { kind: "superpowers" },
+        profiles: { planner: { model: "anthropic/claude-sonnet-4-5" } },
+        routes: {},
+        defaultRoute: "planner",
+        effectiveSources: {
+          "phase.brainstorm": "gstack",
+        },
+      } as never)
+    ).toThrow(/capability policy.*unsupported_source_route.*phase\.brainstorm/i)
   })
 
   it("fails closed for direct workflow configs", () => {
@@ -72,6 +88,6 @@ describe("buildClaudeArtifacts", () => {
         routes: { plan: "planner" },
         defaultRoute: "planner",
       } as never)
-    ).toThrow(/not supported/i)
+    ).toThrow(/capability policy.*unsupported_host_direct_projection.*intent\.plan/i)
   })
 })

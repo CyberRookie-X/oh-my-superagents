@@ -8,10 +8,15 @@ import {
   type ControlPlaneConfig,
   type RouterConfig,
 } from "./config.js"
+import { getHostProjectionDecision } from "./capabilities.js"
 import { CONTROL_PLANE_MARKER_PREFIX, MARKER, renderRouteOwnershipMetadata, type GeneratedArtifact } from "./opencode.js"
 import { resolvePhase, resolveRoute, type BuiltInPhase, type ResolvedRoute } from "./router.js"
+import { getWorkflowSourceEntry } from "./workflow-sources.js"
 import { toDirectCanonicalRouteId } from "./workflow-direct.js"
-import { toSuperpowersCanonicalRouteId } from "./workflow-superpowers.js"
+import {
+  getSuperpowersSourceEntryByWorkflowEntryName,
+  toSuperpowersCanonicalRouteId,
+} from "./workflow-superpowers.js"
 
 const PHASE_TO_QWEN_AGENT = {
   brainstorming: "oms-brainstorm",
@@ -70,19 +75,35 @@ function getSourceEntry(
   sourceEntry: ResolvedRoute["sourceEntry"] | undefined,
   fallback: ResolvedRoute["sourceEntry"],
 ) {
-  return sourceEntry ?? fallback
+  return sourceEntry ? { ...fallback, ...sourceEntry } : fallback
 }
 
-function formatWorkflowEntryName(source: string, entryName: string) {
-  return `${source}/${entryName}`
+function formatWorkflowEntryName(sourceEntry: ResolvedRoute["sourceEntry"]) {
+  return `${sourceEntry.source}/${sourceEntry.entryName ?? sourceEntry.canonicalRoute}`
 }
 
-function getQwenWorkflowEntryName(sourceEntry: ResolvedRoute["sourceEntry"], fallbackEntryName: string) {
-  if (sourceEntry.source === "gstack") {
-    return fallbackEntryName
+function getQwenWorkflowEntryName(sourceEntry: ResolvedRoute["sourceEntry"]) {
+  return formatWorkflowEntryName(sourceEntry)
+}
+
+function formatSourceEntryName(sourceEntry: ResolvedRoute["sourceEntry"]) {
+  return `${sourceEntry.source}/${sourceEntry.entryName ?? sourceEntry.canonicalRoute}`
+}
+
+function assertQwenProjectionSupport(workflowKind: RouterConfig["workflow"]["kind"] | undefined, sourceEntry: ResolvedRoute["sourceEntry"]) {
+  const decision = getHostProjectionDecision({
+    host: "qwen",
+    workflowKind: workflowKind ?? "superpowers",
+    sourceEntry,
+  })
+
+  if (decision.supported) {
+    return
   }
 
-  return formatWorkflowEntryName(sourceEntry.source, sourceEntry.entryName ?? fallbackEntryName)
+  throw new Error(
+    `Qwen projection blocked by capability policy (${decision.reasonCode}) for ${formatSourceEntryName(sourceEntry)} (${sourceEntry.canonicalRoute})`,
+  )
 }
 
 export type BuildQwenArtifactsOptions = BuildQwenArtifactsInput & {
@@ -143,10 +164,13 @@ export async function discoverQwenUpstreamSkills(input: DiscoverQwenUpstreamSkil
 }
 
 export function renderQwenAgentFile(input: RenderQwenAgentInput) {
-  const sourceEntry = getSourceEntry(input.sourceEntry, {
-    canonicalRoute: toSuperpowersCanonicalRouteId(input.skillName as BuiltInPhase),
-    source: "superpowers",
-  })
+  const sourceEntry = input.sourceEntry
+    ? input.sourceEntry
+    : getSuperpowersSourceEntryByWorkflowEntryName(input.skillName)
+
+  if (!sourceEntry) {
+    throw new Error(`Unknown superpowers workflow entry: ${input.skillName}`)
+  }
 
   return [
     "---",
@@ -328,6 +352,8 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
 
       const resolved = resolveRoute(config, intent)
 
+      assertQwenProjectionSupport(config.workflow.kind, resolved.sourceEntry)
+
       agents.push({
         kind: "agent",
         directory: ".qwen/agents",
@@ -369,16 +395,14 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
   for (const phase of BUILT_IN_PHASES) {
     const upstreamSkillName = PHASE_TO_SKILL[phase]
     const resolved = resolveMappedRoute(config, upstreamSkillName)
-    const sourceEntry = getSourceEntry(resolved.sourceEntry, {
-      canonicalRoute: toSuperpowersCanonicalRouteId(phase),
-      source: "superpowers",
-    })
+    const sourceEntry = getSourceEntry(
+      resolved.sourceEntry,
+      getWorkflowSourceEntry(toSuperpowersCanonicalRouteId(phase), "superpowers"),
+    )
 
-    if (sourceEntry.source === "gstack") {
-      throw new Error(`gstack is not yet supported on qwen for canonical route ${sourceEntry.canonicalRoute}`)
-    }
+    assertQwenProjectionSupport(config.workflow?.kind, sourceEntry)
 
-    const workflowEntryName = getQwenWorkflowEntryName(sourceEntry, upstreamSkillName)
+    const workflowEntryName = getQwenWorkflowEntryName(sourceEntry)
 
     agents.push({
       kind: "agent",

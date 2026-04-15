@@ -1,6 +1,11 @@
 import { readFile } from "node:fs/promises"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { discoverConfigPath, loadControlPlaneConfig, loadRouterConfig } from "../src/config.js"
+
+afterEach(() => {
+  vi.doUnmock("../src/capabilities.js")
+  vi.resetModules()
+})
 
 function createExists(files: Record<string, string>) {
   return async (filePath: string) => filePath in files
@@ -179,21 +184,21 @@ describe("loadControlPlaneConfig", () => {
         "sourcePresets": {
           "foundation": {
             "routes": {
-              "phase.brainstorming": "superpowers",
-              "phase.verification-before-completion": "gstack"
+              "phase.brainstorm": "superpowers",
+              "phase.verify": "gstack"
             }
           }
         },
         "presets": {
-          "default": {
-            "label": "Default",
-            "short": "def",
-            "sourcePreset": "foundation",
-            "sourceRoutes": {
-              "phase.writing-plans": "gstack"
-            },
-            "profiles": {
-              "build": { "model": "openai/gpt-5" }
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "sourcePreset": "foundation",
+              "sourceRoutes": {
+                "phase.plan": "gstack"
+              },
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
             },
             "routes": {},
             "defaultRoute": "build"
@@ -205,15 +210,49 @@ describe("loadControlPlaneConfig", () => {
     expect(result.config.sourcePresets).toEqual({
       foundation: {
         routes: {
-          "phase.brainstorming": "superpowers",
-          "phase.verification-before-completion": "gstack",
+          "phase.brainstorm": "superpowers",
+          "phase.verify": "gstack",
         },
       },
     })
     expect(result.config.presets.default.sourcePreset).toBe("foundation")
     expect(result.config.presets.default.sourceRoutes).toEqual({
-      "phase.writing-plans": "gstack",
+      "phase.plan": "gstack",
     })
+  })
+
+  it("rejects legacy superpowers canonical route ids in source mappings", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "sourcePresets": {
+            "foundation": {
+              "routes": {
+                "phase.brainstorming": "superpowers"
+              }
+            }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "sourceRoutes": {
+                "phase.writing-plans": "gstack"
+              },
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/unknown canonical route|phase\.brainstorming|phase\.writing-plans/i)
   })
 
   it("rejects an unknown preset sourcePreset reference", async () => {
@@ -227,7 +266,7 @@ describe("loadControlPlaneConfig", () => {
           "sourcePresets": {
             "foundation": {
               "routes": {
-                "phase.brainstorming": "superpowers"
+                "phase.brainstorm": "superpowers"
               }
             }
           },
@@ -290,7 +329,7 @@ describe("loadControlPlaneConfig", () => {
           "sourcePresets": {
             "foundation": {
               "routes": {
-                "phase.writing-plans": "direct"
+                "phase.plan": "direct"
               }
             }
           },
@@ -308,7 +347,57 @@ describe("loadControlPlaneConfig", () => {
           }
         }`,
       }),
-    ).rejects.toThrow(/phase\.writing-plans.*direct/i)
+    ).rejects.toThrow(/phase\.plan.*direct/i)
+  })
+
+  it("validates source-route support through the shared capability registry", async () => {
+    vi.resetModules()
+    vi.doMock("../src/capabilities.js", async () => {
+      const actual = await vi.importActual<typeof import("../src/capabilities.js")>("../src/capabilities.js")
+
+      return {
+        ...actual,
+        isSourceRouteSupported: vi.fn((source: "superpowers" | "gstack" | "direct", canonicalRoute: string) => {
+          if (source === "superpowers" && canonicalRoute === "phase.plan") {
+            return false
+          }
+
+          return actual.isSourceRouteSupported(source, canonicalRoute as never)
+        }),
+      }
+    })
+
+    const { loadControlPlaneConfig: loadControlPlaneConfigWithCapabilities } = await import("../src/config.js")
+
+    await expect(
+      loadControlPlaneConfigWithCapabilities({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "sourcePresets": {
+            "foundation": {
+              "routes": {
+                "phase.plan": "superpowers"
+              }
+            }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "sourcePreset": "foundation",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/phase\.plan.*superpowers/i)
   })
 
   it("rejects direct workflow intent ids that are not OpenCode-safe artifact names", async () => {
@@ -354,7 +443,7 @@ describe("loadControlPlaneConfig", () => {
           "sourcePresets": {
             "foundation": {
               "routes": {
-                "phase.brainstorming": "not-a-source"
+                "phase.brainstorm": "not-a-source"
               }
             }
           },
@@ -391,7 +480,7 @@ describe("loadControlPlaneConfig", () => {
           "sourcePresets": {
             "foundation": {
               "routes": {
-                "phase.brainstorming": "superpowers"
+                "phase.brainstorm": "superpowers"
               }
             }
           },
@@ -411,7 +500,7 @@ describe("loadControlPlaneConfig", () => {
           }
         }`,
       }),
-    ).rejects.toThrow(/unknown canonical route|phase\.brainstorming|intent\.review/i)
+    ).rejects.toThrow(/unknown canonical route|phase\.brainstorm|intent\.review/i)
   })
 
   it("rejects non-direct sources for intent routes", async () => {
@@ -1488,8 +1577,8 @@ describe("loadRouterConfig", () => {
           "sourcePresets": {
             "foundation": {
               "routes": {
-                "phase.brainstorming": "superpowers",
-                "phase.verification-before-completion": "gstack"
+                "phase.brainstorm": "superpowers",
+                "phase.verify": "gstack"
               }
             }
           },
@@ -1528,8 +1617,8 @@ describe("loadRouterConfig", () => {
           "sourcePresets": {
             "foundation": {
               "routes": {
-                "phase.brainstorming": "superpowers",
-                "phase.verification-before-completion": "gstack"
+                "phase.brainstorm": "superpowers",
+                "phase.verify": "gstack"
               }
             }
           },
@@ -1566,9 +1655,9 @@ describe("loadRouterConfig", () => {
     })
 
     expect(result.config.effectiveSources).toEqual({
-      "phase.brainstorming": "superpowers",
-      "phase.writing-plans": "gstack",
-      "phase.verification-before-completion": "gstack",
+      "phase.brainstorm": "superpowers",
+      "phase.plan": "gstack",
+      "phase.verify": "gstack",
     })
   })
 

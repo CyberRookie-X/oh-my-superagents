@@ -18,11 +18,11 @@ The project follows one simple rule:
 
 > Keep the shared OMS core thicker than any single host adapter.
 
-That keeps host-specific code replaceable while preserving one consistent model for routing, presets, compatibility checks, and OMS control-plane behavior.
+That keeps host-specific code replaceable while preserving one consistent model for routing, presets, compatibility checks, shared capability policy, and OMS control-plane behavior.
 
 ## Layering
 
-The current architecture has six layers.
+The current architecture has seven layers.
 
 ### 1. Control Plane Core
 
@@ -39,6 +39,7 @@ Responsibilities:
 - preset selection
 - command prefix and alias resolution
 - OMS `status/use/disable/sync/doctor` behavior
+- compose `status`, `doctor`, and `explain` diagnostics without collapsing support, availability, compatibility, and sync state into one flag
 
 Why it is thicker:
 
@@ -51,11 +52,16 @@ Why it is thicker:
 Main files:
 
 - `src/router.ts`
+- `src/workflow-direct.ts`
 - `src/workflow-superpowers.ts`
+- `src/workflow-gstack.ts`
+- `src/workflow-sources.ts`
 
 Responsibilities:
 
 - keep workflow-specific route vocabularies out of the generic route resolver
+- normalize built-in OMS phase inputs to true canonical route ids such as `phase.plan`
+- map canonical routes through source adapters to source-native entries such as `writing-plans` or `plan-eng-review`
 - preserve `superpowers` as a first-party workflow adapter
 - let the OpenCode direct-mode slice resolve user-defined intents without upstream workflow-tool dependencies
 
@@ -65,7 +71,26 @@ Why this layer now exists:
 - `superpowers` support remains first-class, but it no longer has to define the entire product identity
 - direct mode can stay thin when adapter assumptions are explicit
 
-### 3. Host Adapters
+### 3. Shared Capability Policy
+
+Main file:
+
+- `src/capabilities.ts`
+
+Responsibilities:
+
+- keep source adapters focused on defining what upstream entries exist for a canonical route
+- let the capability registry decide whether OMS supports a source-route, host-source projection, or control-plane command combination
+- return structured support decisions and reason codes that the CLI and migrated host adapters consume directly
+- keep the current remaining host-local command filtering and CLI projection guardrails explicit until later cleanup folds them into the same shared policy path
+
+Why this layer now exists:
+
+- route resolution and support policy are different concerns and need different extension points
+- fail-closed support rules stay consistent when new sources, hosts, or commands are added
+- adapters can stay thinner because more of the support matrix now lives in one shared policy surface instead of being duplicated ad hoc
+
+### 4. Host Adapters
 
 Main files:
 
@@ -73,19 +98,21 @@ Main files:
 - `src/codex.ts`
 - `src/codex-bootstrap.ts`
 - `src/qwen.ts`
+- `src/claude.ts`
 
 Responsibilities:
 
-- render host-native artifacts
-- map OMS phases and commands into host-native entrypoints
+- render host-native artifacts from resolved canonical routes and source entries
+- map OMS phases and commands into host-native entrypoints without treating source-native workflow names as the internal truth layer
 - apply host-specific constraints without changing OMS semantics
 
 Why these stay thinner:
 
 - they should be mostly rendering and translation layers
+- the canonical route model lives in shared routing code, not in per-host filename or workflow-entry conventions
 - host-specific differences should not leak back into the core model unless unavoidable
 
-### 4. Compatibility Monitor
+### 5. Compatibility Monitor
 
 Main files:
 
@@ -103,7 +130,7 @@ Why it is medium-sized:
 - it is shared across hosts
 - detection is host-specific, but policy is shared
 
-### 5. Artifact Reconciliation
+### 6. Artifact Reconciliation
 
 Main file:
 
@@ -120,11 +147,12 @@ Why it stays separate:
 - every host eventually needs the same ownership and cleanup guarantees
 - it is easier to reason about cleanup centrally than inside each adapter
 
-### 6. Docs and Plans
+### 7. Docs and Plans
 
 Key locations:
 
 - `docs/superpowers/specs/`
+- `docs/superpowers/plans/`
 - `.agents/superpowers/specs/`
 
 Responsibilities:
@@ -132,6 +160,21 @@ Responsibilities:
 - capture decisions before implementation
 - keep staged work explicit
 - preserve boundaries between phases and hosts
+
+## Readiness Surfaces
+
+OMS diagnostics intentionally separate four different questions:
+
+- `support`: can OMS project this route or command combination at all? This comes from `src/capabilities.ts` and is fail-closed. Unsupported entries stop here.
+- `availability`: if the resolved source depends on an upstream installation, can OMS detect that dependency right now? `src/upstream-readiness.ts` normalizes this into statuses such as `available`, `not_detected`, `error`, or `not_implemented`.
+- `compatibility`: if OMS can detect upstream `superpowers`, is that install inside the local tested matrix? This is narrower than availability and comes from `src/superpowers-compatibility.ts`.
+- `sync state`: are OMS-owned artifacts present for the invoking host? This comes from artifact inspection and reconciliation, not from support or upstream detection.
+
+The CLI surfaces those distinctions directly:
+
+- `status` and `doctor` return `effectiveSourceEntries` plus `effectiveSourceReadiness`.
+- `explain` attaches `readiness` whenever a traced route already carries control-plane explain metadata such as `routeSource`, `configSource`, `reuseRelationship`, `resolvedSource`, and `sourceEntry`.
+- OpenCode `status` additionally distills sync state into `state`, `nextAction`, and `artifactSummary`, while all hosts return host-local `artifacts`.
 
 ## Host Differences
 
@@ -178,6 +221,20 @@ Architectural consequence:
 - Qwen is implemented as a thin adapter
 - current support is intentionally narrower than OpenCode/Codex
 
+### Claude
+
+Main characteristics:
+
+- project-scoped `.claude/skills/*/SKILL.md` wrappers
+- no direct-workflow projection in the current slice
+- no heavy bootstrap or CLAUDE.md takeover flow
+
+Architectural consequence:
+
+- Claude stays a thin host adapter
+- Claude consumes the same canonical route and source-entry model as the other hosts
+- current support centers on the `superpowers` workflow slice plus control-plane artifact management
+
 ## Thickness By Source Size
 
 These counts are approximate source lines of code from the implementation files only.
@@ -185,13 +242,15 @@ They exclude tests and documentation.
 
 | Layer | Main files | Approx. source LOC | Thickness |
 | --- | --- | ---: | --- |
-| OMS control plane core | `src/control-plane.ts`, `src/config.ts`, `src/cli.ts` | 3213 | Medium |
-| Workflow adapters | `src/router.ts`, `src/workflow-superpowers.ts` | 152 | Thin |
-| OpenCode adapter | `src/opencode.ts` | 399 | Thin |
-| Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 624 | Medium |
-| Qwen adapter | `src/qwen.ts` | 220 | Thin |
-| Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1051 | Medium |
-| Shared artifact reconciliation | `src/materialize.ts` | 429 | Thin-to-medium |
+| OMS control plane core | `src/control-plane.ts`, `src/config.ts`, `src/cli.ts` | 4316 | Medium |
+| Workflow adapters | `src/router.ts`, `src/workflow-direct.ts`, `src/workflow-superpowers.ts`, `src/workflow-gstack.ts`, `src/workflow-sources.ts` | 371 | Thin |
+| Shared capability policy | `src/capabilities.ts` | 97 | Thin |
+| OpenCode adapter | `src/opencode.ts` | 633 | Thin |
+| Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 760 | Medium |
+| Qwen adapter | `src/qwen.ts` | 424 | Thin |
+| Claude adapter | `src/claude.ts` | 138 | Thin |
+| Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1093 | Medium |
+| Shared artifact reconciliation | `src/materialize.ts` | 712 | Thin-to-medium |
 
 Interpretation:
 

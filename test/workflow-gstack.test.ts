@@ -18,4 +18,8 @@ describe("workflow-gstack", () => {
       entryName: "plan-eng-review",
     })
   })
+
+  it("does not normalize legacy superpowers canonical aliases", () => {
+    expect(getGstackSourceEntry("phase.writing-plans")).toBeUndefined()
+  })
 })

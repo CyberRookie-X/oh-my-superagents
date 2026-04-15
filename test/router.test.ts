@@ -15,6 +15,25 @@ const config = {
 }
 
 describe("resolvePhase", () => {
+  it("maps built-in phases onto true canonical phase routes", () => {
+    const routeConfig = {
+      workflow: { kind: "superpowers" as const },
+      profiles: {
+        build: { model: "openai/gpt-5" },
+      },
+      routes: {},
+      defaultRoute: "build",
+    }
+
+    expect(resolvePhase(routeConfig as never, "brainstorming").canonicalRoute).toBe("phase.brainstorm")
+    expect(resolvePhase(routeConfig as never, "writing-plans").canonicalRoute).toBe("phase.plan")
+    expect(resolvePhase(routeConfig as never, "subagent-driven-development").canonicalRoute).toBe("phase.execute")
+    expect(resolvePhase(routeConfig as never, "requesting-code-review").canonicalRoute).toBe("phase.review")
+    expect(resolvePhase(routeConfig as never, "verification-before-completion").canonicalRoute).toBe("phase.verify")
+    expect(resolvePhase(routeConfig as never, "frontend-design").canonicalRoute).toBe("phase.visual")
+    expect(resolvePhase(routeConfig as never, "webapp-testing").canonicalRoute).toBe("phase.web-test")
+  })
+
   it("uses exact phase route before default route", () => {
     expect(resolvePhase(config, "brainstorming").profileId).toBe("review")
   })
@@ -97,20 +116,20 @@ describe("resolvePhase", () => {
         },
         defaultRoute: "build",
         effectiveSources: {
-          "phase.brainstorming": "gstack",
+          "phase.plan": "gstack",
         },
       } as never,
       "brainstorming",
     )
 
     expect(resolved).toMatchObject({
-      canonicalRoute: "phase.brainstorming",
-      resolvedSource: "gstack",
+      canonicalRoute: "phase.brainstorm",
+      resolvedSource: "superpowers",
       sourceEntry: {
-        canonicalRoute: "phase.brainstorming",
-        source: "gstack",
+        canonicalRoute: "phase.brainstorm",
+        source: "superpowers",
       },
-      sourceResolution: "explicit",
+      sourceResolution: "default",
     })
   })
 
@@ -131,14 +150,41 @@ describe("resolvePhase", () => {
     )
 
     expect(resolved).toMatchObject({
-      canonicalRoute: "phase.writing-plans",
+      canonicalRoute: "phase.plan",
       resolvedSource: "gstack",
       sourceResolution: "explicit",
     })
     expect(resolved.sourceEntry).toMatchObject({
-      canonicalRoute: "phase.writing-plans",
+      canonicalRoute: "phase.plan",
       source: "gstack",
       entryName: "plan-eng-review",
+    })
+  })
+
+  it("requires true canonical built-in source override ids for in-memory source overrides", () => {
+    const resolved = resolvePhase(
+      {
+        workflow: { kind: "superpowers" as const },
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        routes: {},
+        defaultRoute: "build",
+        effectiveSources: {
+          "phase.writing-plans": "gstack",
+        } as never,
+      } as never,
+      "writing-plans",
+    )
+
+    expect(resolved).toMatchObject({
+      canonicalRoute: "phase.plan",
+      resolvedSource: "superpowers",
+      sourceResolution: "default",
+    })
+    expect(resolved.sourceEntry).toMatchObject({
+      canonicalRoute: "phase.plan",
+      source: "superpowers",
     })
   })
 })

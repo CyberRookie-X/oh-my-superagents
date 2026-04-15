@@ -4,6 +4,7 @@ import { homedir } from "node:os"
 import path from "node:path"
 import { parse, type ParseError } from "jsonc-parser"
 import { z } from "zod"
+import { isSourceRouteSupported } from "./capabilities.js"
 import {
   SUPERPOWERS_COMPATIBILITY_MODES,
   type SuperpowersCompatibilityMode,
@@ -17,7 +18,7 @@ import {
   type WorkflowSourceKind,
 } from "./workflow-sources.js"
 import { toDirectCanonicalRouteId } from "./workflow-direct.js"
-import { getGstackSourceEntry, GSTACK_SOURCE_CATALOG } from "./workflow-gstack.js"
+import { GSTACK_SOURCE_CATALOG } from "./workflow-gstack.js"
 import { SUPERPOWERS_ROUTE_CATALOG, toSuperpowersCanonicalRouteId } from "./workflow-superpowers.js"
 
 export { SUPERPOWERS_ROUTE_CATALOG as BUILT_IN_PHASES } from "./workflow-superpowers.js"
@@ -589,17 +590,19 @@ function getValidCanonicalRouteIds(workflow: WorkflowConfig): Set<string> {
 function validateSourceRouting(config: ControlPlaneConfig) {
   const validCanonicalRouteIds = getValidCanonicalRouteIds(config.workflow)
   const validateSourceKindForRoute = (scope: string, routeId: string, source: WorkflowSourceKind) => {
-    if (routeId.startsWith("phase.") && source === "direct") {
+    if (isSourceRouteSupported(source, routeId as CanonicalRouteId)) {
+      return
+    }
+
+    if (source === "direct") {
       throw new Error(`${scope} cannot route ${routeId} through direct source`)
     }
 
-    if (routeId.startsWith("intent.") && source !== "direct") {
+    if (routeId.startsWith("intent.")) {
       throw new Error(`${scope} cannot route ${routeId} through non-direct source ${source}`)
     }
 
-    if (source === "gstack" && !getGstackSourceEntry(routeId as CanonicalRouteId)) {
-      throw new Error(`${scope} cannot route unsupported canonical route ${routeId} through gstack source`)
-    }
+    throw new Error(`${scope} cannot route unsupported canonical route ${routeId} through ${source} source`)
   }
 
   for (const [sourcePresetKey, sourcePreset] of Object.entries(config.sourcePresets)) {
@@ -843,10 +846,13 @@ export async function loadRouterConfig(input: LoadRouterConfigInput): Promise<Lo
     throw new Error(`Unknown preset: ${loaded.config.settings.activePreset}`)
   }
 
-  const effectiveSources = normalizeWorkflowSourceRoutes(loaded.config.workflow, {
-    ...(activePreset.sourcePreset ? (loaded.config.sourcePresets[activePreset.sourcePreset]?.routes ?? {}) : {}),
-    ...(activePreset.sourceRoutes ?? {}),
-  })
+  const effectiveSources = normalizeWorkflowSourceRoutes(
+    loaded.config.workflow,
+    {
+      ...(activePreset.sourcePreset ? (loaded.config.sourcePresets[activePreset.sourcePreset]?.routes ?? {}) : {}),
+      ...(activePreset.sourceRoutes ?? {}),
+    },
+  )
 
   const config: LoadedRouterConfig["config"] = {
     workflow: loaded.config.workflow,
