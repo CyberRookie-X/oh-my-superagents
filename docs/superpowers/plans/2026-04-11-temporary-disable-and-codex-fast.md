@@ -89,7 +89,7 @@ it("keeps the temporary-disable helper outside the configurable control-plane co
 
 - [ ] **Step 2: Run the focused OpenCode tests and verify failure**
 
-Run: `npm test -- --run test/opencode.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts`
 
 Expected: FAIL because no auxiliary helper command is generated yet.
 
@@ -123,7 +123,7 @@ Append this artifact from `buildArtifacts()` as a fixed auxiliary `.opencode/com
 
 - [ ] **Step 4: Run the focused OpenCode tests and verify they pass**
 
-Run: `npm test -- --run test/opencode.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts`
 
 Expected: PASS for the new helper-artifact tests and the existing OpenCode suite.
 
@@ -164,7 +164,7 @@ it("adds a fixed Codex helper skill for temporarily disabling superpowers", () =
 
 - [ ] **Step 2: Run the focused Codex bootstrap tests and verify failure**
 
-Run: `npm test -- --run test/codex-bootstrap.test.ts`
+Run: `pnpm test -- --run test/codex-bootstrap.test.ts`
 
 Expected: FAIL because no auxiliary helper skill exists yet.
 
@@ -197,7 +197,7 @@ Append that file in `buildCodexBootstrapFiles()` next to the generated control-p
 
 - [ ] **Step 4: Run the focused Codex bootstrap tests and verify they pass**
 
-Run: `npm test -- --run test/codex-bootstrap.test.ts`
+Run: `pnpm test -- --run test/codex-bootstrap.test.ts`
 
 Expected: PASS for the new helper-skill coverage and the existing bootstrap suite.
 
@@ -259,7 +259,7 @@ it("keeps effort and codexFast as independent resolved route properties", () => 
 
 - [ ] **Step 2: Run the focused config and router tests and verify failure**
 
-Run: `npm test -- --run test/config.test.ts test/router.test.ts`
+Run: `pnpm test -- --run test/config.test.ts test/router.test.ts`
 
 Expected: FAIL because `codexFast` is not yet part of the schema or resolved selection.
 
@@ -293,7 +293,7 @@ selection: {
 
 - [ ] **Step 4: Run the focused config and router tests and verify they pass**
 
-Run: `npm test -- --run test/config.test.ts test/router.test.ts`
+Run: `pnpm test -- --run test/config.test.ts test/router.test.ts`
 
 Expected: PASS for the new config/router coverage and the existing suites.
 
@@ -351,7 +351,7 @@ expect(result.content).not.toContain('"effort": "fast"')
 
 - [ ] **Step 2: Run the focused Codex tests and verify failure**
 
-Run: `npm test -- --run test/codex.test.ts test/codex-bootstrap.test.ts`
+Run: `pnpm test -- --run test/codex.test.ts test/codex-bootstrap.test.ts`
 
 Expected: FAIL because Codex does not yet read `codexFast`, and the starter config still uses `effort: "fast"` as the only fast signal.
 
@@ -387,7 +387,7 @@ build: {
 
 - [ ] **Step 4: Run the focused Codex tests and verify they pass**
 
-Run: `npm test -- --run test/codex.test.ts test/codex-bootstrap.test.ts`
+Run: `pnpm test -- --run test/codex.test.ts test/codex-bootstrap.test.ts`
 
 Expected: PASS for the new Codex fast behavior and starter-config coverage.
 
@@ -456,7 +456,7 @@ Expected: matches in both README files for the new support-matrix rows and confi
 
 - [ ] **Step 4: Run final verification**
 
-Run: `npm test && npm run check && npm run build`
+Run: `pnpm test && pnpm check && pnpm build`
 
 Expected: PASS for the full test suite, TypeScript check, and build.
 

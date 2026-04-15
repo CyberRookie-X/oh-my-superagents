@@ -125,7 +125,7 @@ expect(library.renderClaudeSkillFile).toBeDefined()
 
 - [ ] **Step 2: Run the focused Claude/index tests and verify failure**
 
-Run: `npm test -- --run test/claude.test.ts test/index.test.ts`
+Run: `pnpm test -- --run test/claude.test.ts test/index.test.ts`
 
 Expected: FAIL because `src/claude.ts` and the Claude exports do not exist yet.
 
@@ -170,7 +170,7 @@ Also export the new Claude helpers from `src/index.ts`.
 
 - [ ] **Step 4: Run the focused Claude/index tests and verify they pass**
 
-Run: `npm test -- --run test/claude.test.ts test/index.test.ts`
+Run: `pnpm test -- --run test/claude.test.ts test/index.test.ts`
 
 Expected: PASS for the new Claude renderer tests and the existing index exports suite.
 
@@ -230,7 +230,7 @@ it("supports claude explain output", async () => {
 
 - [ ] **Step 2: Run the focused Claude CLI/materialize tests and verify failure**
 
-Run: `npm test -- --run test/cli.test.ts test/materialize.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts test/materialize.test.ts`
 
 Expected: FAIL because `claude` is not yet a registered host and the materializer does not scan `.claude/skills`.
 
@@ -248,7 +248,7 @@ Extend `OWNED_ARTIFACT_RULES` and ownership parsing in `src/materialize.ts` so `
 
 - [ ] **Step 4: Run the focused Claude CLI/materialize tests and verify they pass**
 
-Run: `npm test -- --run test/cli.test.ts test/materialize.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts test/materialize.test.ts`
 
 Expected: PASS for the new Claude host and cleanup tests and the existing suites.
 
@@ -277,13 +277,13 @@ Add Claude Code to the support tables and architecture docs with wording like:
 
 - [ ] **Step 2: Run the full test suite**
 
-Run: `npm test`
+Run: `pnpm test`
 
 Expected: PASS with the new Claude tests included.
 
 - [ ] **Step 3: Run type checking and build**
 
-Run: `npm run check && npm run build`
+Run: `pnpm check && pnpm build`
 
 Expected: PASS for both commands.
 

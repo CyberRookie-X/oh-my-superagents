@@ -113,7 +113,7 @@ describe("evaluateProjectionReadiness", () => {
 
 - [ ] **Step 2: Run the focused readiness-model tests and verify failure**
 
-Run: `npm test -- --run test/upstream-readiness.test.ts`
+Run: `pnpm test -- --run test/upstream-readiness.test.ts`
 
 Expected: FAIL because the shared readiness layer does not exist yet.
 
@@ -176,7 +176,7 @@ Export the new helpers from `src/index.ts`.
 
 - [ ] **Step 4: Run the focused readiness-model tests and verify they pass**
 
-Run: `npm test -- --run test/upstream-readiness.test.ts`
+Run: `pnpm test -- --run test/upstream-readiness.test.ts`
 
 Expected: PASS for the new readiness-layer tests.
 
@@ -231,7 +231,7 @@ describe("detectClaudeGstack", () => {
 
 - [ ] **Step 2: Run the focused detector tests and verify failure**
 
-Run: `npm test -- --run test/gstack-detectors.test.ts`
+Run: `pnpm test -- --run test/gstack-detectors.test.ts`
 
 Expected: FAIL because the `gstack` detector module does not exist yet.
 
@@ -280,7 +280,7 @@ export function toAvailabilityResult(result: SuperpowersCompatibilityResult | nu
 
 - [ ] **Step 4: Run the focused detector tests and verify they pass**
 
-Run: `npm test -- --run test/gstack-detectors.test.ts`
+Run: `pnpm test -- --run test/gstack-detectors.test.ts`
 
 Expected: PASS for the new gstack detector tests.
 
@@ -326,7 +326,7 @@ it("reports supported but unavailable gstack readiness in doctor", async () => {
 
 - [ ] **Step 2: Run the focused CLI/control-plane tests and verify failure**
 
-Run: `npm test -- --run test/cli.test.ts test/control-plane.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts test/control-plane.test.ts`
 
 Expected: FAIL because readiness is not yet integrated into shared CLI output.
 
@@ -355,7 +355,7 @@ Render the results into `status`, `doctor`, and `explain` output so that support
 
 - [ ] **Step 4: Run the focused CLI/control-plane tests and verify they pass**
 
-Run: `npm test -- --run test/cli.test.ts test/control-plane.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts test/control-plane.test.ts`
 
 Expected: PASS for the new readiness surfaces.
 
@@ -386,7 +386,7 @@ Add documentation explaining that OMS now distinguishes:
 
 - [ ] **Step 2: Run the full verification suite**
 
-Run: `npm test && npm run check && npm run build`
+Run: `pnpm test && pnpm check && pnpm build`
 
 Expected: all tests, checks, and builds pass with readiness reporting wired through the shared diagnostics model.
 

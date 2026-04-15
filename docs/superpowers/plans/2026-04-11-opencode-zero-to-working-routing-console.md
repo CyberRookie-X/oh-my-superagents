@@ -47,7 +47,7 @@
 
 - Keep commits small and phase-scoped.
 - Prefer shared helpers in `src/control-plane.ts` or `src/cli.ts` over adding OpenCode-only policy to `src/opencode.ts`.
-- Run focused Vitest commands while iterating, then run `npm test` and `npm run check` before claiming a slice is complete.
+- Run focused Vitest commands while iterating, then run `pnpm test` and `pnpm check` before claiming a slice is complete.
 - Parallelize only when tasks do not touch the same files.
 
 ### Task 1: Phase A State Model and CLI Status Surface
@@ -100,7 +100,7 @@ it("reports missing expected OpenCode artifacts as a sync-needed state", async (
 
 - [ ] **Step 2: Run the focused CLI tests and verify failure**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: FAIL because `status` output does not yet include `state`, `nextAction`, or `artifactSummary`.
 
@@ -164,7 +164,7 @@ return {
 
 - [ ] **Step 4: Run the focused CLI tests and verify they pass**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: PASS for the new `status` state-model tests and the existing CLI suite.
 
@@ -212,7 +212,7 @@ Add or extend a test in `test/opencode.test.ts` for a helper that computes rende
 
 - [ ] **Step 2: Run the focused tests and verify failure**
 
-Run: `npm test -- --run test/cli.test.ts test/opencode.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts test/opencode.test.ts`
 
 Expected: FAIL because the doctor output does not yet include rendered command discovery or artifact summaries.
 
@@ -254,7 +254,7 @@ Keep stale-artifact detection based on owned OMS markers and expected file lists
 
 - [ ] **Step 4: Run the focused tests and verify they pass**
 
-Run: `npm test -- --run test/cli.test.ts test/opencode.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts test/opencode.test.ts`
 
 Expected: PASS for the new doctor/discovery coverage and the existing test set.
 
@@ -307,7 +307,7 @@ it("logs targeted guidance when upstream is incompatible", async () => {
 
 - [ ] **Step 2: Run the focused plugin tests and verify failure**
 
-Run: `npm test -- --run test/plugin.test.ts`
+Run: `pnpm test -- --run test/plugin.test.ts`
 
 Expected: FAIL because plugin logs do not yet include explicit state labels and next-step messages.
 
@@ -335,7 +335,7 @@ Use `warn` or `error` based on the existing severity model, but keep the messagi
 
 - [ ] **Step 4: Run the focused plugin tests and verify they pass**
 
-Run: `npm test -- --run test/plugin.test.ts`
+Run: `pnpm test -- --run test/plugin.test.ts`
 
 Expected: PASS for the new guidance tests and the existing plugin suite.
 
@@ -424,7 +424,7 @@ it("rejects cyclic preset reuse", async () => {
 
 - [ ] **Step 2: Run the focused control-plane tests and verify failure**
 
-Run: `npm test -- --run test/control-plane.test.ts`
+Run: `pnpm test -- --run test/control-plane.test.ts`
 
 Expected: FAIL because `extends` is not yet part of the config schema or resolution model.
 
@@ -460,7 +460,7 @@ Rules:
 
 - [ ] **Step 4: Run the focused control-plane tests and verify they pass**
 
-Run: `npm test -- --run test/control-plane.test.ts`
+Run: `pnpm test -- --run test/control-plane.test.ts`
 
 Expected: PASS for the new inheritance tests and the existing control-plane suite.
 
@@ -524,7 +524,7 @@ it("reports that use changed the active preset and now recommends sync", async (
 
 - [ ] **Step 2: Run the focused CLI tests and verify failure**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: FAIL because `explain` and `use` outputs do not yet include tracing or feedback-loop fields.
 
@@ -563,7 +563,7 @@ return {
 
 - [ ] **Step 4: Run the focused CLI tests and verify they pass**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: PASS for the new explain and `use` feedback coverage and the existing CLI suite.
 
@@ -598,7 +598,7 @@ it("reports unused profiles and default-routed phases in OpenCode doctor output"
 
 - [ ] **Step 2: Run the focused tests and verify failure**
 
-Run: `npm test -- --run test/cli.test.ts test/control-plane.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts test/control-plane.test.ts`
 
 Expected: FAIL because doctor output does not yet include routing validation details.
 
@@ -621,7 +621,7 @@ Do not add a new command.
 
 - [ ] **Step 4: Run full verification**
 
-Run: `npm test && npm run check`
+Run: `pnpm test && pnpm check`
 
 Expected: PASS for the full test suite and TypeScript check.
 

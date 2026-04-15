@@ -132,7 +132,7 @@ describe("getControlPlaneCommandDecision", () => {
 
 - [ ] **Step 2: Run the focused capability tests and verify failure**
 
-Run: `npm test -- --run test/capabilities.test.ts`
+Run: `pnpm test -- --run test/capabilities.test.ts`
 
 Expected: FAIL because the shared capability registry does not exist yet.
 
@@ -198,7 +198,7 @@ Export the new helpers from `src/index.ts`.
 
 - [ ] **Step 4: Run the focused capability tests and verify they pass**
 
-Run: `npm test -- --run test/capabilities.test.ts`
+Run: `pnpm test -- --run test/capabilities.test.ts`
 
 Expected: PASS for the new registry tests.
 
@@ -262,7 +262,7 @@ it("rejects qwen explain through the shared capability policy", async () => {
 
 - [ ] **Step 2: Run the focused config and CLI tests and verify failure**
 
-Run: `npm test -- --run test/config.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/config.test.ts test/cli.test.ts`
 
 Expected: FAIL because config and CLI still encode support rules inline instead of through the registry.
 
@@ -289,7 +289,7 @@ Likewise, replace `assertQwenProjectionSupport()` with route-by-route evaluation
 
 - [ ] **Step 4: Run the focused config and CLI tests and verify they pass**
 
-Run: `npm test -- --run test/config.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/config.test.ts test/cli.test.ts`
 
 Expected: PASS for the new capability-driven support assertions.
 
@@ -326,7 +326,7 @@ expect(() => buildClaudeArtifacts(directConfig as never)).toThrow(/unsupported_h
 
 - [ ] **Step 2: Run the focused host tests and verify failure**
 
-Run: `npm test -- --run test/qwen.test.ts test/claude.test.ts`
+Run: `pnpm test -- --run test/qwen.test.ts test/claude.test.ts`
 
 Expected: FAIL because Qwen and Claude still own their unsupported-combination policy locally.
 
@@ -350,7 +350,7 @@ In `src/claude.ts`, replace the direct-mode guard with the same shared policy pa
 
 - [ ] **Step 4: Run the focused host tests and verify they pass**
 
-Run: `npm test -- --run test/qwen.test.ts test/claude.test.ts`
+Run: `pnpm test -- --run test/qwen.test.ts test/claude.test.ts`
 
 Expected: PASS for the capability-driven fail-closed behavior.
 
@@ -380,7 +380,7 @@ Add text to `docs/README-architecture.md` describing a dedicated shared capabili
 
 - [ ] **Step 2: Run the full verification suite**
 
-Run: `npm test && npm run check && npm run build`
+Run: `pnpm test && pnpm check && pnpm build`
 
 Expected: all tests pass and all existing fail-closed behavior still works through the centralized capability layer.
 

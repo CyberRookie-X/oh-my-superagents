@@ -3,6 +3,18 @@
 本文说明 `oh-my-superagents` 当前的架构形态。
 它刻意只讨论结构与权衡，不展开安装步骤或命令参考。
 
+## 仓库工作流
+
+这个仓库的维护工作流使用 `pnpm`。处理仓库本身时，请先执行一次 `corepack enable`，然后使用下面这些命令。面向包使用者的示例仍然可以保留 `npx` 形式，因为发布后的 CLI 用法并不依赖 pnpm。
+
+```bash
+corepack enable
+pnpm install
+pnpm test
+pnpm check
+pnpm build
+```
+
 ## 设计目标
 
 `oh-my-superagents` 的存在目的，是补上某个宿主在运行 `superpowers` 时仍然缺失的那一层能力。

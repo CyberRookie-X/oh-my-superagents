@@ -144,7 +144,7 @@ it("rejects a preset that references a missing lane", async () => {
 
 - [ ] **Step 2: Run the focused config tests and verify failure**
 
-Run: `npm test -- --run test/config.test.ts`
+Run: `pnpm test -- --run test/config.test.ts`
 
 Expected: FAIL because global `profiles`, `lanes`, `settings.defaultLane`, `laneSelection`, and `usesLanes` are not yet part of the schema.
 
@@ -185,7 +185,7 @@ Move lane/profile collections to top level in the layered control-plane shape, w
 
 - [ ] **Step 4: Run the focused config tests and verify they pass**
 
-Run: `npm test -- --run test/config.test.ts`
+Run: `pnpm test -- --run test/config.test.ts`
 
 Expected: PASS for the new lane schema tests and existing config coverage.
 
@@ -278,7 +278,7 @@ it("rejects settings.defaultLane when the active preset does not allow that lane
 
 - [ ] **Step 2: Run the focused control-plane tests and verify failure**
 
-Run: `npm test -- --run test/control-plane.test.ts`
+Run: `pnpm test -- --run test/control-plane.test.ts`
 
 Expected: FAIL because control-plane validation does not yet understand lanes.
 
@@ -294,7 +294,7 @@ Also extend the control-plane config and resolved output so lane-selection setti
 
 - [ ] **Step 4: Run the focused control-plane tests and verify they pass**
 
-Run: `npm test -- --run test/control-plane.test.ts`
+Run: `pnpm test -- --run test/control-plane.test.ts`
 
 Expected: PASS for the new lane validation tests and existing control-plane coverage.
 
@@ -352,7 +352,7 @@ it("falls back to preset defaultRoute when there is no effective lane", () => {
 
 - [ ] **Step 2: Run the focused router tests and verify failure**
 
-Run: `npm test -- --run test/router.test.ts`
+Run: `pnpm test -- --run test/router.test.ts`
 
 Expected: FAIL because `resolvePhase()` does not yet accept or use lane context.
 
@@ -375,7 +375,7 @@ Thread lane-related metadata into explain output so later CLI work can expose it
 
 - [ ] **Step 4: Run the focused router tests and verify they pass**
 
-Run: `npm test -- --run test/router.test.ts`
+Run: `pnpm test -- --run test/router.test.ts`
 
 Expected: PASS for the new lane routing tests and existing router coverage.
 
@@ -448,7 +448,7 @@ it("shows lane selection mode and allowed lanes in doctor output", async () => {
 
 - [ ] **Step 2: Run the focused CLI tests and verify failure**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: FAIL because explain/doctor outputs do not yet surface lane information.
 
@@ -466,7 +466,7 @@ For Stage 1, `effectiveLane` can resolve to the persisted/default baseline when 
 
 - [ ] **Step 4: Run the focused CLI tests and verify they pass**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: PASS for the new lane explain/doctor coverage and the existing CLI suite.
 
@@ -535,7 +535,7 @@ it("still throws shared agent conflict when a lane makes shared phases diverge",
 
 - [ ] **Step 2: Run the focused OpenCode tests and verify failure**
 
-Run: `npm test -- --run test/opencode.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts`
 
 Expected: FAIL because `buildArtifacts()` does not yet accept lane context.
 
@@ -547,7 +547,7 @@ Keep the existing shared-agent conflict detection intact, but make it compare la
 
 - [ ] **Step 4: Run the focused OpenCode tests and verify they pass**
 
-Run: `npm test -- --run test/opencode.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts`
 
 Expected: PASS for the new lane-aware OpenCode coverage and the existing OpenCode suite.
 
@@ -591,7 +591,7 @@ Expected: both READMEs include the new lane section and example.
 
 - [ ] **Step 4: Run full verification**
 
-Run: `npm test && npm run check && npm run build`
+Run: `pnpm test && pnpm check && pnpm build`
 
 Expected: PASS for the full suite, type check, and build.
 

@@ -119,6 +119,18 @@
 - `explain --host claude --phase <phase>` 当前已支持，用于当前 Claude `superpowers` slice。
 - direct mode 不依赖 upstream `superpowers`；与此同时，一等公民级别的 `superpowers` 工作流支持保持不变。
 
+## 仓库维护工作流
+
+这个仓库自身的维护流程统一使用 `pnpm`。如果你是在维护仓库，请先执行一次 `corepack enable`，然后使用下面这些 `pnpm` 命令。安装章节里给包使用者的示例仍然可以继续使用 `npx`。
+
+```bash
+corepack enable
+pnpm install
+pnpm test
+pnpm check
+pnpm build
+```
+
 ## 安装
 
 如果使用 `superpowers` workflow mode，请先单独安装 upstream `superpowers`，然后按宿主分别接入。

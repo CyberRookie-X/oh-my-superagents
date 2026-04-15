@@ -33,7 +33,7 @@
 - Modify: `test/cli.test.ts`
 
 - [ ] **Step 1: Write failing tests for bootstrap marketplace/plugin/config generation**
-- [ ] **Step 2: Run `npm test -- test/codex-bootstrap.test.ts test/cli.test.ts` and confirm failure**
+- [ ] **Step 2: Run `pnpm test -- --run test/codex-bootstrap.test.ts test/cli.test.ts` and confirm failure**
 - [ ] **Step 3: Cover these expectations:**
   - repo-local marketplace JSON points to `./plugins/oh-my-superagents-codex`
   - plugin manifest points to bundled skills
@@ -52,7 +52,7 @@
 - [ ] **Step 1: Implement bootstrap content builders for marketplace, plugin manifest, skills, and starter config**
 - [ ] **Step 2: Use explicit generated markers in scaffolded files**
 - [ ] **Step 3: Export the bootstrap helpers from `src/index.ts`**
-- [ ] **Step 4: Run `npm test -- test/codex-bootstrap.test.ts` and confirm pass**
+- [ ] **Step 4: Run `pnpm test -- --run test/codex-bootstrap.test.ts` and confirm pass**
 
 ## Chunk 2: CLI Flow
 
@@ -63,14 +63,14 @@
 - Modify: `test/cli.test.ts`
 
 - [ ] **Step 1: Add failing CLI tests for bootstrap success and unsupported host rejection**
-- [ ] **Step 2: Run `npm test -- test/cli.test.ts` and confirm failure**
+- [ ] **Step 2: Run `pnpm test -- --run test/cli.test.ts` and confirm failure**
 - [ ] **Step 3: Implement bootstrap command flow:**
   - discover existing config path
   - create starter config if absent
   - write marketplace/plugin scaffold files
   - run the existing Codex sync path
   - return JSON summary with next steps
-- [ ] **Step 4: Re-run `npm test -- test/cli.test.ts test/codex-bootstrap.test.ts` and confirm pass**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/cli.test.ts test/codex-bootstrap.test.ts` and confirm pass**
 
 ## Chunk 3: Docs And Verification
 
@@ -82,7 +82,7 @@
 
 - [ ] **Step 1: Document `bootstrap --host codex` in README**
 - [ ] **Step 2: Clarify in the design doc that Codex now has a convenience bootstrap layer on top of the existing routing core**
-- [ ] **Step 3: Run `npm test && npm run check && npm run build`**
+- [ ] **Step 3: Run `pnpm test && pnpm check && pnpm build`**
 - [ ] **Step 4: Inspect `git diff --stat` and confirm only Codex bootstrap files changed**
 
 - [ ] **Step 5: Commit**

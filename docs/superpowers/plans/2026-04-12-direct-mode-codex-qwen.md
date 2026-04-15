@@ -111,7 +111,7 @@ it("does not delegate to upstream superpowers skills in direct mode", () => {
 
 - [ ] **Step 2: Run the focused Codex tests and verify failure**
 
-Run: `npm test -- --run test/codex.test.ts`
+Run: `pnpm test -- --run test/codex.test.ts`
 
 Expected: FAIL because Codex only renders the current superpowers-mode agents.
 
@@ -128,7 +128,7 @@ Keep `explainCodexPhase` behavior unchanged for `superpowers`; add or adapt a di
 
 - [ ] **Step 4: Run the focused Codex tests and verify they pass**
 
-Run: `npm test -- --run test/codex.test.ts`
+Run: `pnpm test -- --run test/codex.test.ts`
 
 Expected: PASS for the new direct-mode Codex tests and existing Codex coverage.
 
@@ -186,7 +186,7 @@ it("does not mention upstream superpowers skills in direct-mode Codex skill prom
 
 - [ ] **Step 2: Run the focused Codex bootstrap tests and verify failure**
 
-Run: `npm test -- --run test/codex-bootstrap.test.ts`
+Run: `pnpm test -- --run test/codex-bootstrap.test.ts`
 
 Expected: FAIL because direct-mode bootstrap entries do not exist yet.
 
@@ -200,7 +200,7 @@ In `src/codex-bootstrap.ts`:
 
 - [ ] **Step 4: Run the focused Codex bootstrap tests and verify they pass**
 
-Run: `npm test -- --run test/codex-bootstrap.test.ts`
+Run: `pnpm test -- --run test/codex-bootstrap.test.ts`
 
 Expected: PASS for the new direct-mode Codex bootstrap tests and existing bootstrap coverage.
 
@@ -266,7 +266,7 @@ it("skips upstream skill discovery and fail-closed behavior in direct mode", asy
 
 - [ ] **Step 2: Run the focused Qwen tests and verify failure**
 
-Run: `npm test -- --run test/qwen.test.ts`
+Run: `pnpm test -- --run test/qwen.test.ts`
 
 Expected: FAIL because Qwen still requires upstream skill discovery and only renders superpowers-mode artifacts.
 
@@ -281,7 +281,7 @@ In `src/qwen.ts`:
 
 - [ ] **Step 4: Run the focused Qwen tests and verify they pass**
 
-Run: `npm test -- --run test/qwen.test.ts`
+Run: `pnpm test -- --run test/qwen.test.ts`
 
 Expected: PASS for the new direct-mode Qwen tests and existing Qwen coverage.
 
@@ -329,7 +329,7 @@ it("syncs direct workflow artifacts for Qwen without requiring upstream skills",
 
 - [ ] **Step 2: Run the focused CLI tests and verify failure**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: FAIL because direct mode is still OpenCode-only.
 
@@ -342,7 +342,7 @@ In `src/cli.ts`:
 
 - [ ] **Step 4: Run the focused CLI tests and verify they pass**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: PASS for the new direct-mode Codex/Qwen CLI tests and existing coverage.
 
@@ -381,7 +381,7 @@ Expected: both READMEs mention the new host coverage.
 
 - [ ] **Step 4: Run full verification**
 
-Run: `npm test && npm run check && npm run build`
+Run: `pnpm test && pnpm check && pnpm build`
 
 Expected: PASS for the full suite, type check, and build.
 

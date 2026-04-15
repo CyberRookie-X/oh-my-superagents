@@ -128,7 +128,7 @@ it("resolves gstack source entries for canonical routes", () => {
 
 - [ ] **Step 2: Run the focused catalog/router tests and verify failure**
 
-Run: `npm test -- --run test/workflow-gstack.test.ts test/router.test.ts`
+Run: `pnpm test -- --run test/workflow-gstack.test.ts test/router.test.ts`
 
 Expected: FAIL because `src/workflow-gstack.ts` and `gstack` source-entry lookup do not exist yet.
 
@@ -155,7 +155,7 @@ Register `gstack` in `src/workflow-sources.ts`, re-export helpers from `src/inde
 
 - [ ] **Step 4: Run the focused catalog/router tests and verify they pass**
 
-Run: `npm test -- --run test/workflow-gstack.test.ts test/router.test.ts`
+Run: `pnpm test -- --run test/workflow-gstack.test.ts test/router.test.ts`
 
 Expected: PASS for the new `gstack` catalog tests and the existing router suite.
 
@@ -221,7 +221,7 @@ it("reports gstack as the source for the planning route in explain output", asyn
 
 - [ ] **Step 2: Run the focused OpenCode/CLI tests and verify failure**
 
-Run: `npm test -- --run test/opencode.test.ts test/control-plane.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts test/control-plane.test.ts test/cli.test.ts`
 
 Expected: FAIL because OpenCode wrappers still hard-code `superpowers` skill handoff text and the CLI does not yet report `gstack` source entries.
 
@@ -243,7 +243,7 @@ Also update `src/control-plane.ts` and `src/cli.ts` to surface the selected `gst
 
 - [ ] **Step 4: Run the focused OpenCode/CLI tests and verify they pass**
 
-Run: `npm test -- --run test/opencode.test.ts test/control-plane.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts test/control-plane.test.ts test/cli.test.ts`
 
 Expected: PASS for the new OpenCode `gstack` projection tests and the existing diagnostics suites.
 
@@ -309,7 +309,7 @@ it("fails clearly when qwen is asked to project a gstack route", async () => {
 
 - [ ] **Step 2: Run the focused Codex/CLI tests and verify failure**
 
-Run: `npm test -- --run test/codex.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/codex.test.ts test/cli.test.ts`
 
 Expected: FAIL because Codex developer instructions still assume only `superpowers`, and unsupported-host diagnostics do not yet special-case `gstack`.
 
@@ -333,7 +333,7 @@ In `src/cli.ts`, fail clearly for hosts that do not yet support `gstack` project
 
 - [ ] **Step 4: Run the focused Codex/CLI tests and verify they pass**
 
-Run: `npm test -- --run test/codex.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/codex.test.ts test/cli.test.ts`
 
 Expected: PASS for the new Codex `gstack` tests, the unsupported-host diagnostics test, and the existing suites.
 
@@ -352,19 +352,19 @@ git commit -m "feat: add gstack host projections"
 
 - [ ] **Step 1: Run the full test suite**
 
-Run: `npm test`
+Run: `pnpm test`
 
 Expected: PASS with all test files green, including the new `gstack` suite.
 
 - [ ] **Step 2: Run type checking**
 
-Run: `npm run check`
+Run: `pnpm check`
 
 Expected: PASS with no TypeScript errors.
 
 - [ ] **Step 3: Run the production build**
 
-Run: `npm run build`
+Run: `pnpm build`
 
 Expected: PASS and regenerate `dist/` successfully.
 

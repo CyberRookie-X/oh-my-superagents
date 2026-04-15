@@ -53,7 +53,7 @@
   - no-config default is available only for `status` and `doctor`
   - `sync` with no config source rejects
 
-- [ ] **Step 2: Run `npm test -- test/config.test.ts test/control-plane.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/config.test.ts test/control-plane.test.ts`**
   Expected: FAIL because Stage 1 config behavior does not exist.
 
 - [ ] **Step 3: Implement minimal config resolution**
@@ -64,7 +64,7 @@
   - preset and command merge rules
   - first-run in-memory defaults
 
-- [ ] **Step 4: Re-run `npm test -- test/config.test.ts test/control-plane.test.ts`**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/config.test.ts test/control-plane.test.ts`**
   Expected: PASS
 
 ## Task 2: Validation rules and write-target semantics
@@ -86,12 +86,12 @@
   - non-writable selected target fails without fallback
   - legacy target rewrite writes only local migrated content plus required stateful fields
 
-- [ ] **Step 2: Run `npm test -- test/control-plane.test.ts test/config.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/control-plane.test.ts test/config.test.ts`**
   Expected: FAIL because validation and write-target helpers are incomplete.
 
 - [ ] **Step 3: Implement minimal validation and write-target helpers**
 
-- [ ] **Step 4: Re-run `npm test -- test/control-plane.test.ts test/config.test.ts`**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/control-plane.test.ts test/config.test.ts`**
   Expected: PASS
 
 ## Task 3: OMS `status` and `doctor`
@@ -107,12 +107,12 @@
   - `status` returns enabled state, active preset, presets, host, compatibility, artifacts
   - `doctor` returns command names, aliases, artifacts present/missing, compatibility
 
-- [ ] **Step 2: Run `npm test -- test/cli.test.ts test/control-plane.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/cli.test.ts test/control-plane.test.ts`**
   Expected: FAIL because OMS read-only commands do not exist.
 
 - [ ] **Step 3: Implement minimal `status` and `doctor` flows**
 
-- [ ] **Step 4: Re-run `npm test -- test/cli.test.ts test/control-plane.test.ts`**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/cli.test.ts test/control-plane.test.ts`**
   Expected: PASS
 
 ## Task 4: OMS `use`, `disable`, and disabled `sync`
@@ -132,12 +132,12 @@
   - disabled `sync` removes OMS-owned artifacts for invoking host only
   - write happens before artifact reconciliation
 
-- [ ] **Step 2: Run `npm test -- test/cli.test.ts test/control-plane.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/cli.test.ts test/control-plane.test.ts`**
   Expected: FAIL because stateful OMS commands do not exist.
 
 - [ ] **Step 3: Implement minimal `use`, `disable`, and disabled `sync`**
 
-- [ ] **Step 4: Re-run `npm test -- test/cli.test.ts test/control-plane.test.ts`**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/cli.test.ts test/control-plane.test.ts`**
   Expected: PASS
 
 ## Task 5: OpenCode OMS command rendering
@@ -153,12 +153,12 @@
   - configured prefix respected
   - generated command delegates to OMS CLI logical command
 
-- [ ] **Step 2: Run `npm test -- test/opencode.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/opencode.test.ts`**
   Expected: FAIL because OMS control-plane rendering is missing.
 
 - [ ] **Step 3: Implement minimal OpenCode OMS rendering**
 
-- [ ] **Step 4: Re-run `npm test -- test/opencode.test.ts`**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/opencode.test.ts`**
   Expected: PASS
 
 ## Task 6: Codex OMS control-plane rendering
@@ -176,12 +176,12 @@
   - malformed marketplace JSON fails before mutation
   - duplicate OMS entry normalizes to one canonical entry
 
-- [ ] **Step 2: Run `npm test -- test/codex-bootstrap.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/codex-bootstrap.test.ts`**
   Expected: FAIL because OMS Codex control-plane rendering is incomplete.
 
 - [ ] **Step 3: Implement minimal Codex OMS rendering**
 
-- [ ] **Step 4: Re-run `npm test -- test/codex-bootstrap.test.ts`**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/codex-bootstrap.test.ts`**
   Expected: PASS
 
 ## Task 7: Ownership and stale artifact cleanup
@@ -197,12 +197,12 @@
   - non-OMS files are preserved
   - cleanup only touches artifacts satisfying the OMS ownership contract
 
-- [ ] **Step 2: Run `npm test -- test/materialize.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/materialize.test.ts`**
   Expected: FAIL because stale OMS control-plane artifacts are not fully reconciled.
 
 - [ ] **Step 3: Implement minimal ownership and cleanup logic**
 
-- [ ] **Step 4: Re-run `npm test -- test/materialize.test.ts test/opencode.test.ts test/codex-bootstrap.test.ts`**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/materialize.test.ts test/opencode.test.ts test/codex-bootstrap.test.ts`**
   Expected: PASS
 
 ## Task 8: Qwen wrapper-agent core
@@ -220,12 +220,12 @@
   - route resolution uses mapped upstream skill key and `defaultRoute`
   - unsupported profile fields are ignored
 
-- [ ] **Step 2: Run `npm test -- test/qwen.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/qwen.test.ts`**
   Expected: FAIL because Qwen adapter does not exist.
 
 - [ ] **Step 3: Implement minimal Qwen wrapper-agent logic**
 
-- [ ] **Step 4: Re-run `npm test -- test/qwen.test.ts`**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/qwen.test.ts`**
   Expected: PASS
 
 ## Task 9: Qwen command rendering and CLI integration
@@ -245,12 +245,12 @@
   - `doctor --host qwen`
   - `sync --host qwen`
 
-- [ ] **Step 2: Run `npm test -- test/qwen.test.ts test/cli.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/qwen.test.ts test/cli.test.ts`**
   Expected: FAIL because Qwen command rendering and CLI integration are missing.
 
 - [ ] **Step 3: Implement minimal Qwen commands and CLI integration**
 
-- [ ] **Step 4: Re-run `npm test -- test/qwen.test.ts test/cli.test.ts`**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/qwen.test.ts test/cli.test.ts`**
   Expected: PASS
 
 ## Task 10: Final docs and verification
@@ -261,7 +261,7 @@
 
 - [ ] **Step 1: Update README for Stage 1 and Stage 2 only**
 - [ ] **Step 2: Ensure exports are complete in `src/index.ts`**
-- [ ] **Step 3: Run `npm test && npm run check && npm run build`**
+- [ ] **Step 3: Run `pnpm test && pnpm check && pnpm build`**
   Expected: all tests pass, typecheck passes, build succeeds.
 - [ ] **Step 4: Run `git diff --stat`**
   Expected: only OMS control-plane and Qwen files changed; no Kimi support and no upstream `superpowers` disable feature.

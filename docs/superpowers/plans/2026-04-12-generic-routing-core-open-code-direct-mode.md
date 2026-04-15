@@ -161,7 +161,7 @@ it("accepts a direct workflow with named intents", async () => {
 
 - [ ] **Step 2: Run the focused config tests and verify failure**
 
-Run: `npm test -- --run test/config.test.ts`
+Run: `pnpm test -- --run test/config.test.ts`
 
 Expected: FAIL because `workflow` and `workflow.intents` are not yet part of the schema.
 
@@ -193,7 +193,7 @@ Mirror the same shape in `schemas/oh-my-superagents.schema.json`.
 
 - [ ] **Step 4: Run the focused config tests and verify they pass**
 
-Run: `npm test -- --run test/config.test.ts`
+Run: `pnpm test -- --run test/config.test.ts`
 
 Expected: PASS for the new workflow-schema tests and the existing config suite.
 
@@ -259,7 +259,7 @@ expect(library.SUPERPOWERS_ROUTE_CATALOG).toBeDefined()
 
 - [ ] **Step 2: Run the focused router/index tests and verify failure**
 
-Run: `npm test -- --run test/router.test.ts test/index.test.ts`
+Run: `pnpm test -- --run test/router.test.ts test/index.test.ts`
 
 Expected: FAIL because the router still assumes only built-in superpowers phases and no adapter file exists.
 
@@ -279,7 +279,7 @@ Export the new adapter constants from `src/index.ts`.
 
 - [ ] **Step 4: Run the focused router/index tests and verify they pass**
 
-Run: `npm test -- --run test/router.test.ts test/index.test.ts`
+Run: `pnpm test -- --run test/router.test.ts test/index.test.ts`
 
 Expected: PASS for the new generic-route tests and existing router/index coverage.
 
@@ -355,7 +355,7 @@ it("renders direct-mode agents without upstream superpowers skill handoff", () =
 
 - [ ] **Step 2: Run the focused OpenCode tests and verify failure**
 
-Run: `npm test -- --run test/opencode.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts`
 
 Expected: FAIL because OpenCode only renders the current superpowers-mode command/agent surface.
 
@@ -375,7 +375,7 @@ The direct-mode command should pass the selected intent and forwarded arguments 
 
 - [ ] **Step 4: Run the focused OpenCode tests and verify they pass**
 
-Run: `npm test -- --run test/opencode.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts`
 
 Expected: PASS for the new direct-mode coverage and existing OpenCode tests.
 
@@ -450,7 +450,7 @@ it("explains a direct workflow intent on OpenCode", async () => {
 
 - [ ] **Step 2: Run the focused CLI tests and verify failure**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: FAIL because the CLI only supports phase-based `explain` and superpowers-shaped sync behavior.
 
@@ -467,7 +467,7 @@ Keep Stage 1 generic mode scoped to OpenCode only.
 
 - [ ] **Step 4: Run the focused CLI tests and verify they pass**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: PASS for the new direct-mode CLI tests and existing CLI coverage.
 
@@ -523,14 +523,14 @@ Keep wording careful:
 
 Run:
 
-- `npm test -- --run test/index.test.ts`
+- `pnpm test -- --run test/index.test.ts`
 - `rg -n "direct mode|workflow adapter|first-class `superpowers` support" README.md README.zh-CN.md docs/README-architecture.md`
 
 Expected: export tests pass and docs contain the new framing.
 
 - [ ] **Step 4: Run full verification**
 
-Run: `npm test && npm run check && npm run build`
+Run: `pnpm test && pnpm check && pnpm build`
 
 Expected: PASS for the full suite, type check, and build.
 

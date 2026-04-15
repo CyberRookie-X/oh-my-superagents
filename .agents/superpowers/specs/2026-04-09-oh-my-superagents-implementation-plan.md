@@ -69,7 +69,7 @@
   ```
 
 - [ ] **Step 2: Run test to verify it fails**
-  Run: `npm test -- --runInBand test/config.test.ts`
+  Run: `pnpm test -- --run test/config.test.ts`
   Expected: FAIL with module resolution or missing export error for `../src/config`
 
 - [ ] **Step 3: Create minimal project scaffold**
@@ -132,7 +132,7 @@
   ```
 
 - [ ] **Step 4: Run test to verify scaffold is wired**
-  Run: `npm test -- --runInBand test/config.test.ts`
+  Run: `pnpm test -- --run test/config.test.ts`
   Expected: FAIL with missing function implementation, not package or runner errors
 
 ### Task 2: Implement config discovery and schema validation
@@ -197,7 +197,7 @@
   ```
 
 - [ ] **Step 2: Run tests to verify they fail**
-  Run: `npm test -- --runInBand test/config.test.ts`
+  Run: `pnpm test -- --run test/config.test.ts`
   Expected: FAIL with unimplemented `loadRouterConfig`
 
 - [ ] **Step 3: Write minimal config loader and schema**
@@ -283,7 +283,7 @@
   ```
 
 - [ ] **Step 4: Run config tests to verify they pass**
-  Run: `npm test -- --runInBand test/config.test.ts`
+  Run: `pnpm test -- --run test/config.test.ts`
   Expected: PASS
 
 ## Chunk 2: Routing and OpenCode Artifact Generation
@@ -335,7 +335,7 @@
   ```
 
 - [ ] **Step 2: Run router tests to verify they fail**
-  Run: `npm test -- --runInBand test/router.test.ts`
+  Run: `pnpm test -- --run test/router.test.ts`
   Expected: FAIL with missing exports from `src/router.ts`
 
 - [ ] **Step 3: Implement route and explain helpers**
@@ -373,7 +373,7 @@
   ```
 
 - [ ] **Step 4: Run router tests to verify they pass**
-  Run: `npm test -- --runInBand test/router.test.ts`
+  Run: `pnpm test -- --run test/router.test.ts`
   Expected: PASS
 
 ### Task 4: Generate OpenCode agent and command markdown
@@ -454,7 +454,7 @@
   ```
 
 - [ ] **Step 2: Run artifact tests to verify they fail**
-  Run: `npm test -- --runInBand test/opencode.test.ts`
+  Run: `pnpm test -- --run test/opencode.test.ts`
   Expected: FAIL with missing `renderAgentFile` or `renderCommandFile`
 
 - [ ] **Step 3: Implement minimal generators**
@@ -500,7 +500,7 @@
   ```
 
 - [ ] **Step 4: Run artifact tests to verify they pass**
-  Run: `npm test -- --runInBand test/opencode.test.ts`
+  Run: `pnpm test -- --run test/opencode.test.ts`
   Expected: PASS
 
 ## Chunk 3: Materialization, CLI, Runtime, and Docs
@@ -587,7 +587,7 @@
   ```
 
 - [ ] **Step 2: Run tests to verify they fail**
-  Run: `npm test -- --runInBand test/materialize.test.ts`
+  Run: `pnpm test -- --run test/materialize.test.ts`
   Expected: FAIL with missing materializer implementation
 
 - [ ] **Step 3: Implement materializer result contract**
@@ -610,7 +610,7 @@
   ```
 
 - [ ] **Step 4: Run tests to verify they pass**
-  Run: `npm test -- --runInBand test/materialize.test.ts`
+  Run: `pnpm test -- --run test/materialize.test.ts`
   Expected: PASS
 
 ### Task 6: Implement CLI, plugin runtime, README, and full verification
@@ -670,7 +670,7 @@
   ```
 
 - [ ] **Step 2: Run targeted tests to verify they fail**
-  Run: `npm test -- --runInBand test/cli.test.ts test/plugin.test.ts`
+  Run: `pnpm test -- --run test/cli.test.ts test/plugin.test.ts`
   Expected: FAIL with missing `runCli` or plugin runtime exports
 
 - [ ] **Step 3: Implement CLI, plugin runtime, and docs**
@@ -721,7 +721,7 @@
   ```
 
 - [ ] **Step 4: Run the full verification suite**
-  Run: `npm test && npm run check && npm run build`
+  Run: `pnpm test && pnpm check && pnpm build`
   Expected: all commands succeed with exit code 0
 
 - [ ] **Step 5: Commit**
