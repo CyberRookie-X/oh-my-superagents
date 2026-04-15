@@ -106,6 +106,18 @@ The first generic-routing slice is now an experimental direct workflow on OpenCo
 - `explain --host claude --phase <phase>` is supported for the current Claude `superpowers` slice.
 - Direct mode does not require upstream `superpowers`, while first-party `superpowers` workflow routing remains supported and unchanged.
 
+## Repository Maintainer Workflow
+
+This repository is maintained with `pnpm`. If you are working on the repo itself, enable Corepack once and use the pnpm commands below. Consumer-facing package usage examples in the install section can still use `npx`.
+
+```bash
+corepack enable
+pnpm install
+pnpm test
+pnpm check
+pnpm build
+```
+
 ## Install
 
 For `superpowers` workflow mode, install upstream `superpowers` separately, then use the host-specific flow you need.

@@ -165,7 +165,7 @@ it("rejects unknown source kinds in route-to-source mappings", async () => {
 
 - [ ] **Step 2: Run the focused config tests and verify failure**
 
-Run: `npm test -- --run test/config.test.ts`
+Run: `pnpm test -- --run test/config.test.ts`
 
 Expected: FAIL because `sourcePresets`, canonical route ids, and source enums are not yet part of the config schema.
 
@@ -207,7 +207,7 @@ Also add top-level `sourcePresets` to the layered control-plane schema and mirro
 
 - [ ] **Step 4: Run the focused config tests and verify they pass**
 
-Run: `npm test -- --run test/config.test.ts`
+Run: `pnpm test -- --run test/config.test.ts`
 
 Expected: PASS for the new source-aware config tests and the existing config suite.
 
@@ -286,7 +286,7 @@ it("expands preset sourcePreset plus sourceRoutes into an effective source table
 
 - [ ] **Step 2: Run the focused router/control-plane tests and verify failure**
 
-Run: `npm test -- --run test/router.test.ts test/control-plane.test.ts`
+Run: `pnpm test -- --run test/router.test.ts test/control-plane.test.ts`
 
 Expected: FAIL because resolved routes do not yet expose canonical route or source metadata, and the control plane does not yet expand effective source tables.
 
@@ -322,7 +322,7 @@ Export any shared route/source helpers from `src/index.ts`.
 
 - [ ] **Step 4: Run the focused router/control-plane tests and verify they pass**
 
-Run: `npm test -- --run test/router.test.ts test/control-plane.test.ts`
+Run: `pnpm test -- --run test/router.test.ts test/control-plane.test.ts`
 
 Expected: PASS for the new source-aware resolution tests and the existing suites.
 
@@ -396,7 +396,7 @@ it("shows resolved source information in explain output", async () => {
 
 - [ ] **Step 2: Run the focused host/materialize/cli tests and verify failure**
 
-Run: `npm test -- --run test/opencode.test.ts test/codex.test.ts test/qwen.test.ts test/materialize.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts test/codex.test.ts test/qwen.test.ts test/materialize.test.ts test/cli.test.ts`
 
 Expected: FAIL because ownership metadata, host renderers, and CLI explain output do not yet carry source-aware fields.
 
@@ -414,7 +414,7 @@ Extend `src/materialize.ts` with a parser for the new `oms-route` marker and tea
 
 - [ ] **Step 4: Run the focused host/materialize/cli tests and verify they pass**
 
-Run: `npm test -- --run test/opencode.test.ts test/codex.test.ts test/qwen.test.ts test/materialize.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts test/codex.test.ts test/qwen.test.ts test/materialize.test.ts test/cli.test.ts`
 
 Expected: PASS for the new source-aware ownership and explain tests and the existing suites.
 
@@ -433,19 +433,19 @@ git commit -m "feat: add source-aware routing diagnostics"
 
 - [ ] **Step 1: Run the full test suite**
 
-Run: `npm test`
+Run: `pnpm test`
 
 Expected: PASS with all test files green.
 
 - [ ] **Step 2: Run type checking**
 
-Run: `npm run check`
+Run: `pnpm check`
 
 Expected: PASS with no TypeScript errors.
 
 - [ ] **Step 3: Run the production build**
 
-Run: `npm run build`
+Run: `pnpm build`
 
 Expected: PASS and regenerate `dist/` successfully.
 

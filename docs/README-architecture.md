@@ -3,6 +3,18 @@
 This document explains the architectural shape of `oh-my-superagents`.
 It is intentionally focused on structure and tradeoffs, not installation or command reference.
 
+## Repository Workflow
+
+This repository is maintained with `pnpm`. For repository work, enable Corepack once and use the commands below. Consumer-facing package usage elsewhere can remain `npx`-based because published CLI usage is not tied to pnpm.
+
+```bash
+corepack enable
+pnpm install
+pnpm test
+pnpm check
+pnpm build
+```
+
 ## Design Goal
 
 `oh-my-superagents` is evolving from a `superpowers`-first router into a broader routing and control-plane product.

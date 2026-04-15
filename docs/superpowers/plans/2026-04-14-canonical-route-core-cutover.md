@@ -190,7 +190,7 @@ it("rejects legacy superpowers canonical route ids in source mappings", async ()
 
 - [ ] **Step 2: Run the focused route/source tests and verify failure**
 
-Run: `npm test -- --run test/router.test.ts test/workflow-gstack.test.ts test/config.test.ts`
+Run: `pnpm test -- --run test/router.test.ts test/workflow-gstack.test.ts test/config.test.ts`
 
 Expected: FAIL because the router still emits `phase.writing-plans`-style internal route IDs and the shared source layer still performs alias-based normalization.
 
@@ -265,7 +265,7 @@ export function getWorkflowSourceEntry(canonicalRoute: CanonicalRouteId, source:
 
 - [ ] **Step 4: Run the focused route/source tests and verify they pass**
 
-Run: `npm test -- --run test/router.test.ts test/workflow-gstack.test.ts test/config.test.ts`
+Run: `pnpm test -- --run test/router.test.ts test/workflow-gstack.test.ts test/config.test.ts`
 
 Expected: PASS for the new canonical route assertions and existing direct-mode source tests.
 
@@ -336,7 +336,7 @@ it("builds explain traces with the new canonical route ids", async () => {
 
 - [ ] **Step 2: Run the focused router/config/control-plane tests and verify failure**
 
-Run: `npm test -- --run test/router.test.ts test/config.test.ts test/control-plane.test.ts`
+Run: `pnpm test -- --run test/router.test.ts test/config.test.ts test/control-plane.test.ts`
 
 Expected: FAIL because the router still derives canonical routes from `toSuperpowersCanonicalRouteId()` and config validation still accepts the legacy `phase.<superpowers-phase>` namespace.
 
@@ -376,7 +376,7 @@ Mirror the new canonical examples in `schemas/oh-my-superagents.schema.json` so 
 
 - [ ] **Step 4: Run the focused router/config/control-plane tests and verify they pass**
 
-Run: `npm test -- --run test/router.test.ts test/config.test.ts test/control-plane.test.ts`
+Run: `pnpm test -- --run test/router.test.ts test/config.test.ts test/control-plane.test.ts`
 
 Expected: PASS for the new canonical route summaries and explain traces.
 
@@ -426,7 +426,7 @@ Update `test/cli.test.ts` to expect the Qwen projection error to list `phase.pla
 
 - [ ] **Step 2: Run the focused host/materializer/CLI tests and verify failure**
 
-Run: `npm test -- --run test/claude.test.ts test/qwen.test.ts test/materialize.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/claude.test.ts test/qwen.test.ts test/materialize.test.ts test/cli.test.ts`
 
 Expected: FAIL because host renderers and route markers still inherit legacy `superpowers` canonical IDs in some paths.
 
@@ -458,7 +458,7 @@ In `src/cli.ts`, keep the same Qwen fail-closed policy, but derive unsupported e
 
 - [ ] **Step 4: Run the focused host/materializer/CLI tests and verify they pass**
 
-Run: `npm test -- --run test/claude.test.ts test/qwen.test.ts test/materialize.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/claude.test.ts test/qwen.test.ts test/materialize.test.ts test/cli.test.ts`
 
 Expected: PASS for the new route marker and fail-closed assertions.
 
@@ -490,7 +490,7 @@ Update `README.md` and `README.zh-CN.md` examples so any configuration or diagno
 
 - [ ] **Step 2: Run the full verification suite**
 
-Run: `npm test && npm run check && npm run build`
+Run: `pnpm test && pnpm check && pnpm build`
 
 Expected: all tests pass, type checks pass, and the production build succeeds with the new canonical route core.
 

@@ -34,7 +34,7 @@
 - Modify: `test/cli.test.ts`
 
 - [ ] **Step 1: Write the failing tests**
-- [ ] **Step 2: Run `npm test -- test/codex.test.ts test/cli.test.ts` and confirm failure**
+- [ ] **Step 2: Run `pnpm test -- --run test/codex.test.ts test/cli.test.ts` and confirm failure**
 - [ ] **Step 3: Implement minimal Codex expectations in tests for:**
   - one generated agent per built-in phase
   - TOML content with `name`, `description`, `developer_instructions`, `model`
@@ -53,7 +53,7 @@
 - [ ] **Step 1: Implement Codex phase-to-agent mapping and effort mapping**
 - [ ] **Step 2: Render Codex TOML agent files with phase-specific workflow instructions**
 - [ ] **Step 3: Export Codex builder from `src/index.ts`**
-- [ ] **Step 4: Run `npm test -- test/codex.test.ts` and confirm pass**
+- [ ] **Step 4: Run `pnpm test -- --run test/codex.test.ts` and confirm pass**
 
 ## Chunk 2: Host-Generalized Sync Path
 
@@ -65,10 +65,10 @@
 - Modify: `test/materialize.test.ts`
 
 - [ ] **Step 1: Write/adjust failing tests for per-artifact target directories and prefix-aware cleanup**
-- [ ] **Step 2: Run `npm test -- test/materialize.test.ts` and confirm failure**
+- [ ] **Step 2: Run `pnpm test -- --run test/materialize.test.ts` and confirm failure**
 - [ ] **Step 3: Refactor generated artifacts to carry target directory and ownership prefix metadata**
 - [ ] **Step 4: Update materializer to use artifact-provided directories instead of hard-coded OpenCode paths**
-- [ ] **Step 5: Re-run `npm test -- test/materialize.test.ts test/opencode.test.ts test/codex.test.ts` and confirm pass**
+- [ ] **Step 5: Re-run `pnpm test -- --run test/materialize.test.ts test/opencode.test.ts test/codex.test.ts` and confirm pass**
 
 ### Task 4: Extend CLI for `--host codex`
 
@@ -77,9 +77,9 @@
 - Modify: `test/cli.test.ts`
 
 - [ ] **Step 1: Add failing CLI tests for `explain --host codex --all` and `sync --host codex`**
-- [ ] **Step 2: Run `npm test -- test/cli.test.ts` and confirm failure**
+- [ ] **Step 2: Run `pnpm test -- --run test/cli.test.ts` and confirm failure**
 - [ ] **Step 3: Implement host dispatch between OpenCode and Codex adapters**
-- [ ] **Step 4: Re-run `npm test -- test/cli.test.ts` and confirm pass**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/cli.test.ts` and confirm pass**
 
 ## Chunk 3: Docs And Full Verification
 
@@ -91,7 +91,7 @@
 
 - [ ] **Step 1: Document Codex host support and basic usage**
 - [ ] **Step 2: Add a note in the design doc that Codex is now the second implemented host**
-- [ ] **Step 3: Run `npm test && npm run check && npm run build`**
+- [ ] **Step 3: Run `pnpm test && pnpm check && pnpm build`**
 - [ ] **Step 4: Run `node -e "import('./dist/index.js').then(()=>console.log('library-ok'))"`**
 - [ ] **Step 5: Inspect `git diff --stat` and confirm only Codex-support files changed**
 

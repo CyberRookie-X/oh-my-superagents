@@ -113,7 +113,7 @@ it("builds a deterministic routing proposal from repo signals and model inventor
 
 - [ ] **Step 2: Run the focused authoring tests and verify failure**
 
-Run: `npm test -- --run test/author-routing.test.ts`
+Run: `pnpm test -- --run test/author-routing.test.ts`
 
 Expected: FAIL because the authoring module does not exist yet.
 
@@ -144,7 +144,7 @@ Rules for the first slice:
 
 - [ ] **Step 4: Run the focused authoring tests and verify they pass**
 
-Run: `npm test -- --run test/author-routing.test.ts`
+Run: `pnpm test -- --run test/author-routing.test.ts`
 
 Expected: PASS for the new authoring-core tests.
 
@@ -193,7 +193,7 @@ it("prints a routing proposal summary without writing by default", async () => {
 
 - [ ] **Step 2: Run the focused CLI tests and verify failure**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: FAIL because `author` is not yet a recognized CLI command.
 
@@ -218,7 +218,7 @@ Do not write files yet in preview mode.
 
 - [ ] **Step 4: Run the focused CLI tests and verify they pass**
 
-Run: `npm test -- --run test/cli.test.ts`
+Run: `pnpm test -- --run test/cli.test.ts`
 
 Expected: PASS for the new preview-mode tests and existing CLI coverage.
 
@@ -272,7 +272,7 @@ it("writes the proposed routing config only when --write is provided", async () 
 
 - [ ] **Step 2: Run the focused authoring/CLI tests and verify failure**
 
-Run: `npm test -- --run test/author-routing.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/author-routing.test.ts test/cli.test.ts`
 
 Expected: FAIL because preview mode does not yet apply writes.
 
@@ -288,7 +288,7 @@ Keep the write path explicit and deterministic.
 
 - [ ] **Step 4: Run the focused authoring/CLI tests and verify they pass**
 
-Run: `npm test -- --run test/author-routing.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/author-routing.test.ts test/cli.test.ts`
 
 Expected: PASS for the new explicit write behavior and existing tests.
 
@@ -339,14 +339,14 @@ In both READMEs, add a short section describing:
 
 Run:
 
-- `npm test -- --run test/index.test.ts`
+- `pnpm test -- --run test/index.test.ts`
 - `rg -n "author routing|routing authoring|model inventory|模型清单" README.md README.zh-CN.md`
 
 Expected: export tests pass and docs contain the new command description.
 
 - [ ] **Step 4: Run full verification**
 
-Run: `npm test && npm run check && npm run build`
+Run: `pnpm test && pnpm check && pnpm build`
 
 Expected: PASS for the full suite, type check, and build.
 

@@ -116,7 +116,7 @@ it("includes codexFast false/absent agents in the runtime metadata without enabl
 
 - [ ] **Step 2: Run the focused OpenCode tests and verify failure**
 
-Run: `npm test -- --run test/opencode.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts`
 
 Expected: FAIL because no runtime metadata artifact exists yet.
 
@@ -140,7 +140,7 @@ Use a distinct owner prefix for the runtime metadata file so cleanup works indep
 
 - [ ] **Step 4: Run the focused OpenCode tests and verify they pass**
 
-Run: `npm test -- --run test/opencode.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts`
 
 Expected: PASS for the new metadata tests and existing OpenCode coverage.
 
@@ -180,7 +180,7 @@ it("writes and later cleans stale OpenCode runtime metadata artifacts", async ()
 
 - [ ] **Step 2: Run the focused materialization tests and verify failure**
 
-Run: `npm test -- --run test/materialize.test.ts`
+Run: `pnpm test -- --run test/materialize.test.ts`
 
 Expected: FAIL because the runtime metadata file is not treated as OMS-owned yet.
 
@@ -192,7 +192,7 @@ Keep the logic narrow and OpenCode-specific.
 
 - [ ] **Step 4: Run the focused materialization tests and verify they pass**
 
-Run: `npm test -- --run test/materialize.test.ts`
+Run: `pnpm test -- --run test/materialize.test.ts`
 
 Expected: PASS for the new runtime metadata cleanup test and existing materialization coverage.
 
@@ -259,7 +259,7 @@ it("does not patch chat params when the current agent is not codexFast-enabled",
 
 - [ ] **Step 2: Run the focused plugin tests and verify failure**
 
-Run: `npm test -- --run test/plugin.test.ts`
+Run: `pnpm test -- --run test/plugin.test.ts`
 
 Expected: FAIL because the plugin does not yet expose `chat.params` runtime behavior.
 
@@ -279,7 +279,7 @@ output.options.serviceTier = "fast"
 
 - [ ] **Step 4: Run the focused plugin tests and verify they pass**
 
-Run: `npm test -- --run test/plugin.test.ts`
+Run: `pnpm test -- --run test/plugin.test.ts`
 
 Expected: PASS for the new codexFast patching tests and existing plugin coverage.
 
@@ -326,14 +326,14 @@ Update both READMEs to move OpenCode `codexFast` from staged/partial to full.
 
 Run:
 
-- `npm test -- --run test/cli.test.ts`
+- `pnpm test -- --run test/cli.test.ts`
 - `rg -n "codexFast|OpenCode: full|OpenCode：完整|runtime metadata" README.md README.zh-CN.md`
 
 Expected: diagnostics tests pass and docs show the new support level.
 
 - [ ] **Step 4: Run full verification**
 
-Run: `npm test && npm run check && npm run build`
+Run: `pnpm test && pnpm check && pnpm build`
 
 Expected: PASS for the full suite, type check, and build.
 

@@ -133,7 +133,7 @@ it("defaults subagent execution mode to suggest when omitted", async () => {
 
 - [ ] **Step 2: Run the focused config tests and verify failure**
 
-Run: `npm test -- --run test/config.test.ts`
+Run: `pnpm test -- --run test/config.test.ts`
 
 Expected: FAIL because `subagentExecution` is not yet part of the schema/default config.
 
@@ -151,7 +151,7 @@ Thread it through the layered settings shape, default config synthesis, clone/se
 
 - [ ] **Step 4: Run the focused config tests and verify they pass**
 
-Run: `npm test -- --run test/config.test.ts`
+Run: `pnpm test -- --run test/config.test.ts`
 
 Expected: PASS for the new execution-mode tests and the existing config suite.
 
@@ -209,7 +209,7 @@ it("uses stable lane slugs and rejects collisions", () => {
 
 - [ ] **Step 2: Run the focused helper tests and verify failure**
 
-Run: `npm test -- --run test/lane-execution.test.ts`
+Run: `pnpm test -- --run test/lane-execution.test.ts`
 
 Expected: FAIL because the helper module does not exist yet.
 
@@ -240,7 +240,7 @@ Rules:
 
 - [ ] **Step 4: Run the focused helper tests and verify they pass**
 
-Run: `npm test -- --run test/lane-execution.test.ts`
+Run: `pnpm test -- --run test/lane-execution.test.ts`
 
 Expected: PASS for the new helper tests.
 
@@ -309,7 +309,7 @@ it("adds suggest-mode split guidance to the main execute command", () => {
 
 - [ ] **Step 2: Run the focused OpenCode tests and verify failure**
 
-Run: `npm test -- --run test/opencode.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts`
 
 Expected: FAIL because lane-scoped execution helpers are not yet generated.
 
@@ -326,7 +326,7 @@ Keep owner prefixes explicit so cleanup works across lane changes.
 
 - [ ] **Step 4: Run the focused OpenCode tests and verify they pass**
 
-Run: `npm test -- --run test/opencode.test.ts`
+Run: `pnpm test -- --run test/opencode.test.ts`
 
 Expected: PASS for the new lane-scoped execute helper tests and the existing OpenCode suite.
 
@@ -388,7 +388,7 @@ it("shows subagent execution mode and available lane-scoped execute commands in 
 
 - [ ] **Step 2: Run the focused diagnostics tests and verify failure**
 
-Run: `npm test -- --run test/control-plane.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/control-plane.test.ts test/cli.test.ts`
 
 Expected: FAIL because diagnostics do not yet expose subagent execution helpers.
 
@@ -404,7 +404,7 @@ Do not add a new CLI command in this slice.
 
 - [ ] **Step 4: Run the focused diagnostics tests and verify they pass**
 
-Run: `npm test -- --run test/control-plane.test.ts test/cli.test.ts`
+Run: `pnpm test -- --run test/control-plane.test.ts test/cli.test.ts`
 
 Expected: PASS for the new diagnostics coverage and existing suites.
 
@@ -444,7 +444,7 @@ Expected: both READMEs contain the new guidance.
 
 - [ ] **Step 4: Run full verification**
 
-Run: `npm test && npm run check && npm run build`
+Run: `pnpm test && pnpm check && pnpm build`
 
 Expected: PASS for the full suite, type check, and build.
 

@@ -13,9 +13,9 @@ mkdir -p "$ARTIFACT_DIR"
 rm -f "$ARTIFACT_DIR"/oh-my-superagents-*.tgz
 
 printf '[codex-canary-host] building package\n'
-(cd "$ROOT_DIR" && npm run build >/dev/null)
+(cd "$ROOT_DIR" && pnpm run build >/dev/null)
 
-pack_output="$(cd "$ROOT_DIR" && npm pack --pack-destination "$ARTIFACT_DIR")"
+pack_output="$(cd "$ROOT_DIR" && pnpm pack --pack-destination "$ARTIFACT_DIR")"
 package_file="${pack_output##*$'\n'}"
 package_path="/artifacts/$package_file"
 

@@ -55,7 +55,7 @@
   - parseable semver above tested range -> `untested`
   - `strict` blocks only on `incompatible`
 
-- [ ] **Step 3: Run `npm test -- test/config.test.ts test/superpowers-compatibility.test.ts`**
+- [ ] **Step 3: Run `pnpm test -- --run test/config.test.ts test/superpowers-compatibility.test.ts`**
   Expected: FAIL because the config schema and compatibility evaluator do not exist yet.
 
 - [ ] **Step 4: Implement minimal config schema and evaluator**
@@ -64,7 +64,7 @@
   - `schemas/oh-my-superagents.schema.json`
   - `src/superpowers-compatibility.ts`
 
-- [ ] **Step 5: Re-run `npm test -- test/config.test.ts test/superpowers-compatibility.test.ts`**
+- [ ] **Step 5: Re-run `pnpm test -- --run test/config.test.ts test/superpowers-compatibility.test.ts`**
   Expected: PASS
 
 ## Chunk 2: Host Detectors
@@ -94,7 +94,7 @@
   - missing clone and symlink -> `not_detected`
   - detector repo-read failure degrades to `not_detected`
 
-- [ ] **Step 2: Run `npm test -- test/superpowers-detectors.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/superpowers-detectors.test.ts`**
   Expected: FAIL because detector functions do not exist yet.
 
 - [ ] **Step 3: Implement detector module**
@@ -102,7 +102,7 @@
   - `src/superpowers-detectors.ts`
   - `src/superpowers-compatibility.ts`
 
-- [ ] **Step 4: Re-run `npm test -- test/superpowers-detectors.test.ts test/superpowers-compatibility.test.ts`**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/superpowers-detectors.test.ts test/superpowers-compatibility.test.ts`**
   Expected: PASS
 
 ## Chunk 3: CLI Integration
@@ -122,7 +122,7 @@
   - `bootstrap` in `strict` mode blocks before starter config or scaffold writes
   - blocked `sync`/`bootstrap` responses have deterministic exit code and stderr text
 
-- [ ] **Step 2: Run `npm test -- test/cli.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/cli.test.ts`**
   Expected: FAIL because CLI outputs do not include compatibility and strict-mode blocking does not exist.
 
 - [ ] **Step 3: Implement compatibility-aware CLI flow**
@@ -137,7 +137,7 @@
   Cover:
   - strict-mode incompatible result returns before starter config, marketplace writes, or generated agents
 
-- [ ] **Step 5: Re-run `npm test -- test/cli.test.ts test/codex-bootstrap.test.ts test/superpowers-compatibility.test.ts test/superpowers-detectors.test.ts`**
+- [ ] **Step 5: Re-run `pnpm test -- --run test/cli.test.ts test/codex-bootstrap.test.ts test/superpowers-compatibility.test.ts test/superpowers-detectors.test.ts`**
   Expected: PASS
 
 ## Chunk 4: OpenCode Startup Diagnostics
@@ -154,7 +154,7 @@
   - detector/evaluator exceptions degrade to `not_detected`, log, and continue
   - plugin startup never throws or blocks
 
-- [ ] **Step 2: Run `npm test -- test/plugin.test.ts`**
+- [ ] **Step 2: Run `pnpm test -- --run test/plugin.test.ts`**
   Expected: FAIL because plugin startup only checks router config today.
 
 - [ ] **Step 3: Implement compatibility logging in the OpenCode plugin entrypoint**
@@ -162,7 +162,7 @@
   - `src/plugin.ts`
   - `src/superpowers-compatibility.ts`
 
-- [ ] **Step 4: Re-run `npm test -- test/plugin.test.ts`**
+- [ ] **Step 4: Re-run `pnpm test -- --run test/plugin.test.ts`**
   Expected: PASS
 
 ## Chunk 5: Docs and Final Verification
@@ -175,7 +175,7 @@
 
 - [ ] **Step 1: Document compatibility monitoring and `warn` vs `strict` policy**
 - [ ] **Step 2: Export compatibility helpers from `src/index.ts`**
-- [ ] **Step 3: Run `npm test && npm run check && npm run build`**
+- [ ] **Step 3: Run `pnpm test && pnpm check && pnpm build`**
 - [ ] **Step 4: Run `git diff --stat` and confirm the change stays focused on compatibility monitoring**
 
 - [ ] **Step 5: Commit**

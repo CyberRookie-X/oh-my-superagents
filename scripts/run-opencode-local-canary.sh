@@ -24,9 +24,9 @@ rm -rf "$CANARY_ROOT"
 mkdir -p "$ARTIFACT_DIR" "$CANARY_HOME" "$NPM_PREFIX"
 
 log "building package"
-(cd "$ROOT_DIR" && npm run build >/dev/null)
+(cd "$ROOT_DIR" && pnpm run build >/dev/null)
 
-pack_output="$(cd "$ROOT_DIR" && npm pack --pack-destination "$ARTIFACT_DIR")"
+pack_output="$(cd "$ROOT_DIR" && pnpm pack --pack-destination "$ARTIFACT_DIR")"
 package_file="${pack_output##*$'\n'}"
 package_path="$ARTIFACT_DIR/$package_file"
 
