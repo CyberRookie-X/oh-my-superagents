@@ -6,8 +6,11 @@ import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 import { parse, type ParseError } from "jsonc-parser"
 import {
+  evaluateSuperpowersCompatibility,
   normalizeSuperpowersVersion,
   pickHighestSuperpowersVersion,
+  toSuperpowersAvailabilityResult,
+  type SuperpowersCompatibilityMode,
   type SuperpowersDetectionDetails,
   type SuperpowersDetectionFailure,
   type SuperpowersDetectionFailureStage,
@@ -109,6 +112,15 @@ export async function detectOpenCodeSuperpowers(
   return withFailures(resolvedDetection, failures)
 }
 
+export async function detectOpenCodeSuperpowersAvailability(
+  input: OpenCodeDetectorInput = {},
+  policyMode: SuperpowersCompatibilityMode = "warn",
+): Promise<ReturnType<typeof toSuperpowersAvailabilityResult>> {
+  return toSuperpowersAvailabilityResult(
+    evaluateSuperpowersCompatibility(await detectOpenCodeSuperpowers(input), policyMode),
+  )
+}
+
 export async function detectCodexSuperpowers(
   input: CodexDetectorInput = {},
 ): Promise<SuperpowersDetectionResult> {
@@ -160,6 +172,15 @@ export async function detectCodexSuperpowers(
   }
 
   return withFailures({ ...NOT_DETECTED_CODEX }, failures)
+}
+
+export async function detectCodexSuperpowersAvailability(
+  input: CodexDetectorInput = {},
+  policyMode: SuperpowersCompatibilityMode = "warn",
+): Promise<ReturnType<typeof toSuperpowersAvailabilityResult>> {
+  return toSuperpowersAvailabilityResult(
+    evaluateSuperpowersCompatibility(await detectCodexSuperpowers(input), policyMode),
+  )
 }
 
 async function defaultReadFile(filePath: string) {

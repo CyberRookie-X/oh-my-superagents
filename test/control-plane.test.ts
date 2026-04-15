@@ -4,12 +4,53 @@ import path from "node:path"
 import { parse } from "jsonc-parser"
 import { describe, expect, it } from "vitest"
 import {
+  buildOpenCodeStatusState,
   buildControlPlaneExplainTrace,
   prepareControlPlaneStateWrite,
   resolveControlPlane,
+  summarizeEffectiveSourceReadiness,
+  summarizeEffectiveSourceEntries,
   summarizeSubagentExecutionDiagnostics,
   summarizeRoutingValidation,
 } from "../src/control-plane.js"
+
+const defaultSuperpowersSourceEntries = {
+  "phase.brainstorm": {
+    canonicalRoute: "phase.brainstorm",
+    source: "superpowers",
+    entryName: "brainstorming",
+  },
+  "phase.plan": {
+    canonicalRoute: "phase.plan",
+    source: "superpowers",
+    entryName: "writing-plans",
+  },
+  "phase.execute": {
+    canonicalRoute: "phase.execute",
+    source: "superpowers",
+    entryName: "subagent-driven-development",
+  },
+  "phase.review": {
+    canonicalRoute: "phase.review",
+    source: "superpowers",
+    entryName: "requesting-code-review",
+  },
+  "phase.verify": {
+    canonicalRoute: "phase.verify",
+    source: "superpowers",
+    entryName: "verification-before-completion",
+  },
+  "phase.visual": {
+    canonicalRoute: "phase.visual",
+    source: "superpowers",
+    entryName: "frontend-design",
+  },
+  "phase.web-test": {
+    canonicalRoute: "phase.web-test",
+    source: "superpowers",
+    entryName: "webapp-testing",
+  },
+} as const
 
 function createExists(files: Record<string, string>) {
   return async (filePath: string) => filePath in files
@@ -439,8 +480,8 @@ describe("resolveControlPlane", () => {
         "sourcePresets": {
           "foundation": {
             "routes": {
-              "phase.brainstorming": "superpowers",
-              "phase.verification-before-completion": "gstack"
+              "phase.brainstorm": "superpowers",
+              "phase.verify": "gstack"
             }
           }
         },
@@ -463,9 +504,9 @@ describe("resolveControlPlane", () => {
     })
 
     expect(result.effectiveSources).toEqual({
-      "phase.brainstorming": "superpowers",
-      "phase.writing-plans": "gstack",
-      "phase.verification-before-completion": "gstack",
+      "phase.brainstorm": "superpowers",
+      "phase.plan": "gstack",
+      "phase.verify": "gstack",
     })
   })
 
@@ -1838,6 +1879,347 @@ describe("summarizeSubagentExecutionDiagnostics", () => {
   })
 })
 
+describe("summarizeEffectiveSourceEntries", () => {
+  it("returns the full effective route table while preserving canonical route ids", () => {
+    const sourceEntries = summarizeEffectiveSourceEntries({
+      source: {
+        kind: "default",
+        hasRealSource: false,
+        sources: [],
+      },
+      config: {
+        workflow: { kind: "superpowers" },
+        settings: {
+          enabled: true,
+          activePreset: "default",
+          laneSelection: { mode: "suggest" },
+          subagentExecution: { mode: "suggest" },
+          commandPrefix: "oms",
+          commands: {
+            status: { name: "status", aliases: ["st"] },
+            use: { name: "use", aliases: ["u"] },
+            disable: { name: "off", aliases: ["o"] },
+            sync: { name: "sync", aliases: ["sy"] },
+            doctor: { name: "doctor", aliases: ["dr"] },
+          },
+          superpowersCompatibility: { mode: "warn" },
+        },
+        sourcePresets: {},
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        lanes: {},
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+      },
+      activePreset: {
+        key: "default",
+        preset: {
+          label: "Default",
+          short: "def",
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+      laneState: {
+        allowedLanes: [],
+        defaultLane: undefined,
+        effectiveLane: undefined,
+        presetDefaultLane: undefined,
+        runtimeLane: undefined,
+        mode: "suggest",
+      },
+      effectiveSources: {
+        "phase.plan": "gstack",
+      },
+    })
+
+    expect(sourceEntries).toEqual({
+      ...defaultSuperpowersSourceEntries,
+      "phase.plan": {
+        canonicalRoute: "phase.plan",
+        source: "gstack",
+        entryName: "plan-eng-review",
+      },
+    })
+  })
+})
+
+describe("summarizeEffectiveSourceReadiness", () => {
+  it("attaches readiness results to effective source entries", async () => {
+    const readiness = await summarizeEffectiveSourceReadiness({
+      resolved: {
+        source: {
+          kind: "file",
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          workflow: { kind: "superpowers" },
+          settings: {
+            enabled: true,
+            activePreset: "default",
+            laneSelection: { mode: "suggest" },
+            subagentExecution: { mode: "suggest" },
+            commandPrefix: "oms",
+            commands: {
+              status: { name: "status", aliases: ["st"] },
+              use: { name: "use", aliases: ["u"] },
+              disable: { name: "off", aliases: ["o"] },
+              sync: { name: "sync", aliases: ["sy"] },
+              doctor: { name: "doctor", aliases: ["dr"] },
+            },
+            superpowersCompatibility: { mode: "warn" },
+          },
+          profiles: {
+            build: { model: "openai/gpt-5" },
+          },
+          presets: {
+            default: {
+              label: "Default",
+              short: "def",
+              routes: {},
+              defaultRoute: "build",
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            label: "Default",
+            short: "def",
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        laneState: {
+          allowedLanes: [],
+          defaultLane: undefined,
+          effectiveLane: undefined,
+          presetDefaultLane: undefined,
+          runtimeLane: undefined,
+          mode: "suggest",
+        },
+        effectiveSources: {
+          "phase.plan": "gstack",
+        },
+      },
+      evaluateReadiness: async () => ({
+        support: {
+          supported: true,
+        },
+        availability: {
+          status: "not_detected",
+          reason: "No gstack install could be detected.",
+        },
+        compatibility: null,
+      }),
+    })
+
+    expect(readiness).toEqual({
+      "phase.brainstorm": {
+        canonicalRoute: "phase.brainstorm",
+        source: "superpowers",
+        entryName: "brainstorming",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "not_detected",
+            reason: "No gstack install could be detected.",
+          },
+          compatibility: null,
+        },
+      },
+      "phase.plan": {
+        canonicalRoute: "phase.plan",
+        source: "gstack",
+        entryName: "plan-eng-review",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "not_detected",
+            reason: "No gstack install could be detected.",
+          },
+          compatibility: null,
+        },
+      },
+      "phase.execute": {
+        canonicalRoute: "phase.execute",
+        source: "superpowers",
+        entryName: "subagent-driven-development",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "not_detected",
+            reason: "No gstack install could be detected.",
+          },
+          compatibility: null,
+        },
+      },
+      "phase.review": {
+        canonicalRoute: "phase.review",
+        source: "superpowers",
+        entryName: "requesting-code-review",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "not_detected",
+            reason: "No gstack install could be detected.",
+          },
+          compatibility: null,
+        },
+      },
+      "phase.verify": {
+        canonicalRoute: "phase.verify",
+        source: "superpowers",
+        entryName: "verification-before-completion",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "not_detected",
+            reason: "No gstack install could be detected.",
+          },
+          compatibility: null,
+        },
+      },
+      "phase.visual": {
+        canonicalRoute: "phase.visual",
+        source: "superpowers",
+        entryName: "frontend-design",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "not_detected",
+            reason: "No gstack install could be detected.",
+          },
+          compatibility: null,
+        },
+      },
+      "phase.web-test": {
+        canonicalRoute: "phase.web-test",
+        source: "superpowers",
+        entryName: "webapp-testing",
+        readiness: {
+          support: {
+            supported: true,
+          },
+          availability: {
+            status: "not_detected",
+            reason: "No gstack install could be detected.",
+          },
+          compatibility: null,
+        },
+      },
+    })
+  })
+})
+
+describe("buildOpenCodeStatusState", () => {
+  it("surfaces supported-but-unavailable effective source readiness when compatibility is absent", () => {
+    const state = buildOpenCodeStatusState({
+      host: "opencode",
+      source: {
+        kind: "file",
+        hasRealSource: true,
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+      },
+      enabled: true,
+      compatibility: null,
+      effectiveSourceReadiness: {
+        "phase.plan": {
+          canonicalRoute: "phase.plan",
+          source: "superpowers",
+          entryName: "writing-plans",
+          readiness: {
+            support: {
+              supported: true,
+            },
+            availability: {
+              status: "not_detected",
+              reason: "No superpowers install could be detected.",
+            },
+            compatibility: {
+              status: "not_detected",
+              reason: "No superpowers install could be detected.",
+            },
+          },
+        },
+      },
+      artifactSummary: {
+        expected: 0,
+        present: [],
+        missing: [],
+        stale: [],
+      },
+    })
+
+    expect(state).toEqual({
+      code: "upstream_not_detected",
+      category: "upstream",
+      reason: "No superpowers install could be detected.",
+    })
+  })
+
+  it("keeps unsupported effective source readiness on the support path instead of reporting unavailability", () => {
+    const state = buildOpenCodeStatusState({
+      host: "opencode",
+      source: {
+        kind: "file",
+        hasRealSource: true,
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+      },
+      enabled: true,
+      compatibility: null,
+      effectiveSourceReadiness: {
+        "phase.plan": {
+          canonicalRoute: "phase.plan",
+          source: "gstack",
+          entryName: "plan-eng-review",
+          readiness: {
+            support: {
+              supported: false,
+              reasonCode: "unsupported_host_source_projection",
+            },
+          },
+        },
+      },
+      artifactSummary: {
+        expected: 0,
+        present: [],
+        missing: [],
+        stale: [],
+      },
+    })
+
+    expect(state).toEqual({
+      code: "healthy",
+      category: "oms",
+      reason: "OMS is enabled and expected OpenCode artifacts are present.",
+    })
+  })
+})
+
 describe("buildControlPlaneExplainTrace", () => {
   it("includes the resolved source and source entry for gstack planning routes", () => {
     const trace = buildControlPlaneExplainTrace({
@@ -1910,7 +2292,7 @@ describe("buildControlPlaneExplainTrace", () => {
 
     expect(trace.resolvedSource).toBe("gstack")
     expect(trace.sourceEntry).toEqual({
-      canonicalRoute: "phase.writing-plans",
+      canonicalRoute: "phase.plan",
       source: "gstack",
       entryName: "plan-eng-review",
     })

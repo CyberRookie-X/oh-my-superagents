@@ -41,17 +41,20 @@ The table below uses current source line counts from the implementation files on
 
 | Layer | Main files | Approx. source LOC | Thickness |
 | --- | --- | ---: | --- |
-| OMS control plane core | `src/control-plane.ts`, `src/config.ts`, `src/cli.ts` | 3972 | Medium |
-| Workflow adapters | `src/router.ts`, `src/workflow-superpowers.ts`, `src/workflow-gstack.ts`, `src/workflow-sources.ts`, `src/workflow-direct.ts` | 348 | Thin-to-medium |
-| OpenCode adapter | `src/opencode.ts` | 637 | Medium |
+| OMS control plane core | `src/control-plane.ts`, `src/config.ts`, `src/cli.ts` | 4316 | Medium |
+| Workflow adapters | `src/router.ts`, `src/workflow-superpowers.ts`, `src/workflow-gstack.ts`, `src/workflow-sources.ts`, `src/workflow-direct.ts` | 371 | Thin |
+| Shared capability policy | `src/capabilities.ts` | 97 | Thin |
+| OpenCode adapter | `src/opencode.ts` | 633 | Thin |
 | Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 760 | Medium |
-| Qwen adapter | `src/qwen.ts` | 400 | Thin-to-medium |
-| Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1051 | Medium |
-| Shared artifact reconciliation | `src/materialize.ts` | 689 | Medium |
+| Qwen adapter | `src/qwen.ts` | 424 | Thin |
+| Claude adapter | `src/claude.ts` | 138 | Thin |
+| Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1093 | Medium |
+| Shared artifact reconciliation | `src/materialize.ts` | 712 | Thin-to-medium |
 
 How to read this:
 
 - `Thin`: mostly host-specific rendering or lightweight integration glue
+- `Thin-to-medium`: shared operational glue or adapters that stay narrower than the core but do more than pure rendering
 - `Medium`: shared policy, config resolution, lifecycle, or bootstrap behavior
 - OMS is intentionally thicker in the shared core than in any single host adapter
 
@@ -73,7 +76,7 @@ Today that means:
 ## What It Does
 
 - Reads layered `oh-my-superagents.config.jsonc` from global and project locations
-- Resolves built-in `superpowers` phases across supported hosts and user-defined direct intents for OpenCode, Codex, and Qwen
+- Resolves built-in `superpowers` phase inputs into canonical routes such as `phase.plan`, and resolves user-defined direct intents into canonical routes such as `intent.plan`
 - Generates `.opencode/agents/*.md` and `.opencode/commands/*.md`
 - Generates `.codex/agents/*.toml`
 - Generates `.qwen/agents/*.md` and `.qwen/commands/*.md`
@@ -81,6 +84,13 @@ Today that means:
 - Proposes routing config changes with `author routing` from repo signals plus a user-supplied model inventory
 - Exposes `author routing`, `status`, `use`, `disable`, `sync`, `doctor`, `explain`, and `bootstrap` CLIs
 - Ships a minimal OpenCode plugin entrypoint for startup diagnostics
+
+## Canonical Route Model
+
+- Built-in OMS phase inputs stay user-facing as stable phase names such as `writing-plans`, but the shared router normalizes them to true canonical route ids such as `phase.plan`.
+- Source adapters map those canonical routes to source-native workflow entries. For example, `phase.plan` maps to `superpowers/writing-plans` by default and can map to `gstack/plan-eng-review` when that source is selected.
+- Host adapters consume the resolved canonical route plus its source entry metadata, then render host-native artifacts from that result instead of treating source-native phase names as the internal truth layer.
+- Source overrides, explain output, and control-plane diagnostics use canonical route ids like `phase.plan`; legacy aliases like `phase.writing-plans` are not the internal routing contract.
 
 ## Direct Mode
 
@@ -285,8 +295,8 @@ These lane-scoped helpers stay inside the existing `superpowers` execution flow.
 Stage 1 adds host-local control-plane commands:
 
 - `oh-my-superagents status --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen>`
-- `oh-my-superagents disable --host <opencode|codex|qwen>`
+- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen|claude>`
+- `oh-my-superagents disable --host <opencode|codex|qwen|claude>`
 - `oh-my-superagents sync --host <opencode|codex|qwen|claude>`
 - `oh-my-superagents doctor --host <opencode|codex|qwen|claude>`
 
@@ -300,6 +310,17 @@ Behavior notes:
 - For `--host qwen`, the OMS-managed surface includes both `.qwen/commands/*.md` and `.qwen/agents/*.md`.
 - For `--host claude`, the OMS-managed surface includes project-scoped `.claude/skills/*/SKILL.md` wrappers.
 - Artifact inspection in `status` and `doctor` is also invoking-host-only.
+
+## Readiness Surfaces
+
+OMS diagnostics now separate four different questions instead of flattening everything into one generic readiness bit:
+
+- `support`: whether OMS supports the host/source/route or command combination at all. This comes from shared capability policy and surfaces as `readiness.support`.
+- `availability`: whether the required upstream source can be detected right now. This surfaces as `readiness.availability` with statuses such as `available`, `not_detected`, `error`, or `not_implemented`.
+- `compatibility`: whether a detected upstream `superpowers` install is inside the tested OMS matrix. This surfaces as top-level `compatibility` on hosts with a monitor, and as `readiness.compatibility` for route-level readiness when that question applies.
+- `sync state`: whether OMS-managed artifacts for the invoking host are present, missing, or stale. `status` and `doctor` always return host-local `artifacts`; OpenCode `status` additionally summarizes sync state through `state`, `nextAction`, and `artifactSummary`, while OpenCode `doctor` surfaces `artifactSummary` without those extra status-only fields.
+
+Those signals are intentionally independent. For example, an unsupported Qwen gstack projection stops at `support.supported: false`; a Claude gstack detector failure becomes `availability.status: "error"`; missing OpenCode wrappers are a sync-state problem, not a compatibility problem.
 
 ## AI-Assisted Routing Authoring
 
@@ -421,6 +442,10 @@ oh-my-superagents sync --host codex
 oh-my-superagents sync --host qwen
 ```
 
+```bash
+oh-my-superagents sync --host claude
+```
+
 Use `--config /absolute/or/relative/path.jsonc` to override config discovery.
 
 For Codex, `sync` and `use` reconcile the full OMS-owned Stage 1 surface: `.codex/agents/*.toml`, the OMS marketplace entry, `plugins/oh-my-superagents-codex/.codex-plugin/plugin.json`, and OMS control-plane skills under `plugins/oh-my-superagents-codex/skills/*/SKILL.md`.
@@ -439,7 +464,13 @@ oh-my-superagents explain --host opencode --all
 oh-my-superagents explain --host codex --all
 ```
 
-`explain` is currently limited to `--host opencode` and `--host codex` in v1.
+```bash
+oh-my-superagents explain --host claude --phase writing-plans
+```
+
+`explain` is currently supported for `--host opencode`, `--host codex`, and `--host claude` in v1.
+
+When control-plane explainability is available, `explain` adds route-trace fields such as `routeSource`, `configSource`, `reuseRelationship`, `resolvedSource`, and `sourceEntry`, plus route-level `readiness`. Single-item output carries top-level `compatibility`; `--all` preserves array shape and attaches `compatibility` to each item.
 
 ## Compatibility Monitoring
 
@@ -458,7 +489,7 @@ The monitor is observational only:
 
 For OpenCode, if project-scope and user-scope detection resolve to different upstream refs or versions, the monitor degrades to a conservative non-versioned result that evaluates as `not_detected` instead of pretending one install won.
 
-Compatibility results surface in JSON output from `sync`, `explain`, and `bootstrap`.
+Host-wide compatibility results surface in JSON output from `status`, `doctor`, `sync`, `explain`, and `bootstrap` on the hosts that currently have a monitor.
 OpenCode startup diagnostics currently log only `incompatible` and `not_detected` outcomes.
 The reported status is one of:
 

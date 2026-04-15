@@ -49,6 +49,10 @@ describe("buildCodexArtifacts", () => {
       "oms-visual.toml",
       "oms-web-test.toml",
     ])
+
+    const planAgent = artifacts.agents.find((item) => item.fileName === "oms-plan.toml")
+
+    expect(planAgent?.content).toContain("Use the workflow entry `superpowers/writing-plans` for `phase.plan` whenever it is relevant.")
   })
 
   it("renders direct-mode Codex agents for workflow intents", () => {

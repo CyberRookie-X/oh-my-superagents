@@ -41,17 +41,20 @@
 
 | 层 | 主要文件 | 大致源码行数 | 厚度 |
 | --- | --- | ---: | --- |
-| OMS 控制平面核心 | `src/control-plane.ts`、`src/config.ts`、`src/cli.ts` | 3972 | 中等 |
-| 工作流适配层 | `src/router.ts`、`src/workflow-superpowers.ts`、`src/workflow-gstack.ts`、`src/workflow-sources.ts`、`src/workflow-direct.ts` | 348 | 薄到中等 |
-| OpenCode 适配层 | `src/opencode.ts` | 637 | 中等 |
+| OMS 控制平面核心 | `src/control-plane.ts`、`src/config.ts`、`src/cli.ts` | 4316 | 中等 |
+| 工作流适配层 | `src/router.ts`、`src/workflow-superpowers.ts`、`src/workflow-gstack.ts`、`src/workflow-sources.ts`、`src/workflow-direct.ts` | 371 | 薄 |
+| 共享能力策略层 | `src/capabilities.ts` | 97 | 薄 |
+| OpenCode 适配层 | `src/opencode.ts` | 633 | 薄 |
 | Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 760 | 中等 |
-| Qwen 适配层 | `src/qwen.ts` | 400 | 薄到中等 |
-| 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1051 | 中等 |
-| 共享工件协调层 | `src/materialize.ts` | 689 | 中等 |
+| Qwen 适配层 | `src/qwen.ts` | 424 | 薄 |
+| Claude 适配层 | `src/claude.ts` | 138 | 薄 |
+| 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1093 | 中等 |
+| 共享工件协调层 | `src/materialize.ts` | 712 | 薄到中等 |
 
 理解方式：
 
 - `薄`：以宿主特定渲染或轻量集成为主
+- `薄到中等`：仍然比共享核心更窄，但已经不只是纯渲染，还承担一部分共享运行时胶水逻辑
 - `中等`：包含共享策略、配置解析、生命周期、bootstrap 等逻辑
 - OMS 整体设计上刻意让“共享核心”比任何单个宿主适配层更厚
 
@@ -86,7 +89,7 @@
 ## 它能做什么
 
 - 从项目级和全局级位置读取分层的 `oh-my-superagents.config.jsonc`
-- 在已支持宿主上解析内置 `superpowers` phase 路由，并在 OpenCode、Codex、Qwen 上解析用户定义的 direct intent 路由
+- 把内置 `superpowers` phase 输入规范化成 `phase.plan` 这类 canonical route，并把用户定义的 direct intent 规范化成 `intent.plan` 这类 canonical route
 - 生成 `.opencode/agents/*.md` 与 `.opencode/commands/*.md`
 - 生成 `.codex/agents/*.toml`
 - 生成 `.qwen/agents/*.md` 与 `.qwen/commands/*.md`
@@ -94,6 +97,13 @@
 - 通过 `author routing` 基于仓库信号和用户提供的模型清单生成路由配置提案
 - 提供 `author routing`、`status`、`use`、`disable`、`sync`、`doctor`、`explain`、`bootstrap` CLI
 - 提供最小 OpenCode plugin 入口用于启动诊断
+
+## Canonical Route 模型
+
+- 内置 OMS phase 对外仍然保持 `writing-plans` 这类稳定名称，但共享路由核心内部会先把它们规范化成 `phase.plan` 这类真正的 canonical route id。
+- Source adapter 再把 canonical route 映射成 source-native workflow entry。例如 `phase.plan` 默认映射到 `superpowers/writing-plans`，切到 gstack source 时则映射到 `gstack/plan-eng-review`。
+- Host adapter 消费的是“已解析 canonical route + source entry 元数据”，然后再渲染宿主原生工件，而不是把 source-native phase 名称当成内部真相层。
+- Source override、`explain` 输出和控制平面诊断都以 `phase.plan` 这类 canonical route id 为准；`phase.writing-plans` 这类旧别名不是内部路由契约。
 
 ## Direct Mode
 
@@ -106,6 +116,7 @@
 - Direct intent id 只能包含小写字母、数字和 `-`，这样生成的宿主文件名才合法。
 - 当前 direct mode 在 OpenCode、Codex、Qwen 上都支持 `status`、`doctor`、`sync`。
 - `explain --intent` 目前只在 OpenCode 和 Codex 上支持，Qwen 和 Claude Code 还没有接上。
+- `explain --host claude --phase <phase>` 当前已支持，用于当前 Claude `superpowers` slice。
 - direct mode 不依赖 upstream `superpowers`；与此同时，一等公民级别的 `superpowers` 工作流支持保持不变。
 
 ## 安装
@@ -288,8 +299,8 @@ Lane-aware subagent execution 是 `superpowers` 下面的执行层增强，不�
 Stage 1 新增了宿主本地控制平面命令：
 
 - `oh-my-superagents status --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen>`
-- `oh-my-superagents disable --host <opencode|codex|qwen>`
+- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen|claude>`
+- `oh-my-superagents disable --host <opencode|codex|qwen|claude>`
 - `oh-my-superagents sync --host <opencode|codex|qwen|claude>`
 - `oh-my-superagents doctor --host <opencode|codex|qwen|claude>`
 
@@ -302,6 +313,17 @@ Stage 1 新增了宿主本地控制平面命令：
 - `disable` 和禁用状态下的 `sync` 只清理**当前宿主**的 OMS 工件，不会去动别的宿主
 - `status` 与 `doctor` 的工件检查也只针对当前宿主
 - `--host claude` 当前管理的工件面是项目级 `.claude/skills/*/SKILL.md`
+
+## 就绪度诊断面
+
+OMS 现在会把四个不同问题分开暴露，而不是把一切都压成一个笼统的“是否 ready”结论：
+
+- `support`：OMS 是否从产品能力上支持这个 host/source/route 或命令组合。它来自共享能力策略层，对外体现在 `readiness.support`。
+- `availability`：当前是否能检测到该 route 所需的 upstream source。它体现在 `readiness.availability`，状态包括 `available`、`not_detected`、`error`、`not_implemented`。
+- `compatibility`：如果已经检测到 upstream `superpowers`，它是否落在 OMS 当前测试过的兼容矩阵里。它会体现在宿主级顶层 `compatibility`，以及适用时的 route 级 `readiness.compatibility`。
+- `sync state`：当前宿主的 OMS 管理工件是已存在、缺失还是陈旧。`status` 和 `doctor` 都会返回宿主本地的 `artifacts`；对 OpenCode 来说，`status` 还会进一步汇总成 `state`、`nextAction`、`artifactSummary`，而 `doctor` 只额外暴露 `artifactSummary`，不会带上这两个仅属于 `status` 的字段。
+
+这些信号彼此独立。例如，Qwen 上不支持的 gstack 投影会直接停在 `support.supported: false`；Claude 上 gstack 检测器崩溃会表现为 `availability.status: "error"`；OpenCode wrapper 缺失属于 sync-state 问题，而不是 compatibility 问题。
 
 ## AI 辅助路由编写
 
@@ -446,6 +468,10 @@ oh-my-superagents sync --host codex
 oh-my-superagents sync --host qwen
 ```
 
+```bash
+oh-my-superagents sync --host claude
+```
+
 可用 `--config /absolute/or/relative/path.jsonc` 覆盖默认配置发现。
 
 对于 Qwen，`sync` 会根据当前工作流形态生成不同工件：
@@ -454,6 +480,24 @@ oh-my-superagents sync --host qwen
 - direct mode：生成 `ai-<intent>` commands 与 `rt-<intent>` agents，不依赖 upstream skills。
 
 当前这个切片里，Qwen 故意不支持 gstack-backed 路由投影。
+
+## Explain
+
+```bash
+oh-my-superagents explain --host opencode --all
+```
+
+```bash
+oh-my-superagents explain --host codex --all
+```
+
+```bash
+oh-my-superagents explain --host claude --phase writing-plans
+```
+
+`explain` 当前在 v1 支持 `--host opencode`、`--host codex` 和 `--host claude`。
+
+当控制平面的 explainability 可用时，`explain` 会返回 `routeSource`、`configSource`、`reuseRelationship`、`resolvedSource`、`sourceEntry` 这类 route trace 字段，并附带 route 级 `readiness`。单条输出会带顶层 `compatibility`；`--all` 会保持数组形态，并把 `compatibility` 挂到每个条目上。
 
 ## 兼容性监控
 
@@ -466,6 +510,8 @@ oh-my-superagents sync --host qwen
 - Qwen：当前还没有做兼容性监控
 
 这个监控是**观察型**的，不负责安装或升级 upstream `superpowers`。
+
+当前已有兼容性监控的宿主，会在 `status`、`doctor`、`sync`、`explain`、`bootstrap` 的 JSON 输出里暴露宿主级 `compatibility`。
 
 兼容性状态包括：
 

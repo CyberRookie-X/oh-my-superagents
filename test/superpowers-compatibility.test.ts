@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { evaluateSuperpowersCompatibility } from "../src/superpowers-compatibility.js"
+import {
+  evaluateSuperpowersCompatibility,
+  toSuperpowersAvailabilityResult,
+} from "../src/superpowers-compatibility.js"
 
 function getThrownError(fn: () => unknown) {
   try {
@@ -518,5 +521,41 @@ describe("evaluateSuperpowersCompatibility", () => {
     expect(compatible.shouldBlock).toBe(false)
     expect(untested.shouldBlock).toBe(false)
     expect(notDetected.shouldBlock).toBe(false)
+  })
+})
+
+describe("toSuperpowersAvailabilityResult", () => {
+  it("returns available when a superpowers install is detected and compatibility can be evaluated", () => {
+    const result = toSuperpowersAvailabilityResult({
+      host: "opencode",
+      source: "opencode-project-config",
+      detectedVersion: "5.1.0",
+      detectedRef: null,
+      status: "compatible",
+      reason: "Version is within a tested range.",
+      policyMode: "warn",
+      shouldBlock: false,
+    })
+
+    expect(result.status).toBe("available")
+    expect(result.reason).toMatch(/detected superpowers install/i)
+  })
+
+  it("passes through not_detected compatibility results as not_detected availability", () => {
+    const result = toSuperpowersAvailabilityResult({
+      host: "codex",
+      source: "codex-repo-clone",
+      detectedVersion: null,
+      detectedRef: null,
+      status: "not_detected",
+      reason: "No superpowers install could be detected.",
+      policyMode: "warn",
+      shouldBlock: false,
+    })
+
+    expect(result).toEqual({
+      status: "not_detected",
+      reason: "No superpowers install could be detected.",
+    })
   })
 })

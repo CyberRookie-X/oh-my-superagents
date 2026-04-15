@@ -68,8 +68,8 @@ function getRouteSourceEntry(
   return sourceEntry ?? fallback
 }
 
-function formatWorkflowEntryName(sourceEntry: WorkflowSourceEntry, fallbackEntryName: string) {
-  return `${sourceEntry.source}/${sourceEntry.entryName ?? fallbackEntryName}`
+function formatWorkflowEntryName(sourceEntry: WorkflowSourceEntry) {
+  return `${sourceEntry.source}/${sourceEntry.entryName ?? sourceEntry.canonicalRoute}`
 }
 
 const SHARED_OPENCODE_AGENT_NAMES = new Set(
@@ -489,7 +489,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
       const resolved = resolvePhase(config, phase)
       const agentName = PHASE_TO_AGENT[phase]
       const commandName = PHASE_TO_COMMAND[phase].slice(1)
-      const workflowEntryName = formatWorkflowEntryName(resolved.sourceEntry, phase)
+      const workflowEntryName = formatWorkflowEntryName(resolved.sourceEntry)
       const permissionTask: PermissionTask | undefined =
         phase === "subagent-driven-development"
           ? {
@@ -503,12 +503,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
       registerRuntimeAgentMetadata(agentName, resolved.profileId, resolved.selection.codexFast)
 
       if (!agents.has(agentName)) {
-        const sharedAgentSourceEntry = SHARED_OPENCODE_AGENT_NAMES.has(agentName)
-          ? {
-              canonicalRoute: `phase.shared-${agentName}` as CanonicalRouteId,
-              source: resolved.sourceEntry.source,
-            }
-          : resolved.sourceEntry
+        const sharedAgentSourceEntry = resolved.sourceEntry
 
         agentSelections.set(
           agentName,
@@ -577,6 +572,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
       for (const unit of laneExecutionUnits) {
         const laneResolved = resolvePhase(config, phase, { effectiveLane: unit.lane })
         const laneAgentName = unit.agentFileName.replace(/\.md$/, "")
+        const laneWorkflowEntryName = formatWorkflowEntryName(laneResolved.sourceEntry)
 
         registerRuntimeAgentMetadata(laneAgentName, laneResolved.profileId, laneResolved.selection.codexFast)
 
@@ -593,7 +589,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
             temperature: laneResolved.selection.temperature,
             permissionTask: SUBAGENT_EXECUTION_BASE_PERMISSION_TASK,
             sourceEntry: laneResolved.sourceEntry,
-            workflowEntryName,
+            workflowEntryName: laneWorkflowEntryName,
           }),
         })
 
@@ -606,7 +602,7 @@ export function buildArtifacts(config: RouterConfig, controlPlaneSettings?: Open
             description: `Route ${phase} through ${laneAgentName}`,
             agentName: laneAgentName,
             renderedName: unit.commandFileName.replace(/\.md$/, ""),
-            skillName: workflowEntryName,
+            skillName: laneWorkflowEntryName,
             phase,
             effectiveLane: unit.lane,
             sourceEntry: laneResolved.sourceEntry,

@@ -3,7 +3,9 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
 import {
+  detectCodexSuperpowersAvailability,
   detectCodexSuperpowers,
+  detectOpenCodeSuperpowersAvailability,
   detectOpenCodeSuperpowers,
 } from "../src/superpowers-detectors.js"
 import {
@@ -699,5 +701,36 @@ describe("detectCodexSuperpowers", () => {
         stage: "inspect-git-checkout",
       }),
     )
+  })
+})
+
+describe("superpowers availability wrappers", () => {
+  it("returns available for an OpenCode install with a detected version", async () => {
+    const result = await detectOpenCodeSuperpowersAvailability({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      readFile: createReadFile({
+        "/workspace/project/opencode.json": JSON.stringify({
+          plugin: ["https://github.com/example/superpowers.git#v5.2.0"],
+        }),
+      }),
+    })
+
+    expect(result.status).toBe("available")
+    expect(result.reason).toMatch(/detected superpowers install/i)
+  })
+
+  it("returns not_detected for a missing Codex install", async () => {
+    const result = await detectCodexSuperpowersAvailability({
+      homeDir: "/home/tester",
+      pathExists: createPathExists([]),
+      resolveRealPath: createResolveRealPath({}),
+      readGitCheckout: createReadGitCheckout({}),
+    })
+
+    expect(result).toEqual({
+      status: "not_detected",
+      reason: "No superpowers install could be detected.",
+    })
   })
 })
