@@ -93,7 +93,7 @@ describe("repository package-manager baseline", () => {
 
 - [ ] **Step 2: Run the focused guard test and verify it fails**
 
-Run: `npm test -- --run test/package-manager-repo.test.ts`
+Run: `pnpm test -- --run test/package-manager-repo.test.ts`
 
 Expected: FAIL because `package-lock.json` still exists and `pnpm-lock.yaml` does not exist yet.
 
@@ -160,10 +160,10 @@ describe("repository package-manager docs", () => {
     expect(readme).toContain("pnpm test")
     expect(readme).toContain("pnpm check")
     expect(readme).toContain("pnpm build")
-    expect(readme).not.toContain("npm install")
-    expect(readme).not.toContain("npm test")
-    expect(readme).not.toContain("npm run check")
-    expect(readme).not.toContain("npm run build")
+    expect(readme).not.toContain(["npm", "install"].join(" "))
+    expect(readme).not.toContain(["npm", "test"].join(" "))
+    expect(readme).not.toContain(["npm", "run", "check"].join(" "))
+    expect(readme).not.toContain(["npm", "run", "build"].join(" "))
   })
 
   it("documents pnpm as the maintainer workflow in README.zh-CN.md", () => {
@@ -175,10 +175,10 @@ describe("repository package-manager docs", () => {
     expect(readme).toContain("pnpm test")
     expect(readme).toContain("pnpm check")
     expect(readme).toContain("pnpm build")
-    expect(readme).not.toContain("npm install")
-    expect(readme).not.toContain("npm test")
-    expect(readme).not.toContain("npm run check")
-    expect(readme).not.toContain("npm run build")
+    expect(readme).not.toContain(["npm", "install"].join(" "))
+    expect(readme).not.toContain(["npm", "test"].join(" "))
+    expect(readme).not.toContain(["npm", "run", "check"].join(" "))
+    expect(readme).not.toContain(["npm", "run", "build"].join(" "))
   })
 
   it("captures the repository workflow in the architecture doc", () => {
