@@ -32,6 +32,9 @@
             }
           }
         },
+        "contextCompression": {
+          "$ref": "#/$defs/contextCompression"
+        },
         "commandPrefix": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
         "commands": {
           "type": "object",
@@ -65,6 +68,26 @@
       },
       "additionalProperties": {
         "$ref": "#/$defs/sourcePreset"
+      }
+    },
+    "compressionPresets": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/compressionPreset"
+      }
+    },
+    "contextProviders": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/contextProvider"
       }
     },
     "presets": {
@@ -274,6 +297,9 @@
                 }
               }
             },
+            "contextCompression": {
+              "$ref": "#/$defs/contextCompression"
+            },
             "commandPrefix": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9-]+$" },
             "commands": {
               "type": "object",
@@ -307,6 +333,26 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/sourcePreset"
+          }
+        },
+        "compressionPresets": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/compressionPreset"
+          }
+        },
+        "contextProviders": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/contextProvider"
           }
         },
         "profiles": {
@@ -515,6 +561,119 @@
       "properties": {
         "routes": {
           "$ref": "#/$defs/sourceRoutes"
+        }
+      }
+    },
+    "contextCompressionMode": {
+      "enum": ["manual", "suggest", "auto"]
+    },
+    "contextCompressionEngine": {
+      "enum": ["builtin", "external", "hybrid"]
+    },
+    "contextInlineLevel": {
+      "enum": ["minimal", "standard", "full"]
+    },
+    "contextCompressionMoments": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subagentHandoff": { "type": "boolean" },
+        "planCheckpoint": { "type": "boolean" },
+        "reviewCheckpoint": { "type": "boolean" },
+        "verificationCheckpoint": { "type": "boolean" },
+        "sessionResume": { "type": "boolean" },
+        "sourceSwitch": { "type": "boolean" },
+        "branchIntegration": { "type": "boolean" }
+      }
+    },
+    "contextCompressionSafety": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowConditional": { "type": "boolean" },
+        "requireFreshVerification": { "type": "boolean" }
+      }
+    },
+    "contextCompression": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preset": { "type": ["string", "null"], "minLength": 1 },
+        "mode": { "$ref": "#/$defs/contextCompressionMode" },
+        "engine": { "$ref": "#/$defs/contextCompressionEngine" },
+        "inlineLevel": { "$ref": "#/$defs/contextInlineLevel" },
+        "moments": { "$ref": "#/$defs/contextCompressionMoments" },
+        "safety": { "$ref": "#/$defs/contextCompressionSafety" }
+      }
+    },
+    "compressionPreset": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "$ref": "#/$defs/contextCompressionMode" },
+        "engine": { "$ref": "#/$defs/contextCompressionEngine" },
+        "inlineLevel": { "$ref": "#/$defs/contextInlineLevel" },
+        "moments": { "$ref": "#/$defs/contextCompressionMoments" },
+        "safety": { "$ref": "#/$defs/contextCompressionSafety" }
+      }
+    },
+    "contextProviderCapability": {
+      "enum": ["recall", "search", "summarize", "pack", "status"]
+    },
+    "contextProvider": {
+      "oneOf": [
+        { "$ref": "#/$defs/fileContextProvider" },
+        { "$ref": "#/$defs/cliContextProvider" },
+        { "$ref": "#/$defs/mcpContextProvider" }
+      ]
+    },
+    "fileContextProvider": {
+      "type": "object",
+      "required": ["kind", "enabled", "root", "capabilities"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "file" },
+        "enabled": { "type": "boolean" },
+        "root": { "type": "string", "minLength": 1 },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/contextProviderCapability" }
+        }
+      }
+    },
+    "cliContextProvider": {
+      "type": "object",
+      "required": ["kind", "enabled", "command", "capabilities"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "cli" },
+        "enabled": { "type": "boolean" },
+        "command": { "type": "string", "minLength": 1 },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/contextProviderCapability" }
+        }
+      }
+    },
+    "mcpContextProvider": {
+      "type": "object",
+      "required": ["kind", "enabled", "command", "capabilities"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "mcp" },
+        "enabled": { "type": "boolean" },
+        "command": { "type": "string", "minLength": 1 },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/contextProviderCapability" }
         }
       }
     },

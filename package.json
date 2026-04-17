@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "tsc -p tsconfig.json --noEmit && tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 --strict --esModuleInterop true --skipLibCheck true test/public-api-config-typecheck.ts test/public-api-context-providers-typecheck.ts",
     "test": "vitest run"
   },
   "dependencies": {

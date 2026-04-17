@@ -76,11 +76,33 @@ const incompatibleCodexStrict = {
   shouldBlock: true,
 }
 
+const defaultContextCompressionSettings = {
+  mode: "manual" as const,
+  engine: "builtin" as const,
+  inlineLevel: "minimal" as const,
+  moments: {
+    subagentHandoff: false,
+    planCheckpoint: false,
+    reviewCheckpoint: false,
+    verificationCheckpoint: false,
+    sessionResume: false,
+    sourceSwitch: false,
+    branchIntegration: false,
+  },
+  safety: {
+    allowConditional: false,
+    requireFreshVerification: true,
+  },
+}
+
 const controlPlaneConfig = {
   workflow: { kind: "superpowers" as const },
   settings: {
     enabled: true,
     activePreset: "default",
+    laneSelection: { mode: "suggest" as const },
+    subagentExecution: { mode: "suggest" as const },
+    contextCompression: defaultContextCompressionSettings,
     commandPrefix: "oms",
     commands: {
       status: { name: "status", aliases: ["st"] },
@@ -269,6 +291,94 @@ const defaultLaneState = {
   effectiveLane: undefined,
   presetDefaultLane: undefined,
 }
+
+const indexedContextArtifacts = {
+  artifacts: [
+    {
+      kind: "spec" as const,
+      path: "docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+      authority: "authoritative" as const,
+      source: "oms" as const,
+      lifecycleStage: "design" as const,
+    },
+    {
+      kind: "plan" as const,
+      path: "docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md",
+      authority: "authoritative" as const,
+      source: "oms" as const,
+      lifecycleStage: "plan" as const,
+    },
+  ],
+  warnings: [],
+}
+
+const indexedContextArtifactContents = {
+  "docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md": [
+    "# Spec",
+    "",
+    "This artifact is intentionally long so the built-in compression engine has to truncate it before exposing the diagnostic bundle.",
+    "It should keep a useful markdown boundary and append the standard truncation notice for CLI inspection.",
+    "Additional supporting detail keeps the payload comfortably above the truncation threshold.",
+  ].join("\n"),
+  "docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md": [
+    "# Plan",
+    "",
+    "This plan entry is short enough to remain intact in the diagnostic bundle.",
+  ].join("\n"),
+} as const
+
+const resolvedContextProviders = [
+  {
+    id: "memoryBank",
+    kind: "file" as const,
+    root: "/workspace/project/.memorybank",
+    available: false,
+    capabilities: ["recall", "status"],
+  },
+  {
+    id: "graphiti",
+    kind: "mcp" as const,
+    command: "graphiti-mcp",
+    args: ["--stdio"],
+    available: true,
+    capabilities: ["recall", "search", "summarize", "status"],
+  },
+] as const
+
+const persistedDefaultContextCompressionConfig = `{
+  "settings": {
+    "activePreset": "default",
+    "contextCompression": {
+      "mode": "manual",
+      "engine": "builtin",
+      "inlineLevel": "minimal",
+      "moments": {
+        "subagentHandoff": false,
+        "planCheckpoint": false,
+        "reviewCheckpoint": false,
+        "verificationCheckpoint": false,
+        "sessionResume": false,
+        "sourceSwitch": false,
+        "branchIntegration": false
+      },
+      "safety": {
+        "allowConditional": false,
+        "requireFreshVerification": true
+      }
+    }
+  },
+  "presets": {
+    "default": {
+      "label": "Default",
+      "short": "def",
+      "profiles": {
+        "build": { "model": "openai/gpt-5" }
+      },
+      "routes": {},
+      "defaultRoute": "build"
+    }
+  }
+}`
 
 function renderOwnedMarkdownArtifact(name: string) {
   return `---\ndescription: '${name}'\n---\n\n<!-- ${MARKER_TEXT} -->\n`
@@ -541,6 +651,36 @@ function createCliDeps(overrides: Record<string, unknown> = {}) {
     ...defaultArtifactFs,
     ...overrides,
   } as any
+}
+
+function createRealContextCompressionCliDeps() {
+  const configPath = "/workspace/project/oh-my-superagents.config.jsonc"
+
+  return createCliDeps({
+    resolveControlPlane: (input: Parameters<typeof resolveOmsControlPlane>[0]) => resolveOmsControlPlane({
+      ...input,
+      homeDir: "/home/tester",
+      explicitPath: configPath,
+      exists: async (filePath: string) => filePath === configPath,
+      readFile: async (filePath: string) => {
+        if (filePath !== configPath) {
+          const relativePath = path.relative("/workspace/project", filePath).replace(/\\/g, "/")
+          const artifactContent = indexedContextArtifactContents[
+            relativePath as keyof typeof indexedContextArtifactContents
+          ]
+
+          if (artifactContent !== undefined) {
+            return artifactContent
+          }
+
+          throw new Error(`Unexpected read: ${filePath}`)
+        }
+
+        return persistedDefaultContextCompressionConfig
+      },
+      buildContextIndex: async () => indexedContextArtifacts,
+    }),
+  })
 }
 
 function getAuthorRoutingSection(stdout: string, startHeading: string, endHeading: string) {
@@ -1096,6 +1236,448 @@ describe("runCli", () => {
     expect(output.effectiveSources).toEqual({
       "phase.brainstorm": "gstack",
     })
+  })
+
+  it("shows indexed context artifacts in doctor output", async () => {
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        contextIndex: indexedContextArtifacts,
+      }),
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toMatch(/context/i)
+    expect(result.stdout).toMatch(/hybrid-context-orchestration-design/i)
+
+    const output = JSON.parse(result.stdout)
+
+    expect(output.contextIndex).toEqual({
+      artifactCount: 2,
+      authoritativePaths: indexedContextArtifacts.artifacts.map((artifact) => artifact.path),
+      warnings: [],
+    })
+  })
+
+  it("shows indexed context artifacts in status output", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        contextIndex: indexedContextArtifacts,
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.contextIndex).toEqual({
+      artifactCount: 2,
+      authoritativePaths: indexedContextArtifacts.artifacts.map((artifact) => artifact.path),
+      warnings: [],
+    })
+  })
+
+  it("shows context providers in status output", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        contextProviders: [...resolvedContextProviders],
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.contextProviders).toEqual([
+      {
+        id: "graphiti",
+        kind: "mcp",
+        available: true,
+        capabilities: ["recall", "search", "summarize", "status"],
+      },
+      {
+        id: "memoryBank",
+        kind: "file",
+        available: false,
+        capabilities: ["recall", "status"],
+      },
+    ])
+  })
+
+  it("shows real effective context compression in status output", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createRealContextCompressionCliDeps())
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.contextCompression).toEqual({
+      policy: {
+        mode: "manual",
+        engine: "builtin",
+        inlineLevel: "minimal",
+      },
+      selection: {
+        lifecycleStage: "plan",
+        packIds: [],
+        artifactPaths: [],
+      },
+      readiness: {
+        state: "unsafe",
+        reason: "Freshness verification failed and conditional compression is disabled by policy.",
+      },
+      engineBundle: {
+        packIds: [],
+        summary: null,
+        entries: [],
+        warnings: [],
+      },
+    })
+  })
+
+  it("shows indexed context artifacts in explain output", async () => {
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        contextIndex: indexedContextArtifacts,
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.contextIndex).toEqual({
+      artifactCount: 2,
+      authoritativePaths: indexedContextArtifacts.artifacts.map((artifact) => artifact.path),
+      warnings: [],
+    })
+  })
+
+  it("shows context providers in explain output", async () => {
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        contextProviders: [...resolvedContextProviders],
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.contextProviders).toEqual([
+      {
+        id: "graphiti",
+        kind: "mcp",
+        available: true,
+        capabilities: ["recall", "search", "summarize", "status"],
+      },
+      {
+        id: "memoryBank",
+        kind: "file",
+        available: false,
+        capabilities: ["recall", "status"],
+      },
+    ])
+  })
+
+  it("shows effective context pack selection in explain output", async () => {
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "writing-plans"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        contextCompression: {
+          policy: {
+            mode: "auto",
+            engine: "hybrid",
+            inlineLevel: "standard",
+            moments: { planCheckpoint: true },
+            safety: { allowConditional: false, requireFreshVerification: true },
+          },
+          selection: {
+            lifecycleStage: "plan",
+            packIds: ["spec-core", "plan-core"],
+            artifacts: [],
+          },
+          readiness: {
+            state: "safe",
+            reason: "Ready to compress.",
+          },
+          engineBundle: {
+            packIds: ["spec-core", "plan-core"],
+            summary: null,
+            entries: [
+              {
+                path: "docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+                kind: "spec",
+                content: "# Summary\n\n[...truncated by OMS built-in compression]",
+              },
+            ],
+            warnings: [],
+          },
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.contextCompression).toEqual({
+      policy: {
+        mode: "auto",
+        engine: "hybrid",
+        inlineLevel: "standard",
+      },
+      selection: {
+        lifecycleStage: "plan",
+        packIds: ["spec-core", "plan-core"],
+        artifactPaths: [],
+      },
+      readiness: {
+        state: "safe",
+        reason: "Ready to compress.",
+      },
+      engineBundle: {
+        packIds: ["spec-core", "plan-core"],
+        summary: null,
+        entries: [
+          {
+            path: "docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+            kind: "spec",
+            content: "# Summary\n\n[...truncated by OMS built-in compression]",
+          },
+        ],
+        warnings: [],
+      },
+    })
+  })
+
+  it("shows real effective context compression in doctor output", async () => {
+    const result = await runCli(["doctor", "--host", "opencode"], createRealContextCompressionCliDeps())
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.contextCompression).toEqual({
+      policy: {
+        mode: "manual",
+        engine: "builtin",
+        inlineLevel: "minimal",
+      },
+      selection: {
+        lifecycleStage: "plan",
+        packIds: [],
+        artifactPaths: [],
+      },
+      readiness: {
+        state: "unsafe",
+        reason: "Freshness verification failed and conditional compression is disabled by policy.",
+      },
+      engineBundle: {
+        packIds: [],
+        summary: null,
+        entries: [],
+        warnings: [],
+      },
+    })
+  })
+
+  it("shows compression readiness and selected engine details in doctor output", async () => {
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        contextCompression: {
+          policy: {
+            mode: "auto",
+            engine: "hybrid",
+            inlineLevel: "minimal",
+            moments: { planCheckpoint: true },
+            safety: { allowConditional: false, requireFreshVerification: true },
+          },
+          selection: { lifecycleStage: "plan", packIds: ["spec-core"], artifacts: [] },
+          readiness: { state: "safe", reason: "Ready to compress." },
+          engineBundle: {
+            packIds: ["spec-core"],
+            summary: null,
+            entries: [{
+              path: "docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+              kind: "spec",
+              content: "# Summary",
+            }],
+            warnings: [],
+          },
+        },
+      }),
+    }))
+
+    expect(result.stdout).toMatch(/safe/i)
+    expect(result.stdout).toMatch(/hybrid/i)
+    expect(result.stdout).toMatch(/spec-core/i)
+  })
+
+  it("shows context providers in doctor output", async () => {
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        contextProviders: [...resolvedContextProviders],
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.contextProviders).toEqual([
+      {
+        id: "graphiti",
+        kind: "mcp",
+        available: true,
+        capabilities: ["recall", "search", "summarize", "status"],
+      },
+      {
+        id: "memoryBank",
+        kind: "file",
+        available: false,
+        capabilities: ["recall", "status"],
+      },
+    ])
+  })
+
+  it("shows engine bundle warnings in doctor output when selected artifacts are unreadable", async () => {
+    const configPath = "/workspace/project/oh-my-superagents.config.jsonc"
+    const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: (input: Parameters<typeof resolveOmsControlPlane>[0]) => resolveOmsControlPlane({
+        ...input,
+        homeDir: "/home/tester",
+        explicitPath: configPath,
+        exists: async (filePath: string) => filePath === configPath,
+        readFile: async (filePath: string) => {
+          if (filePath === configPath) {
+            return `{
+              "settings": {
+                "activePreset": "default",
+                "contextCompression": {
+                  "mode": "auto",
+                  "engine": "hybrid",
+                  "inlineLevel": "standard",
+                  "moments": { "planCheckpoint": true },
+                  "safety": {
+                    "allowConditional": false,
+                    "requireFreshVerification": true
+                  }
+                }
+              },
+              "presets": {
+                "default": {
+                  "label": "Default",
+                  "short": "def",
+                  "profiles": {
+                    "build": { "model": "openai/gpt-5" }
+                  },
+                  "routes": {},
+                  "defaultRoute": "build"
+                }
+              }
+            }`
+          }
+
+          throw new Error(`artifact unavailable: ${filePath}`)
+        },
+        buildContextIndex: async () => indexedContextArtifacts,
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.contextCompression.engineBundle.warnings).toEqual([
+      "Failed to read context artifact docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md: artifact unavailable: /workspace/project/docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+      "Failed to read context artifact docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md: artifact unavailable: /workspace/project/docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md",
+    ])
   })
 
   it("surfaces supported-but-unavailable readiness in doctor output", async () => {
@@ -2030,6 +2612,42 @@ describe("runCli", () => {
     )
   })
 
+  it("includes context index in codex explain output", async () => {
+    const result = await runCli(["explain", "--host", "codex", "--all"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        contextIndex: indexedContextArtifacts,
+      }),
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          phase: "brainstorming",
+          contextIndex: {
+            artifactCount: 2,
+            authoritativePaths: indexedContextArtifacts.artifacts.map((artifact) => artifact.path),
+            warnings: [],
+          },
+        }),
+      ]),
+    )
+  })
+
   it("supports claude explain output", async () => {
     const result = await runCli(["explain", "--host", "claude", "--phase", "writing-plans"], createCliDeps())
 
@@ -2043,6 +2661,35 @@ describe("runCli", () => {
       model: "openai/gpt-5",
       skillName: "oms-plan",
       compatibility: null,
+    })
+  })
+
+  it("includes context index in claude explain output", async () => {
+    const result = await runCli(["explain", "--host", "claude", "--phase", "writing-plans"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        contextIndex: indexedContextArtifacts,
+      }),
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.contextIndex).toEqual({
+      artifactCount: 2,
+      authoritativePaths: indexedContextArtifacts.artifacts.map((artifact) => artifact.path),
+      warnings: [],
     })
   })
 
@@ -3208,6 +3855,54 @@ describe("runCli", () => {
       hasRealSource: true,
       path: "/home/tester/.config/oh-my-superagents/config.jsonc",
       sources: ["/home/tester/.config/oh-my-superagents/config.jsonc"],
+    })
+  })
+
+  it("reports the post-write layered source view after creating an explicit project overlay over a global config", async () => {
+    const result = await runCli([
+      "use",
+      "review",
+      "--host",
+      "opencode",
+      "--config",
+      "/workspace/project/oh-my-superagents.config.jsonc",
+    ], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/home/tester/.config/oh-my-superagents/config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: { key: "default", preset: controlPlaneConfig.presets.default },
+        laneState: defaultLaneState,
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({ settings: nextState, presets: {} }, null, 2),
+        config: {
+          ...controlPlaneConfig,
+          settings: {
+            ...controlPlaneConfig.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.source).toEqual({
+      kind: "file",
+      hasRealSource: true,
+      path: "/workspace/project/oh-my-superagents.config.jsonc",
+      sources: [
+        "/home/tester/.config/oh-my-superagents/config.jsonc",
+        "/workspace/project/oh-my-superagents.config.jsonc",
+      ],
     })
   })
 
@@ -5105,6 +5800,36 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(parsed.artifacts.discoveryWarnings).toEqual([
       expect.stringContaining(".opencode/commands"),
+    ])
+  })
+
+  it("orders discovery warnings deterministically when artifact inspection fails for unsorted directory entries", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      readdir: async (directory: string) => {
+        if (directory === "/workspace/project/.opencode/agents") {
+          return ["spr-zeta.md", "spr-alpha.md"]
+        }
+
+        return defaultArtifactFs.readdir(directory)
+      },
+      artifactStat: async (filePath: string) => {
+        if (
+          filePath === "/workspace/project/.opencode/agents/spr-zeta.md"
+          || filePath === "/workspace/project/.opencode/agents/spr-alpha.md"
+        ) {
+          throw new Error(`EACCES: cannot inspect ${path.basename(filePath)}`)
+        }
+
+        return defaultArtifactFs.artifactStat(filePath)
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.artifacts.discoveryWarnings).toEqual([
+      "Failed to inspect OMS-owned artifact /workspace/project/.opencode/agents/spr-alpha.md: EACCES: cannot inspect spr-alpha.md",
+      "Failed to inspect OMS-owned artifact /workspace/project/.opencode/agents/spr-zeta.md: EACCES: cannot inspect spr-zeta.md",
     ])
   })
 
