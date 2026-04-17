@@ -13,6 +13,7 @@ import {
   summarizeSubagentExecutionDiagnostics,
   summarizeRoutingValidation,
 } from "../src/control-plane.js"
+import { enhanceCompressionBundleWithSummary } from "../src/context-compression.js"
 
 const defaultSuperpowersSourceEntries = {
   "phase.brainstorm": {
@@ -52,6 +53,51 @@ const defaultSuperpowersSourceEntries = {
   },
 } as const
 
+const planningContextIndex = {
+  artifacts: [
+    {
+      kind: "spec" as const,
+      path: "docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+      authority: "authoritative" as const,
+      source: "oms" as const,
+      lifecycleStage: "design" as const,
+    },
+    {
+      kind: "plan" as const,
+      path: "docs/superpowers/plans/2026-04-15-session-aware-context-pack-selection.md",
+      authority: "authoritative" as const,
+      source: "oms" as const,
+      lifecycleStage: "plan" as const,
+    },
+  ],
+  warnings: [],
+}
+
+const defaultContextCompressionSettings = {
+  mode: "manual" as const,
+  engine: "builtin" as const,
+  inlineLevel: "minimal" as const,
+  moments: {
+    subagentHandoff: false,
+    planCheckpoint: false,
+    reviewCheckpoint: false,
+    verificationCheckpoint: false,
+    sessionResume: false,
+    sourceSwitch: false,
+    branchIntegration: false,
+  },
+  safety: {
+    allowConditional: false,
+    requireFreshVerification: true,
+  },
+}
+
+const defaultControlPlaneSettings = {
+  laneSelection: { mode: "suggest" as const },
+  subagentExecution: { mode: "suggest" as const },
+  contextCompression: defaultContextCompressionSettings,
+}
+
 function createExists(files: Record<string, string>) {
   return async (filePath: string) => filePath in files
 }
@@ -73,6 +119,22 @@ function createIsWritable(writablePaths: string[]) {
 }
 
 describe("resolveControlPlane", () => {
+  it("adds an optional summary on top of the built-in compression bundle", () => {
+    const enhancedBundle = enhanceCompressionBundleWithSummary({
+      bundle: {
+        packIds: ["spec-core"],
+        entries: [{
+          path: "docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+          kind: "spec",
+          content: "# Summary",
+        }],
+      },
+      summarizer: (bundle) => `packs:${bundle.packIds.join(",")}`,
+    })
+
+    expect(enhancedBundle.summary).toBe("packs:spec-core")
+  })
+
   it("allows no-config defaults for status and doctor", async () => {
     const status = await resolveControlPlane({
       command: "status",
@@ -118,6 +180,875 @@ describe("resolveControlPlane", () => {
     })
   })
 
+  it("includes a read-only context index summary in resolved control-plane state", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => false,
+      readFile: async () => {
+        throw new Error("should not read")
+      },
+      buildContextIndex: async () => ({
+        artifacts: [
+          {
+            kind: "spec",
+            path: "docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "design",
+          },
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+          },
+        ],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.contextIndex?.artifacts).toHaveLength(2)
+  })
+
+  it("preserves the resolved default context compression policy in state", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => false,
+      readFile: async () => {
+        throw new Error("should not read")
+      },
+      buildContextIndex: async () => planningContextIndex,
+    })
+
+    expect(resolved.contextCompression).toMatchObject({
+      policy: {
+        mode: "manual",
+        engine: "builtin",
+        inlineLevel: "minimal",
+      },
+      selection: {
+        lifecycleStage: "plan",
+        packIds: [],
+      },
+    })
+  })
+
+  it("resolves preset-selected compression policy from authored layered settings instead of finalized defaults", async () => {
+    const configPath = "/workspace/project/oh-my-superagents.config.jsonc"
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: configPath,
+      exists: async (filePath) => filePath === configPath,
+      readFile: async (filePath) => {
+        if (filePath !== configPath) {
+          throw new Error(`Unexpected read: ${filePath}`)
+        }
+
+        return `{
+          "settings": {
+            "activePreset": "default",
+            "contextCompression": {
+              "preset": "review"
+            }
+          },
+          "compressionPresets": {
+            "review": {
+              "mode": "auto",
+              "engine": "hybrid",
+              "inlineLevel": "standard",
+              "moments": {
+                "planCheckpoint": true
+              },
+              "safety": {
+                "allowConditional": false,
+                "requireFreshVerification": true
+              }
+            }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`
+      },
+      buildContextIndex: async () => planningContextIndex,
+    })
+
+    expect(resolved.contextCompression).toMatchObject({
+      policy: {
+        preset: "review",
+        mode: "auto",
+        engine: "hybrid",
+        inlineLevel: "standard",
+      },
+      selection: {
+        packIds: ["spec-core", "plan-core"],
+      },
+    })
+  })
+
+  it("includes compression readiness and engine details in resolved context compression state", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => false,
+      readFile: async () => {
+        throw new Error("should not read")
+      },
+    })
+
+    expect(resolved.contextCompression?.readiness).toBeDefined()
+    expect(resolved.contextCompression?.engineBundle).toBeDefined()
+  })
+
+  it("derives explicit freshness for readiness from boundary-relevant artifacts", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => false,
+      readFile: async () => {
+        throw new Error("should not read")
+      },
+      buildContextIndex: async () => ({
+        artifacts: [
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+            headCommit: "abc123",
+            reviewedCommit: "abc123",
+            commitsSinceArtifact: 0,
+          },
+        ],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.contextCompression?.readiness).toMatchObject({
+      state: "safe",
+      resumePacket: {
+        freshness: {
+          headCommit: "abc123",
+          reviewedCommit: "abc123",
+          commitsSinceArtifact: 0,
+        },
+      },
+    })
+  })
+
+  it("treats expired staleAfter freshness as non-safe", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      now: "2026-04-16T00:00:00.000Z",
+      exists: async () => false,
+      readFile: async () => {
+        throw new Error("should not read")
+      },
+      buildContextIndex: async () => ({
+        artifacts: [
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+            staleAfter: "2026-04-15T00:00:00.000Z",
+          },
+        ],
+        warnings: [],
+      }),
+    } as Parameters<typeof resolveControlPlane>[0])
+
+    expect(resolved.contextCompression?.readiness).toMatchObject({
+      state: "unsafe",
+      reason: "Freshness verification failed and conditional compression is disabled by policy.",
+    })
+  })
+
+  it("treats missing freshness metadata on any boundary-relevant authoritative artifact as non-safe", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => false,
+      readFile: async () => {
+        throw new Error("should not read")
+      },
+      buildContextIndex: async () => ({
+        artifacts: [
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+            headCommit: "abc123",
+            reviewedCommit: "abc123",
+            commitsSinceArtifact: 0,
+          },
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-session-aware-context-pack-selection.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+          },
+        ],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.contextCompression?.readiness).toMatchObject({
+      state: "unsafe",
+      reason: "Freshness verification failed and conditional compression is disabled by policy.",
+    })
+  })
+
+  it("treats partially populated freshness metadata as non-safe", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => false,
+      readFile: async () => {
+        throw new Error("should not read")
+      },
+      buildContextIndex: async () => ({
+        artifacts: [
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+            headCommit: "abc123",
+          },
+        ],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.contextCompression?.readiness).toMatchObject({
+      state: "unsafe",
+      reason: "Freshness verification failed and conditional compression is disabled by policy.",
+    })
+  })
+
+  it("treats conflicting boundary freshness metadata as non-safe", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => false,
+      readFile: async () => {
+        throw new Error("should not read")
+      },
+      buildContextIndex: async () => ({
+        artifacts: [
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+            headCommit: "abc123",
+            reviewedCommit: "abc123",
+            commitsSinceArtifact: 0,
+          },
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-session-aware-context-pack-selection.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+            headCommit: "def456",
+            reviewedCommit: "def456",
+            commitsSinceArtifact: 0,
+          },
+        ],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.contextCompression?.readiness).toMatchObject({
+      state: "unsafe",
+      reason: "Freshness verification failed and conditional compression is disabled by policy.",
+    })
+  })
+
+  it("adds engine bundle warnings when selected artifact content cannot be read", async () => {
+    const configPath = "/workspace/project/oh-my-superagents.config.jsonc"
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: configPath,
+      exists: async (filePath) => filePath === configPath,
+      readFile: async (filePath) => {
+        if (filePath === configPath) {
+          return `{
+            "settings": {
+              "activePreset": "default",
+              "contextCompression": {
+                "mode": "auto",
+                "engine": "hybrid",
+                "inlineLevel": "standard",
+                "moments": { "planCheckpoint": true },
+                "safety": {
+                  "allowConditional": false,
+                  "requireFreshVerification": true
+                }
+              }
+            },
+            "presets": {
+              "default": {
+                "label": "Default",
+                "short": "def",
+                "profiles": {
+                  "build": { "model": "openai/gpt-5" }
+                },
+                "routes": {},
+                "defaultRoute": "build"
+              }
+            }
+          }`
+        }
+
+        throw new Error(`artifact unavailable: ${filePath}`)
+      },
+      buildContextIndex: async () => planningContextIndex,
+    })
+
+    expect(resolved.contextCompression?.engineBundle.warnings).toEqual([
+      "Failed to read context artifact docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md: artifact unavailable: /workspace/project/docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+      "Failed to read context artifact docs/superpowers/plans/2026-04-15-session-aware-context-pack-selection.md: artifact unavailable: /workspace/project/docs/superpowers/plans/2026-04-15-session-aware-context-pack-selection.md",
+    ])
+  })
+
+  it("keeps engine bundle warnings ordered by selection when reads fail out of order", async () => {
+    const configPath = "/workspace/project/oh-my-superagents.config.jsonc"
+    const specPath = "/workspace/project/docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md"
+    const planPath = "/workspace/project/docs/superpowers/plans/2026-04-15-session-aware-context-pack-selection.md"
+    const pendingRejectors = new Map<string, (error: Error) => void>()
+    let readyResolve!: () => void
+    const ready = new Promise<void>((resolve) => {
+      readyResolve = resolve
+    })
+
+    const resolvedPromise = resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: configPath,
+      exists: async (filePath) => filePath === configPath,
+      readFile: async (filePath) => {
+        if (filePath === configPath) {
+          return `{
+            "settings": {
+              "activePreset": "default",
+              "contextCompression": {
+                "mode": "auto",
+                "engine": "hybrid",
+                "inlineLevel": "standard",
+                "moments": { "planCheckpoint": true },
+                "safety": {
+                  "allowConditional": false,
+                  "requireFreshVerification": true
+                }
+              }
+            },
+            "presets": {
+              "default": {
+                "label": "Default",
+                "short": "def",
+                "profiles": {
+                  "build": { "model": "openai/gpt-5" }
+                },
+                "routes": {},
+                "defaultRoute": "build"
+              }
+            }
+          }`
+        }
+
+        return await new Promise<string>((_resolve, reject) => {
+          pendingRejectors.set(filePath, reject)
+          if (pendingRejectors.size === 2) {
+            readyResolve()
+          }
+        })
+      },
+      buildContextIndex: async () => planningContextIndex,
+    })
+
+    await ready
+    pendingRejectors.get(planPath)?.(new Error(`artifact unavailable: ${planPath}`))
+    pendingRejectors.get(specPath)?.(new Error(`artifact unavailable: ${specPath}`))
+
+    const resolved = await resolvedPromise
+
+    expect(resolved.contextCompression?.engineBundle.warnings).toEqual([
+      `Failed to read context artifact docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md: artifact unavailable: ${specPath}`,
+      `Failed to read context artifact docs/superpowers/plans/2026-04-15-session-aware-context-pack-selection.md: artifact unavailable: ${planPath}`,
+    ])
+  })
+
+  it("treats unreadable selected authoritative artifacts as non-safe readiness", async () => {
+    const configPath = "/workspace/project/oh-my-superagents.config.jsonc"
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: configPath,
+      exists: async (filePath) => filePath === configPath,
+      readFile: async (filePath) => {
+        if (filePath === configPath) {
+          return `{
+            "settings": {
+              "activePreset": "default",
+              "contextCompression": {
+                "mode": "auto",
+                "engine": "hybrid",
+                "inlineLevel": "standard",
+                "moments": {
+                  "planCheckpoint": true
+                },
+                "safety": {
+                  "allowConditional": false,
+                  "requireFreshVerification": true
+                }
+              }
+            },
+            "presets": {
+              "default": {
+                "label": "Default",
+                "short": "def",
+                "profiles": {
+                  "build": { "model": "openai/gpt-5" }
+                },
+                "routes": {},
+                "defaultRoute": "build"
+              }
+            }
+          }`
+        }
+
+        if (filePath === "/workspace/project/docs/superpowers/plans/2026-04-15-session-aware-context-pack-selection.md") {
+          return "# Plan\n\nReadable"
+        }
+
+        throw new Error(`artifact unavailable: ${filePath}`)
+      },
+      buildContextIndex: async () => ({
+        artifacts: [
+          {
+            kind: "spec",
+            path: "docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "design",
+          },
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-session-aware-context-pack-selection.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+            headCommit: "abc123",
+            reviewedCommit: "abc123",
+            commitsSinceArtifact: 0,
+          },
+        ],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.contextCompression?.readiness).toMatchObject({
+      state: "unsafe",
+    })
+    expect(resolved.contextCompression?.engineBundle.warnings).toEqual([
+      "Failed to read context artifact docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md: artifact unavailable: /workspace/project/docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+    ])
+  })
+
+  it("forces unreadable selected authoritative artifacts to unsafe even when readiness was conditional", async () => {
+    const configPath = "/workspace/project/oh-my-superagents.config.jsonc"
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: configPath,
+      exists: async (filePath) => filePath === configPath,
+      readFile: async (filePath) => {
+        if (filePath === configPath) {
+          return `{
+            "settings": {
+              "activePreset": "default",
+              "contextCompression": {
+                "mode": "auto",
+                "engine": "hybrid",
+                "inlineLevel": "standard",
+                "moments": {
+                  "planCheckpoint": true
+                },
+                "safety": {
+                  "allowConditional": true,
+                  "requireFreshVerification": true
+                }
+              }
+            },
+            "presets": {
+              "default": {
+                "label": "Default",
+                "short": "def",
+                "profiles": {
+                  "build": { "model": "openai/gpt-5" }
+                },
+                "routes": {},
+                "defaultRoute": "build"
+              }
+            }
+          }`
+        }
+
+        throw new Error(`artifact unavailable: ${filePath}`)
+      },
+      buildContextIndex: async () => ({
+        artifacts: [
+          {
+            kind: "spec",
+            path: "docs/superpowers/specs/2026-04-15-hybrid-context-orchestration-design.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "design",
+          },
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-session-aware-context-pack-selection.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+            commitsSinceArtifact: 1,
+          },
+        ],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.contextCompression?.readiness).toMatchObject({
+      state: "unsafe",
+      reason: "One or more selected authoritative artifacts could not be read for compression diagnostics.",
+    })
+  })
+
+  it("keeps default effective context compression stable after first-write defaults are persisted", async () => {
+    const unresolvedWorkspace = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async () => false,
+      readFile: async () => {
+        throw new Error("should not read")
+      },
+      buildContextIndex: async () => planningContextIndex,
+    })
+    const prepared = await prepareControlPlaneStateWrite({
+      command: "use",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => false,
+      readFile: async () => {
+        throw new Error("should not read")
+      },
+      isWritable: async () => true,
+      nextState: {
+        activePreset: "default",
+        enabled: true,
+      },
+    })
+    const persistedWorkspace = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: prepared.path,
+      exists: async (filePath) => filePath === prepared.path,
+      readFile: async (filePath) => {
+        if (filePath !== prepared.path) {
+          throw new Error(`Unexpected read: ${filePath}`)
+        }
+
+        return prepared.content
+      },
+      buildContextIndex: async () => planningContextIndex,
+    })
+
+    expect(unresolvedWorkspace.contextCompression).toEqual(persistedWorkspace.contextCompression)
+    expect(persistedWorkspace.contextCompression).toMatchObject({
+      policy: {
+        mode: "manual",
+        engine: "builtin",
+        inlineLevel: "minimal",
+      },
+      selection: {
+        lifecycleStage: "plan",
+        packIds: [],
+      },
+    })
+  })
+
+  it("includes a context index summary for config-backed resolution", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      buildContextIndex: async () => ({
+        artifacts: [
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+          },
+        ],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.source.kind).toBe("file")
+    expect(resolved.contextIndex).toEqual({
+      artifacts: [
+        {
+          kind: "plan",
+          path: "docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md",
+          authority: "authoritative",
+          source: "oms",
+          lifecycleStage: "plan",
+        },
+      ],
+      warnings: [],
+    })
+  })
+
+  it("records a context index warning when indexing fails", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      buildContextIndex: async () => {
+        throw new Error("index unavailable")
+      },
+    })
+
+    expect(resolved.source.kind).toBe("file")
+    expect(resolved.activePreset.key).toBe("default")
+    expect(resolved.contextIndex).toEqual({
+      artifacts: [],
+      warnings: ["Failed to build context index: index unavailable"],
+    })
+  })
+
+  it("includes resolved context provider availability in control-plane diagnostics", async () => {
+    let receivedProviderConfig: unknown
+
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default",
+          "contextCompression": {
+            "mode": "auto",
+            "engine": "hybrid",
+            "inlineLevel": "standard",
+            "moments": {
+              "planCheckpoint": true
+            },
+            "safety": {
+              "allowConditional": false,
+              "requireFreshVerification": true
+            }
+          }
+        },
+        "contextProviders": {
+          "memoryBank": {
+            "kind": "file",
+            "enabled": true,
+            "root": ".memorybank",
+            "capabilities": ["recall", "status"]
+          },
+          "graphiti": {
+            "kind": "mcp",
+            "enabled": true,
+            "command": "graphiti-mcp",
+            "capabilities": ["recall", "search", "summarize", "status"]
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      buildContextIndex: async () => ({
+        artifacts: [
+          {
+            kind: "plan",
+            path: "docs/superpowers/plans/2026-04-15-context-index-and-diagnostics.md",
+            authority: "authoritative",
+            source: "oms",
+            lifecycleStage: "plan",
+          },
+        ],
+        warnings: [],
+      }),
+      resolveContextProviders: async (input) => {
+        receivedProviderConfig = input.config
+        return [
+          {
+            id: "memoryBank",
+            kind: "file",
+            root: "/workspace/project/.memorybank",
+            available: false,
+            capabilities: ["recall", "status"],
+          },
+          {
+            id: "graphiti",
+            kind: "mcp",
+            command: "graphiti-mcp",
+            args: [],
+            available: true,
+            capabilities: ["recall", "search", "summarize", "status"],
+          },
+        ]
+      },
+    })
+
+    expect(receivedProviderConfig).toMatchObject({
+      memoryBank: {
+        kind: "file",
+        root: ".memorybank",
+      },
+      graphiti: {
+        kind: "mcp",
+        command: "graphiti-mcp",
+      },
+    })
+    expect(resolved.contextProviders).toEqual([
+      {
+        id: "memoryBank",
+        kind: "file",
+        root: "/workspace/project/.memorybank",
+        available: false,
+        capabilities: ["recall", "status"],
+      },
+      {
+        id: "graphiti",
+        kind: "mcp",
+        command: "graphiti-mcp",
+        args: [],
+        available: true,
+        capabilities: ["recall", "search", "summarize", "status"],
+      },
+    ])
+    expect(resolved.contextIndex?.providers).toEqual({
+      availableIds: ["graphiti"],
+      unavailableIds: ["memoryBank"],
+      capabilityMap: {
+        recall: ["graphiti", "memoryBank"],
+        search: ["graphiti"],
+        summarize: ["graphiti"],
+        status: ["graphiti", "memoryBank"],
+      },
+    })
+    expect(resolved.contextCompression?.selection.providers).toEqual({
+      availableIds: ["graphiti"],
+      unavailableIds: ["memoryBank"],
+      capabilityMap: {
+        recall: ["graphiti", "memoryBank"],
+        search: ["graphiti"],
+        summarize: ["graphiti"],
+        status: ["graphiti", "memoryBank"],
+      },
+    })
+    expect(resolved.contextCompression?.readiness.providers).toEqual({
+      availableIds: ["graphiti"],
+      unavailableIds: ["memoryBank"],
+      capabilityMap: {
+        recall: ["graphiti", "memoryBank"],
+        search: ["graphiti"],
+        summarize: ["graphiti"],
+        status: ["graphiti", "memoryBank"],
+      },
+    })
+  })
+
   it("allows read-only fallback when --config points at a missing file", async () => {
     const result = await resolveControlPlane({
       command: "status",
@@ -132,6 +1063,87 @@ describe("resolveControlPlane", () => {
 
     expect(result.source.kind).toBe("default")
     expect(result.config.settings.activePreset).toBe("default")
+  })
+
+  it("uses lower-priority global config when an explicit missing project config path is selected for reads", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "shared"
+        },
+        "presets": {
+          "shared": {
+            "label": "Shared",
+            "short": "sha",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+      buildContextIndex: async () => ({ artifacts: [], warnings: [] }),
+    })
+
+    expect(result.source.kind).toBe("file")
+    expect(result.activePreset.key).toBe("shared")
+    expect(Object.keys(result.config.presets)).toEqual(["shared"])
+  })
+
+  it("preserves lower-priority preset sets when writing through an explicit missing project config path", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "shared"
+        },
+        "presets": {
+          "shared": {
+            "label": "Shared",
+            "short": "sha",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await prepareControlPlaneStateWrite({
+      command: "disable",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+      isWritable: createIsWritable(["/workspace/project/oh-my-superagents.config.jsonc"]),
+      nextState: {
+        activePreset: "shared",
+        enabled: false,
+      },
+    })
+    const serialized = parse(result.content) as {
+      settings?: { activePreset?: string; enabled?: boolean }
+      presets?: Record<string, unknown>
+    }
+
+    expect(result.path).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(serialized.settings).toEqual({
+      activePreset: "shared",
+      enabled: false,
+    })
+    expect(serialized.presets).toEqual({})
   })
 
   it("rejects sync when there is no real config source", async () => {
@@ -809,6 +1821,79 @@ describe("resolveControlPlane", () => {
     expect(result.path).toBe("/workspace/project/explicit.jsonc")
   })
 
+  it("does not force standalone compression defaults when explicit --config targets the project path with a lower-priority source", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "default",
+          "contextCompression": {
+            "mode": "auto",
+            "engine": "hybrid",
+            "inlineLevel": "standard",
+            "moments": {
+              "planCheckpoint": true
+            },
+            "safety": {
+              "allowConditional": false,
+              "requireFreshVerification": true
+            }
+          }
+        },
+        "compressionPresets": {
+          "review": {
+            "mode": "suggest",
+            "engine": "external",
+            "inlineLevel": "full"
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await prepareControlPlaneStateWrite({
+      command: "disable",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+      isWritable: createIsWritable(["/workspace/project/oh-my-superagents.config.jsonc"]),
+      nextState: {
+        activePreset: "default",
+        enabled: false,
+      },
+    })
+    const serialized = parse(result.content) as {
+      settings?: {
+        activePreset?: string
+        enabled?: boolean
+        contextCompression?: unknown
+        commandPrefix?: string
+        subagentExecution?: unknown
+      }
+      compressionPresets?: Record<string, unknown>
+      presets?: Record<string, unknown>
+    }
+
+    expect(result.path).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(serialized.settings).toEqual({
+      activePreset: "default",
+      enabled: false,
+    })
+    expect(serialized.compressionPresets).toBeUndefined()
+    expect(serialized.presets).toEqual({})
+  })
+
   it("selects the project config as the write target when it exists", async () => {
     const files = {
       "/workspace/project/oh-my-superagents.config.jsonc": `{
@@ -1010,6 +2095,64 @@ describe("resolveControlPlane", () => {
         aliases: ["u"],
       })
       expect(serialized.presets.default).toBeTruthy()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("includes contextCompression settings and compressionPresets on first write", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "oms-control-plane-context-compression-"))
+
+    try {
+      const projectDir = path.join(root, "workspace", "project")
+      const homeDir = path.join(root, "home")
+      await mkdir(projectDir, { recursive: true })
+      await mkdir(homeDir, { recursive: true })
+
+      const result = await prepareControlPlaneStateWrite({
+        command: "use",
+        cwd: projectDir,
+        homeDir,
+        nextState: {
+          activePreset: "default",
+          enabled: true,
+        },
+      })
+      const serialized = parse(result.content) as {
+        settings?: {
+          contextCompression?: {
+            mode?: string
+            engine?: string
+            inlineLevel?: string
+            moments?: Record<string, boolean>
+            safety?: {
+              allowConditional?: boolean
+              requireFreshVerification?: boolean
+            }
+          }
+        }
+        compressionPresets?: Record<string, unknown>
+      }
+
+      expect(serialized.settings?.contextCompression).toEqual({
+        mode: "manual",
+        engine: "builtin",
+        inlineLevel: "minimal",
+        moments: {
+          subagentHandoff: false,
+          planCheckpoint: false,
+          reviewCheckpoint: false,
+          verificationCheckpoint: false,
+          sessionResume: false,
+          sourceSwitch: false,
+          branchIntegration: false,
+        },
+        safety: {
+          allowConditional: false,
+          requireFreshVerification: true,
+        },
+      })
+      expect(serialized.compressionPresets).toEqual({})
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -1237,7 +2380,18 @@ describe("resolveControlPlane", () => {
         enabled?: boolean
         commandPrefix?: string
         subagentExecution?: { mode: string }
+        contextCompression?: {
+          mode?: string
+          engine?: string
+          inlineLevel?: string
+          moments?: Record<string, boolean>
+          safety?: {
+            allowConditional?: boolean
+            requireFreshVerification?: boolean
+          }
+        }
       }
+      compressionPresets?: Record<string, unknown>
     }
 
     expect(serialized.settings).toEqual(expect.objectContaining({
@@ -1245,7 +2399,26 @@ describe("resolveControlPlane", () => {
       enabled: true,
       commandPrefix: "oms",
       subagentExecution: { mode: "suggest" },
+      contextCompression: {
+        mode: "manual",
+        engine: "builtin",
+        inlineLevel: "minimal",
+        moments: {
+          subagentHandoff: false,
+          planCheckpoint: false,
+          reviewCheckpoint: false,
+          verificationCheckpoint: false,
+          sessionResume: false,
+          sourceSwitch: false,
+          branchIntegration: false,
+        },
+        safety: {
+          allowConditional: false,
+          requireFreshVerification: true,
+        },
+      },
     }))
+    expect(serialized.compressionPresets).toEqual({})
   })
 
   it("produces the persisted next-config payload before later reconciliation concerns", async () => {
@@ -1472,6 +2645,230 @@ describe("resolveControlPlane", () => {
     })
   })
 
+  it("preserves contextCompression settings and compressionPresets when preparing a state write", async () => {
+    const files = {
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "default",
+          "contextCompression": {
+            "preset": "balanced",
+            "mode": "auto",
+            "engine": "hybrid",
+            "inlineLevel": "standard",
+            "moments": {
+              "subagentHandoff": true,
+              "sessionResume": true
+            },
+            "safety": {
+              "allowConditional": false,
+              "requireFreshVerification": true
+            }
+          }
+        },
+        "compressionPresets": {
+          "balanced": {
+            "mode": "suggest",
+            "engine": "hybrid",
+            "inlineLevel": "standard",
+            "moments": {
+              "subagentHandoff": true,
+              "branchIntegration": true
+            },
+            "safety": {
+              "allowConditional": false,
+              "requireFreshVerification": true
+            }
+          }
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await prepareControlPlaneStateWrite({
+      command: "disable",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+      isWritable: createIsWritable(["/workspace/project/oh-my-superagents.config.jsonc"]),
+      nextState: {
+        activePreset: "default",
+        enabled: false,
+      },
+    })
+
+    const serialized = parse(result.content) as {
+      settings?: {
+        activePreset?: string
+        enabled?: boolean
+        contextCompression?: {
+          preset?: string
+          mode?: string
+          engine?: string
+          inlineLevel?: string
+          moments?: Record<string, boolean>
+          safety?: {
+            allowConditional?: boolean
+            requireFreshVerification?: boolean
+          }
+        }
+      }
+      compressionPresets?: Record<string, {
+        mode?: string
+        engine?: string
+        inlineLevel?: string
+        moments?: Record<string, boolean>
+        safety?: {
+          allowConditional?: boolean
+          requireFreshVerification?: boolean
+        }
+      }>
+    }
+
+    expect(serialized.settings).toEqual(expect.objectContaining({
+      activePreset: "default",
+      enabled: false,
+      contextCompression: {
+        preset: "balanced",
+        mode: "auto",
+        engine: "hybrid",
+        inlineLevel: "standard",
+        moments: {
+          subagentHandoff: true,
+          sessionResume: true,
+        },
+        safety: {
+          allowConditional: false,
+          requireFreshVerification: true,
+        },
+      },
+    }))
+    expect(serialized.compressionPresets).toEqual({
+      balanced: {
+        mode: "suggest",
+        engine: "hybrid",
+        inlineLevel: "standard",
+        moments: {
+          subagentHandoff: true,
+          branchIntegration: true,
+        },
+        safety: {
+          allowConditional: false,
+          requireFreshVerification: true,
+        },
+      },
+    })
+  })
+
+  it("preserves a cleared contextCompression preset sentinel when preparing a state write", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "default",
+          "contextCompression": {
+            "preset": "balanced",
+            "mode": "suggest",
+            "engine": "hybrid",
+            "inlineLevel": "standard",
+            "moments": {
+              "subagentHandoff": true
+            },
+            "safety": {
+              "allowConditional": false,
+              "requireFreshVerification": true
+            }
+          }
+        },
+        "compressionPresets": {
+          "balanced": {
+            "mode": "suggest",
+            "engine": "hybrid",
+            "inlineLevel": "standard",
+            "moments": {
+              "subagentHandoff": true
+            },
+            "safety": {
+              "allowConditional": false,
+              "requireFreshVerification": true
+            }
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "default",
+          "contextCompression": {
+            "preset": null,
+            "mode": "auto"
+          }
+        },
+        "presets": {}
+      }`,
+    }
+
+    const result = await prepareControlPlaneStateWrite({
+      command: "disable",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+      isWritable: createIsWritable(["/workspace/project/oh-my-superagents.config.jsonc"]),
+      nextState: {
+        activePreset: "default",
+        enabled: false,
+      },
+    })
+
+    const serialized = parse(result.content) as {
+      settings?: {
+        activePreset?: string
+        enabled?: boolean
+        contextCompression?: {
+          preset?: string | null
+          mode?: string
+          engine?: string
+          inlineLevel?: string
+          moments?: Record<string, boolean>
+          safety?: {
+            allowConditional?: boolean
+            requireFreshVerification?: boolean
+          }
+        }
+      }
+    }
+
+    expect(result.config.settings.contextCompression.preset).toBeUndefined()
+    expect(serialized.settings).toEqual(expect.objectContaining({
+      activePreset: "default",
+      enabled: false,
+      contextCompression: {
+        preset: null,
+        mode: "auto",
+      },
+    }))
+  })
+
   it("clears a persisted settings.defaultLane when switching presets", async () => {
     const files = {
       "/workspace/project/oh-my-superagents.config.jsonc": `{
@@ -1632,9 +3029,11 @@ describe("resolveControlPlane", () => {
 describe("summarizeRoutingValidation", () => {
   it("reports explicit routes, default-routed phases, unused profiles, and invalid missing-parent reuse", () => {
     const summary = summarizeRoutingValidation({
+      workflow: { kind: "superpowers" },
       settings: {
         enabled: true,
         activePreset: "child",
+        ...defaultControlPlaneSettings,
         commandPrefix: "oms",
         commands: {
           status: { name: "status", aliases: ["st"] },
@@ -1661,6 +3060,10 @@ describe("summarizeRoutingValidation", () => {
           defaultRoute: "build",
         },
       },
+      sourcePresets: {},
+      compressionPresets: {},
+      profiles: {},
+      lanes: {},
     }, "child")
 
     expect(summary.explicitRoutedPhases).toEqual(["brainstorming"])
@@ -1675,9 +3078,11 @@ describe("summarizeRoutingValidation", () => {
 
   it("reports resolvable reuse when the parent preset exists", () => {
     const summary = summarizeRoutingValidation({
+      workflow: { kind: "superpowers" },
       settings: {
         enabled: true,
         activePreset: "child",
+        ...defaultControlPlaneSettings,
         commandPrefix: "oms",
         commands: {
           status: { name: "status", aliases: ["st"] },
@@ -1711,6 +3116,10 @@ describe("summarizeRoutingValidation", () => {
           defaultRoute: "build",
         },
       },
+      sourcePresets: {},
+      compressionPresets: {},
+      profiles: {},
+      lanes: {},
     }, "child")
 
     expect(summary.reuseRelationship).toEqual({
@@ -1722,10 +3131,11 @@ describe("summarizeRoutingValidation", () => {
 
   it("tracks unused top-level profiles when the preset has no local profiles", () => {
     const summary = summarizeRoutingValidation({
+      workflow: { kind: "superpowers" },
       settings: {
         enabled: true,
         activePreset: "default",
-        laneSelection: { mode: "suggest" },
+        ...defaultControlPlaneSettings,
         commandPrefix: "oms",
         commands: {
           status: { name: "status", aliases: ["st"] },
@@ -1741,6 +3151,8 @@ describe("summarizeRoutingValidation", () => {
         strategy: { model: "anthropic/claude-sonnet-4-5" },
         unused: { model: "google/gemini-2.5-pro" },
       },
+      sourcePresets: {},
+      compressionPresets: {},
       lanes: {},
       presets: {
         default: {
@@ -1759,10 +3171,11 @@ describe("summarizeRoutingValidation", () => {
 
   it("treats lane-only profiles as used during routing validation", () => {
     const summary = summarizeRoutingValidation({
+      workflow: { kind: "superpowers" },
       settings: {
         enabled: true,
         activePreset: "default",
-        laneSelection: { mode: "suggest" },
+        ...defaultControlPlaneSettings,
         commandPrefix: "oms",
         commands: {
           status: { name: "status", aliases: ["st"] },
@@ -1778,6 +3191,8 @@ describe("summarizeRoutingValidation", () => {
         "lane-strategy": { model: "anthropic/claude-sonnet-4-5" },
         unused: { model: "google/gemini-2.5-pro" },
       },
+      sourcePresets: {},
+      compressionPresets: {},
       lanes: {
         frontend: {
           label: "Frontend",
@@ -1814,11 +3229,12 @@ describe("summarizeSubagentExecutionDiagnostics", () => {
       },
       config: {
         workflow: { kind: "superpowers" },
+        sourcePresets: {},
+        compressionPresets: {},
         settings: {
           enabled: true,
           activePreset: "default",
-          laneSelection: { mode: "suggest" },
-          subagentExecution: { mode: "suggest" },
+          ...defaultControlPlaneSettings,
           commandPrefix: "oms",
           commands: {
             status: { name: "status", aliases: ["st"] },
@@ -1866,6 +3282,7 @@ describe("summarizeSubagentExecutionDiagnostics", () => {
         runtimeLane: undefined,
         mode: "suggest",
       },
+      effectiveSources: {},
     })
 
     expect(summary).toEqual({
@@ -1892,8 +3309,7 @@ describe("summarizeEffectiveSourceEntries", () => {
         settings: {
           enabled: true,
           activePreset: "default",
-          laneSelection: { mode: "suggest" },
-          subagentExecution: { mode: "suggest" },
+          ...defaultControlPlaneSettings,
           commandPrefix: "oms",
           commands: {
             status: { name: "status", aliases: ["st"] },
@@ -1905,6 +3321,7 @@ describe("summarizeEffectiveSourceEntries", () => {
           superpowersCompatibility: { mode: "warn" },
         },
         sourcePresets: {},
+        compressionPresets: {},
         profiles: {
           build: { model: "openai/gpt-5" },
         },
@@ -1963,11 +3380,12 @@ describe("summarizeEffectiveSourceReadiness", () => {
         },
         config: {
           workflow: { kind: "superpowers" },
+          sourcePresets: {},
+          compressionPresets: {},
           settings: {
             enabled: true,
             activePreset: "default",
-            laneSelection: { mode: "suggest" },
-            subagentExecution: { mode: "suggest" },
+            ...defaultControlPlaneSettings,
             commandPrefix: "oms",
             commands: {
               status: { name: "status", aliases: ["st"] },
@@ -1981,6 +3399,7 @@ describe("summarizeEffectiveSourceReadiness", () => {
           profiles: {
             build: { model: "openai/gpt-5" },
           },
+          lanes: {},
           presets: {
             default: {
               label: "Default",
@@ -2233,11 +3652,12 @@ describe("buildControlPlaneExplainTrace", () => {
         },
         config: {
           workflow: { kind: "superpowers" },
+          sourcePresets: {},
+          compressionPresets: {},
           settings: {
             enabled: true,
             activePreset: "default",
-            laneSelection: { mode: "suggest" },
-            subagentExecution: { mode: "suggest" },
+            ...defaultControlPlaneSettings,
             commandPrefix: "oms",
             commands: {
               status: { name: "status", aliases: ["st"] },
@@ -2251,6 +3671,7 @@ describe("buildControlPlaneExplainTrace", () => {
           profiles: {
             build: { model: "openai/gpt-5" },
           },
+          lanes: {},
           presets: {
             default: {
               label: "Default",

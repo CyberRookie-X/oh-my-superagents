@@ -1,4 +1,5 @@
 import { homedir } from "node:os"
+import path from "node:path"
 import {
   BUILT_IN_PHASES,
   type ControlPlaneCommandKey,
@@ -18,6 +19,25 @@ import {
   readControlPlaneSourceDocument,
   resolvePresetReuse,
 } from "./config.js"
+import {
+  deriveLifecycleStage,
+  type ContextLifecycleStage,
+} from "./context-lifecycle.js"
+import type { ContextArtifact, ContextArtifactFreshness } from "./context-artifacts.js"
+import {
+  buildBuiltinCompressionBundle,
+  enhanceCompressionBundleWithSummary,
+  evaluateCompressionReadiness,
+  type CompressionReadiness,
+  type EnhancedCompressionBundle,
+} from "./context-compression.js"
+import {
+  resolveContextCompressionPolicy,
+  selectContextPacks,
+  type EffectiveContextCompressionPolicy,
+  type EffectiveContextPackSelection,
+} from "./context-packs.js"
+import { buildContextIndex, summarizeContextProviders, type ContextIndex } from "./context-index.js"
 import { listLaneExecutionUnits } from "./lane-execution.js"
 import { resolveEffectiveSources, resolveRoute, type BuiltInPhase } from "./router.js"
 import type { SuperpowersCompatibilityResult, SupportedSuperpowersHost } from "./superpowers-compatibility.js"
@@ -29,6 +49,11 @@ import {
   type WorkflowSourceEntry,
   type WorkflowSourceKind,
 } from "./workflow-sources.js"
+import {
+  resolveContextProviders as defaultResolveContextProviders,
+  type ResolvedContextProvider,
+  type ResolveContextProvidersInput,
+} from "./context-providers.js"
 
 const READ_ONLY_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "doctor"])
 const NAME_PATTERN = /^[a-z0-9-]+$/
@@ -36,6 +61,9 @@ const NAME_PATTERN = /^[a-z0-9-]+$/
 export type ResolveControlPlaneInput = LoadControlPlaneConfigInput & {
   command: ControlPlaneCommandKey
   runtimeLane?: string
+  now?: string
+  buildContextIndex?: (input: { cwd: string; contextProviders?: readonly ResolvedContextProvider[] }) => Promise<ContextIndex>
+  resolveContextProviders?: (input: ResolveContextProvidersInput) => Promise<ResolvedContextProvider[]>
 }
 
 export type PrepareControlPlaneStateWriteInput = ResolveControlPlaneInput & {
@@ -74,6 +102,14 @@ export type ResolvedControlPlane = {
     runtimeLane?: string
     mode: ControlPlaneConfig["settings"]["laneSelection"]["mode"]
     nonApplyingReason?: string
+  }
+  contextProviders: ResolvedContextProvider[]
+  contextIndex?: ContextIndex
+  contextCompression?: {
+    policy: EffectiveContextCompressionPolicy
+    selection: EffectiveContextPackSelection & { lifecycleStage: ContextLifecycleStage }
+    readiness: CompressionReadiness
+    engineBundle: EnhancedCompressionBundle
   }
   effectiveSources: Partial<Record<CanonicalRouteId, WorkflowSourceKind>>
 }
@@ -140,6 +176,19 @@ export type SubagentExecutionDiagnostics = {
 
 const STAGE_1_SUGGESTION_MESSAGE =
   "Lane suggestions do not change routing in Stage 1. Use a runtime lane override with laneSelection.mode=auto to apply a lane for the current session."
+const BUILTIN_ENGINE_BUNDLE_MAX_CHARS = 160
+const CONTEXT_LIFECYCLE_STAGE_PRIORITY = {
+  bootstrap: 0,
+  design: 1,
+  prepare_workspace: 2,
+  plan: 3,
+  execute_task: 4,
+  review: 5,
+  verify: 6,
+  integrate_branch: 7,
+  checkpoint: 8,
+  resume: 9,
+} as const satisfies Record<ContextLifecycleStage, number>
 
 export type RoutingValidationSummary = {
   defaultRoutedPhases: string[]
@@ -758,6 +807,35 @@ function cloneWorkflow(config: { workflow: ControlPlaneConfig["workflow"] }) {
     : { kind: "superpowers" as const }
 }
 
+function cloneContextCompression<
+  T extends {
+    moments?: Record<string, boolean>
+    safety?: Record<string, boolean>
+  } | undefined,
+>(contextCompression: T): T {
+  if (!contextCompression) {
+    return contextCompression
+  }
+
+  return {
+    ...contextCompression,
+    moments: contextCompression.moments ? { ...contextCompression.moments } : undefined,
+    safety: contextCompression.safety ? { ...contextCompression.safety } : undefined,
+  } as T
+}
+
+function cloneCompressionPresets<
+  T extends Record<string, { moments?: Record<string, boolean>; safety?: Record<string, boolean> }> | undefined,
+>(compressionPresets: T): T {
+  if (!compressionPresets) {
+    return compressionPresets
+  }
+
+  return Object.fromEntries(
+    Object.entries(compressionPresets).map(([key, preset]) => [key, cloneContextCompression(preset)]),
+  ) as T
+}
+
 function cloneLayeredConfig(config: LayeredControlPlaneConfigInput): LayeredControlPlaneConfigInput {
   return {
     workflow: config.workflow
@@ -781,6 +859,7 @@ function cloneLayeredConfig(config: LayeredControlPlaneConfigInput): LayeredCont
                 ]),
               )
             : undefined,
+          contextCompression: cloneContextCompression(config.settings.contextCompression),
           superpowersCompatibility: config.settings.superpowersCompatibility
             ? { ...config.settings.superpowersCompatibility }
             : undefined,
@@ -791,6 +870,7 @@ function cloneLayeredConfig(config: LayeredControlPlaneConfigInput): LayeredCont
           Object.entries(config.sourcePresets).map(([key, sourcePreset]) => [key, { routes: { ...sourcePreset.routes } }]),
         )
       : undefined,
+    compressionPresets: cloneCompressionPresets(config.compressionPresets),
     profiles: cloneProfiles(config.profiles),
     lanes: cloneLanes(config.lanes),
     presets: Object.fromEntries(
@@ -808,6 +888,7 @@ function toLayeredDocument(config: ControlPlaneConfig): LayeredControlPlaneConfi
       defaultLane: config.settings.defaultLane,
       laneSelection: { ...config.settings.laneSelection },
       subagentExecution: { ...config.settings.subagentExecution },
+      contextCompression: cloneContextCompression(config.settings.contextCompression),
       commandPrefix: config.settings.commandPrefix,
       commands: Object.fromEntries(
         Object.entries(config.settings.commands).map(([key, command]) => [
@@ -823,6 +904,7 @@ function toLayeredDocument(config: ControlPlaneConfig): LayeredControlPlaneConfi
         { routes: Object.fromEntries(Object.entries(sourcePreset.routes)) as Record<string, "superpowers" | "gstack" | "direct"> },
       ]),
     ),
+    compressionPresets: cloneCompressionPresets(config.compressionPresets),
     profiles: cloneProfiles(config.profiles),
     lanes: cloneLanes(config.lanes),
     presets: Object.fromEntries(
@@ -854,11 +936,13 @@ function ensureStandaloneSettings(config: LayeredControlPlaneConfigInput) {
 
   return {
     ...config,
+    compressionPresets: config.compressionPresets ?? cloneCompressionPresets(defaults.compressionPresets),
     settings: {
       ...config.settings,
       commandPrefix: config.settings?.commandPrefix ?? defaults.settings.commandPrefix,
       commands: config.settings?.commands ?? defaults.settings.commands,
       subagentExecution: config.settings?.subagentExecution ?? defaults.settings.subagentExecution,
+      contextCompression: config.settings?.contextCompression ?? cloneContextCompression(defaults.settings.contextCompression),
       superpowersCompatibility:
         config.settings?.superpowersCompatibility ?? defaults.settings.superpowersCompatibility,
     },
@@ -868,26 +952,28 @@ function ensureStandaloneSettings(config: LayeredControlPlaneConfigInput) {
 async function selectWriteTarget(input: PrepareControlPlaneStateWriteInput) {
   const exists = input.exists ?? defaultExists
   const homeDirectory = input.homeDir ?? homedir()
+  const projectPath = getProjectConfigPath(input.cwd)
+  const globalPath = getGlobalConfigPath(homeDirectory)
 
   if (input.explicitPath) {
     return {
       path: input.explicitPath,
       exists: await exists(input.explicitPath),
-      hasLowerPrioritySource: false,
+      hasLowerPrioritySource: input.explicitPath === projectPath
+        ? await exists(globalPath)
+        : false,
     }
   }
 
-  const projectPath = getProjectConfigPath(input.cwd)
   const projectExists = await exists(projectPath)
   if (projectExists) {
     return {
       path: projectPath,
       exists: true,
-      hasLowerPrioritySource: await exists(getGlobalConfigPath(homeDirectory)),
+      hasLowerPrioritySource: await exists(globalPath),
     }
   }
 
-  const globalPath = getGlobalConfigPath(homeDirectory)
   const globalExists = await exists(globalPath)
   if (globalExists) {
     return {
@@ -945,6 +1031,8 @@ export async function prepareControlPlaneStateWrite(
     const source = await readControlPlaneSourceDocument(target.path, reader)
     sourceFormat = source.format
     nextDocument = cloneLayeredConfig(source.config)
+  } else if (target.hasLowerPrioritySource) {
+    nextDocument = { presets: {} }
   } else {
     nextDocument = toLayeredDocument(createDefaultControlPlaneConfig())
   }
@@ -972,11 +1060,332 @@ export async function prepareControlPlaneStateWrite(
   }
 }
 
+async function resolveContextIndex(input: Pick<ResolveControlPlaneInput, "cwd" | "buildContextIndex"> & {
+  contextProviders: readonly ResolvedContextProvider[]
+}): Promise<ContextIndex> {
+  const buildIndex = input.buildContextIndex ?? buildContextIndex
+
+  try {
+    const contextIndex = await buildIndex({ cwd: input.cwd, contextProviders: input.contextProviders })
+    const providers = contextIndex.providers ?? summarizeContextProviders(input.contextProviders)
+
+    return {
+      ...contextIndex,
+      ...(providers ? { providers } : {}),
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const providers = summarizeContextProviders(input.contextProviders)
+
+    return {
+      artifacts: [],
+      warnings: [`Failed to build context index: ${message}`],
+      ...(providers ? { providers } : {}),
+    }
+  }
+}
+
+function resolveIndexedLifecycleStage(
+  contextIndex: ContextIndex,
+  workflowKind: ControlPlaneConfig["workflow"]["kind"],
+): ContextLifecycleStage {
+  const indexedStage = contextIndex.artifacts
+    .flatMap((artifact) => (artifact.lifecycleStage ? [artifact.lifecycleStage] : []))
+    .sort((left, right) => CONTEXT_LIFECYCLE_STAGE_PRIORITY[right] - CONTEXT_LIFECYCLE_STAGE_PRIORITY[left])[0]
+
+  if (indexedStage) {
+    return indexedStage
+  }
+
+  return workflowKind === "superpowers" ? "plan" : "execute_task"
+}
+
+function resolveContextCompressionCanonicalRoute(input: {
+  workflow: ControlPlaneConfig["workflow"]
+  effectiveSources: Partial<Record<CanonicalRouteId, WorkflowSourceKind>>
+  lifecycleStage: ContextLifecycleStage
+}): CanonicalRouteId {
+  if (input.workflow.kind === "direct") {
+    return Object.keys(input.effectiveSources).find((canonicalRoute) => canonicalRoute.startsWith("intent.")) as CanonicalRouteId
+      ?? "intent.default" as CanonicalRouteId
+  }
+
+  switch (input.lifecycleStage) {
+    case "design":
+    case "bootstrap":
+      return "phase.brainstorm"
+    case "plan":
+    case "checkpoint":
+    case "resume":
+      return "phase.plan"
+    case "review":
+      return "phase.review"
+    case "verify":
+      return "phase.verify"
+    default:
+      return "phase.execute"
+  }
+}
+
+function resolveAuthoredContextCompressionFromLayers(
+  layers: Array<{ path: string; config: LayeredControlPlaneConfigInput }>,
+): NonNullable<LayeredControlPlaneConfigInput["settings"]>["contextCompression"] | undefined {
+  let merged: NonNullable<LayeredControlPlaneConfigInput["settings"]>["contextCompression"] | undefined
+
+  for (const layer of layers) {
+    const authoredContextCompression = layer.config.settings?.contextCompression
+    if (!authoredContextCompression) {
+      continue
+    }
+
+    merged = merged
+      ? {
+          ...merged,
+          ...authoredContextCompression,
+          moments: {
+            ...merged.moments,
+            ...authoredContextCompression.moments,
+          },
+          safety: {
+            ...merged.safety,
+            ...authoredContextCompression.safety,
+          },
+        }
+      : cloneContextCompression(authoredContextCompression)
+
+    if (Object.prototype.hasOwnProperty.call(authoredContextCompression, "preset")
+      && authoredContextCompression.preset === null) {
+      merged = { ...merged, preset: null }
+    }
+  }
+
+  return merged ? cloneContextCompression(merged) : undefined
+}
+
+function getBoundaryRelevantAuthoritativeArtifacts(
+  artifacts: ContextArtifact[],
+  lifecycleStage: ContextLifecycleStage,
+) {
+  return artifacts.filter((artifact) => artifact.authority === "authoritative" && artifact.lifecycleStage === lifecycleStage)
+}
+
+function deriveBestEffortCompressionFreshness(
+  artifacts: ContextArtifact[],
+): ContextArtifactFreshness | undefined {
+  const freshness: ContextArtifactFreshness = {}
+  const headCommits = new Set(
+    artifacts.flatMap((artifact) => (artifact.headCommit === undefined ? [] : [artifact.headCommit])),
+  )
+  const reviewedCommits = new Set(
+    artifacts.flatMap((artifact) => (artifact.reviewedCommit === undefined ? [] : [artifact.reviewedCommit])),
+  )
+  const commitsSinceArtifact = artifacts
+    .flatMap((artifact) => (artifact.commitsSinceArtifact === undefined ? [] : [artifact.commitsSinceArtifact]))
+  const staleAfter = artifacts
+    .flatMap((artifact) => (artifact.staleAfter === undefined ? [] : [artifact.staleAfter]))
+    .sort()[0]
+  const hasConflictingCommitMetadata = headCommits.size > 1 || reviewedCommits.size > 1
+  const hasIncompleteFreshnessMetadata = artifacts.some((artifact) => !hasCompleteFreshnessStrategy(artifact))
+
+  if (headCommits.size === 1) {
+    freshness.headCommit = Array.from(headCommits)[0]
+  }
+
+  if (reviewedCommits.size === 1) {
+    freshness.reviewedCommit = Array.from(reviewedCommits)[0]
+  }
+
+  if (commitsSinceArtifact.length > 0) {
+    freshness.commitsSinceArtifact = Math.max(...commitsSinceArtifact)
+  }
+
+  if (hasConflictingCommitMetadata || hasIncompleteFreshnessMetadata) {
+    freshness.commitsSinceArtifact = Math.max(freshness.commitsSinceArtifact ?? 0, 1)
+  }
+
+  if (staleAfter !== undefined) {
+    freshness.staleAfter = staleAfter
+  }
+
+  return Object.keys(freshness).length > 0 ? freshness : undefined
+}
+
+function hasCompleteFreshnessStrategy(artifact: ContextArtifact) {
+  return artifact.staleAfter !== undefined
+    || artifact.commitsSinceArtifact !== undefined
+    || (artifact.headCommit !== undefined && artifact.reviewedCommit !== undefined)
+}
+
+async function buildCompressionEngineBundle(input: {
+  cwd: string
+  readFile?: ResolveControlPlaneInput["readFile"]
+  selection: EffectiveContextPackSelection & { lifecycleStage: ContextLifecycleStage }
+  policy: EffectiveContextCompressionPolicy
+}): Promise<{
+  bundle: EnhancedCompressionBundle
+  unreadableSelectedAuthoritativeArtifactPaths: string[]
+}> {
+  const readFile = input.readFile ?? defaultReadFile
+  const artifactReadResults = await Promise.all(input.selection.artifacts.map(async (artifact) => {
+    try {
+      return {
+        artifact: {
+          ...artifact,
+          content: await readFile(path.join(input.cwd, artifact.path)),
+        },
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+
+      return {
+        artifact: {
+          ...artifact,
+          content: "",
+        },
+        warning: `Failed to read context artifact ${artifact.path}: ${message}`,
+        unreadableSelectedAuthoritativeArtifactPath: artifact.authority === "authoritative"
+          ? artifact.path
+          : undefined,
+      }
+    }
+  }))
+  const artifactsWithContent = artifactReadResults.map((result) => result.artifact)
+  const warnings = artifactReadResults.flatMap((result) => result.warning ? [result.warning] : [])
+  const unreadableSelectedAuthoritativeArtifactPaths = artifactReadResults.flatMap((result) => (
+    result.unreadableSelectedAuthoritativeArtifactPath
+      ? [result.unreadableSelectedAuthoritativeArtifactPath]
+      : []
+  ))
+
+  return {
+    bundle: enhanceCompressionBundleWithSummary({
+      bundle: buildBuiltinCompressionBundle({
+        selection: {
+          ...input.selection,
+          policy: input.policy,
+          artifacts: artifactsWithContent,
+        },
+        maxCharsPerArtifact: BUILTIN_ENGINE_BUNDLE_MAX_CHARS,
+      }),
+      warnings,
+    }),
+    unreadableSelectedAuthoritativeArtifactPaths,
+  }
+}
+
+async function resolveEffectiveContextCompression(input: {
+  command: ResolveControlPlaneInput["command"]
+  cwd: string
+  now?: string
+  readFile?: ResolveControlPlaneInput["readFile"]
+  config: ControlPlaneConfig
+  layers: Array<{ path: string; config: LayeredControlPlaneConfigInput }>
+  contextIndex: ContextIndex
+  effectiveSources: Partial<Record<CanonicalRouteId, WorkflowSourceKind>>
+  contextProviders: readonly ResolvedContextProvider[]
+}): Promise<ResolvedControlPlane["contextCompression"]> {
+  const lifecycleHint = resolveIndexedLifecycleStage(input.contextIndex, input.config.workflow.kind)
+  const canonicalRoute = resolveContextCompressionCanonicalRoute({
+    workflow: input.config.workflow,
+    effectiveSources: input.effectiveSources,
+    lifecycleStage: lifecycleHint,
+  })
+  const resolvedSource = input.effectiveSources[canonicalRoute]
+    ?? (input.config.workflow.kind === "direct" ? "direct" : "superpowers")
+  const sourceEntry = getWorkflowSourceEntry(canonicalRoute, resolvedSource)
+  const lifecycleStage = deriveLifecycleStage({
+    command: input.command,
+    canonicalRoute,
+    sourceEntry,
+    lifecycleHint,
+  })
+  const authoredContextCompression = resolveAuthoredContextCompressionFromLayers(input.layers)
+  const policy = resolveContextCompressionPolicy({
+    compressionPresets: input.config.compressionPresets,
+    contextCompression: authoredContextCompression,
+  })
+  const selection = selectContextPacks({
+    lifecycleStage,
+    canonicalRoute,
+    resolvedSource,
+    artifacts: input.contextIndex.artifacts,
+    policy,
+    contextProviders: input.contextProviders,
+  })
+  const resolvedSelection = {
+    lifecycleStage,
+    ...selection,
+  }
+  const boundaryRelevantArtifacts = getBoundaryRelevantAuthoritativeArtifacts(input.contextIndex.artifacts, lifecycleStage)
+  let readiness = evaluateCompressionReadiness({
+    lifecycleStage,
+    policy,
+    artifacts: boundaryRelevantArtifacts,
+    unresolvedDecisions: [],
+    freshness: deriveBestEffortCompressionFreshness(boundaryRelevantArtifacts),
+    now: input.now,
+    contextProviders: input.contextProviders,
+  })
+  const { bundle: engineBundle, unreadableSelectedAuthoritativeArtifactPaths } = await buildCompressionEngineBundle({
+    cwd: input.cwd,
+    readFile: input.readFile,
+    selection: resolvedSelection,
+    policy,
+  })
+
+  if (unreadableSelectedAuthoritativeArtifactPaths.length > 0) {
+    readiness = {
+      ...readiness,
+      state: "unsafe",
+      reason: "One or more selected authoritative artifacts could not be read for compression diagnostics.",
+    }
+  }
+
+  return {
+    policy,
+    selection: resolvedSelection,
+    readiness,
+    engineBundle,
+  }
+}
+
+async function resolveConfiguredContextProviders(input: {
+  config: ControlPlaneConfig["contextProviders"]
+  baseDir: string
+  resolveContextProviders?: ResolveControlPlaneInput["resolveContextProviders"]
+}): Promise<ResolvedContextProvider[]> {
+  const resolveContextProviders = input.resolveContextProviders ?? defaultResolveContextProviders
+  return resolveContextProviders({
+    baseDir: input.baseDir,
+    config: input.config,
+  })
+}
+
 export async function resolveControlPlane(input: ResolveControlPlaneInput): Promise<ResolvedControlPlane> {
   try {
     const loaded = await loadControlPlaneConfig(input)
     const { activePreset, laneState } = validateControlPlaneConfig(loaded.config, input.runtimeLane)
     const effectiveSources = getEffectiveSources(loaded.config, activePreset.preset)
+    const contextProviders = await resolveConfiguredContextProviders({
+      config: loaded.config.contextProviders,
+      baseDir: path.dirname(loaded.path),
+      resolveContextProviders: input.resolveContextProviders,
+    })
+    const contextIndex = await resolveContextIndex({
+      ...input,
+      contextProviders,
+    })
+    const contextCompression = await resolveEffectiveContextCompression({
+      command: input.command,
+      cwd: input.cwd,
+      now: input.now,
+      readFile: input.readFile,
+      config: loaded.config,
+      layers: loaded.layers,
+      contextIndex,
+      effectiveSources,
+      contextProviders,
+    })
     const activePresetDefinition = resolvePresetDefinitionFromLayers(loaded.layers, activePreset.key)
     const parentPresetDefinition = activePreset.preset.extends
       ? resolvePresetDefinitionFromLayers(loaded.layers, activePreset.preset.extends)
@@ -993,6 +1402,9 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       activePreset,
       layers: loaded.layers,
       laneState,
+      contextProviders,
+      contextIndex,
+      contextCompression,
       effectiveSources,
       trace: {
         activePresetDefinition,
@@ -1010,6 +1422,27 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
 
     const config = createDefaultControlPlaneConfig()
     const { activePreset, laneState } = validateControlPlaneConfig(config, input.runtimeLane)
+    const effectiveSources = getEffectiveSources(config, activePreset.preset)
+    const contextProviders = await resolveConfiguredContextProviders({
+      config: config.contextProviders,
+      baseDir: input.cwd,
+      resolveContextProviders: input.resolveContextProviders,
+    })
+    const contextIndex = await resolveContextIndex({
+      ...input,
+      contextProviders,
+    })
+    const contextCompression = await resolveEffectiveContextCompression({
+      command: input.command,
+      cwd: input.cwd,
+      now: input.now,
+      readFile: input.readFile,
+      config,
+      layers: [],
+      contextIndex,
+      effectiveSources,
+      contextProviders,
+    })
 
     return {
       source: {
@@ -1021,7 +1454,10 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       activePreset,
       layers: [],
       laneState,
-      effectiveSources: getEffectiveSources(config, activePreset.preset),
+      contextProviders,
+      contextIndex,
+      contextCompression,
+      effectiveSources,
     }
   }
 }

@@ -41,6 +41,7 @@ import {
   type LaneExplainability,
   type ResolvedControlPlane,
 } from "./control-plane.js"
+import type { ContextIndex } from "./context-index.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildClaudeArtifacts } from "./claude.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
@@ -488,29 +489,103 @@ function formatCompatibilityBlock(result: SuperpowersCompatibilityResult | null)
 function withCompatibility<T extends Record<string, unknown>>(
   payload: T,
   compatibility: SuperpowersCompatibilityResult | null,
+  contextIndex: ReturnType<typeof summarizeContextIndex>,
+  contextCompression: ReturnType<typeof summarizeContextCompression>,
+  contextProviders: ReturnType<typeof summarizeContextProviders>,
 ) {
   return {
     ...payload,
     compatibility,
+    ...(contextIndex ? { contextIndex } : {}),
+    ...(contextCompression ? { contextCompression } : {}),
+    ...(contextProviders ? { contextProviders } : {}),
   }
 }
 
-function formatExplainOutput(payload: unknown, compatibility: SuperpowersCompatibilityResult | null) {
+function summarizeContextIndex(index: ContextIndex | undefined) {
+  if (!index) {
+    return undefined
+  }
+
+  return {
+    artifactCount: index.artifacts.length,
+    authoritativePaths: index.artifacts
+      .filter((artifact) => artifact.authority === "authoritative")
+      .map((artifact) => artifact.path),
+    warnings: index.warnings,
+  }
+}
+
+function summarizeContextCompression(contextCompression: ResolvedControlPlane["contextCompression"]) {
+  if (!contextCompression) {
+    return undefined
+  }
+
+  return {
+    policy: {
+      mode: contextCompression.policy.mode,
+      engine: contextCompression.policy.engine,
+      inlineLevel: contextCompression.policy.inlineLevel,
+    },
+    selection: {
+      lifecycleStage: contextCompression.selection.lifecycleStage,
+      packIds: [...contextCompression.selection.packIds],
+      artifactPaths: contextCompression.selection.artifacts.map((artifact) => artifact.path),
+    },
+    readiness: {
+      state: contextCompression.readiness.state,
+      reason: contextCompression.readiness.reason,
+      ...(contextCompression.readiness.resumePacket
+        ? { resumePacket: contextCompression.readiness.resumePacket }
+        : {}),
+    },
+    engineBundle: {
+      packIds: [...contextCompression.engineBundle.packIds],
+      summary: contextCompression.engineBundle.summary,
+      entries: contextCompression.engineBundle.entries.map((entry) => ({ ...entry })),
+      warnings: [...contextCompression.engineBundle.warnings],
+    },
+  }
+}
+
+function summarizeContextProviders(contextProviders: ResolvedControlPlane["contextProviders"]) {
+  const summarizedProviders = [...(contextProviders ?? [])]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((provider) => ({
+      id: provider.id,
+      kind: provider.kind,
+      available: provider.available,
+      capabilities: [...provider.capabilities],
+    }))
+
+  return summarizedProviders.length > 0 ? summarizedProviders : undefined
+}
+
+function formatExplainOutput(
+  payload: unknown,
+  compatibility: SuperpowersCompatibilityResult | null,
+  contextIndex: ReturnType<typeof summarizeContextIndex>,
+  contextCompression: ReturnType<typeof summarizeContextCompression>,
+  contextProviders: ReturnType<typeof summarizeContextProviders>,
+) {
   if (Array.isArray(payload)) {
     return payload.map((item) => (
       item && typeof item === "object" && !Array.isArray(item)
-        ? withCompatibility(item as Record<string, unknown>, compatibility)
+        ? withCompatibility(item as Record<string, unknown>, compatibility, contextIndex, contextCompression, contextProviders)
         : item
     ))
   }
 
   if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    return withCompatibility(payload as Record<string, unknown>, compatibility)
+    return withCompatibility(payload as Record<string, unknown>, compatibility, contextIndex, contextCompression, contextProviders)
   }
 
   return {
     result: payload,
     compatibility,
+    ...(contextIndex ? { contextIndex } : {}),
+    ...(contextCompression ? { contextCompression } : {}),
+    ...(contextProviders ? { contextProviders } : {}),
   }
 }
 
@@ -565,6 +640,17 @@ function formatPostWriteControlPlaneSource(
       hasRealSource: true,
       path: prepared.path,
       sources: [prepared.path],
+    }
+  }
+
+  if (resolved.source.path !== prepared.path || !resolved.source.sources.includes(prepared.path)) {
+    return {
+      kind: "file" as const,
+      hasRealSource: true,
+      path: prepared.path,
+      sources: resolved.source.sources.includes(prepared.path)
+        ? resolved.source.sources
+        : [...resolved.source.sources, prepared.path],
     }
   }
 
@@ -1329,12 +1415,12 @@ async function discoverOwnedSkillFiles(cwd: string, skillsRoot: string, deps: Cl
 
   let entries: string[] = []
   try {
-    entries = await deps.readdir(root)
+    entries = (await deps.readdir(root)).sort()
   } catch (error) {
     if (!isMissingFsError(error)) {
       warnings.push(`Failed to scan OMS-owned artifact directory ${root}: ${error instanceof Error ? error.message : String(error)}`)
     }
-    return { paths: [], warnings }
+    return { paths: [], warnings: warnings.sort() }
   }
 
   for (const entry of entries) {
@@ -1359,7 +1445,7 @@ async function discoverOwnedSkillFiles(cwd: string, skillsRoot: string, deps: Cl
     }
   }
 
-  return { paths: [...discovered].sort(), warnings }
+  return { paths: [...discovered].sort(), warnings: warnings.sort() }
 }
 
 async function discoverOwnedArtifacts(
@@ -1384,7 +1470,7 @@ async function discoverOwnedArtifacts(
     let entries: string[] = []
 
     try {
-      entries = await deps.readdir(directory)
+      entries = (await deps.readdir(directory)).sort()
     } catch (error) {
       if (!isMissingFsError(error)) {
         warnings.push(`Failed to scan OMS-owned artifact directory ${directory}: ${error instanceof Error ? error.message : String(error)}`)
@@ -1469,7 +1555,7 @@ async function discoverOwnedArtifacts(
 
   return {
     paths: [...discovered].sort(),
-    warnings,
+    warnings: warnings.sort(),
     specialPresent: [...specialPresent].sort(),
     unverifiedDirectories: [...unverifiedDirectories].sort(),
     unverifiedFiles: [...unverifiedFiles].sort(),
@@ -1694,6 +1780,9 @@ async function buildControlPlaneStatus(
 ) {
   const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
   assertWorkflowSupport(resolved.config, "status", host)
+  const contextIndex = summarizeContextIndex(resolved.contextIndex)
+  const contextCompression = summarizeContextCompression(resolved.contextCompression)
+  const contextProviders = summarizeContextProviders(resolved.contextProviders)
   const compatibility = await maybeResolveCompatibility(
     resolved.config,
     host,
@@ -1763,6 +1852,9 @@ async function buildControlPlaneStatus(
       .map(([key, preset]) => ({ key, label: preset.label, short: preset.short, description: preset.description }))
       .sort((left, right) => left.key.localeCompare(right.key)),
     source: formatControlPlaneSource(resolved),
+    ...(contextProviders ? { contextProviders } : {}),
+    ...(contextIndex ? { contextIndex } : {}),
+    ...(contextCompression ? { contextCompression } : {}),
     effectiveSources: resolved.effectiveSources,
     effectiveSourceEntries: summarizeEffectiveSourceEntries(resolved),
     effectiveSourceReadiness,
@@ -1784,6 +1876,9 @@ async function buildControlPlaneDoctor(
 ) {
   const resolved = await deps.resolveControlPlane({ command: "doctor", cwd, explicitPath, runtimeLane })
   assertWorkflowSupport(resolved.config, "doctor", host)
+  const contextIndex = summarizeContextIndex(resolved.contextIndex)
+  const contextCompression = summarizeContextCompression(resolved.contextCompression)
+  const contextProviders = summarizeContextProviders(resolved.contextProviders)
   const compatibility = await maybeResolveCompatibility(
     resolved.config,
     host,
@@ -1830,6 +1925,9 @@ async function buildControlPlaneDoctor(
       short: resolved.activePreset.preset.short,
     },
     source: formatControlPlaneSource(resolved),
+    ...(contextProviders ? { contextProviders } : {}),
+    ...(contextIndex ? { contextIndex } : {}),
+    ...(contextCompression ? { contextCompression } : {}),
     effectiveSources: resolved.effectiveSources,
     effectiveSourceEntries: summarizeEffectiveSourceEntries(resolved),
     effectiveSourceReadiness,
@@ -1973,13 +2071,17 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
     if (command === "explain") {
       const loaded = await deps.loadConfig({ cwd, explicitPath })
-      const shouldResolveExplainControlPlane = host === "opencode"
+      const explainResolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
+      const shouldAttachExplainControlPlaneDiagnostics = host === "opencode"
         || runtimeLane !== undefined
         || (host === "codex" && loaded.config.workflow.kind === "direct")
-      const resolved = shouldResolveExplainControlPlane
-        ? await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
+      const resolved = shouldAttachExplainControlPlaneDiagnostics
+        ? explainResolved
         : null
       const explainConfig = resolved?.config ?? loaded.config
+      const contextIndex = summarizeContextIndex(explainResolved.contextIndex)
+      const contextCompression = summarizeContextCompression(explainResolved.contextCompression)
+      const contextProviders = summarizeContextProviders(explainResolved.contextProviders)
       assertWorkflowSupport(explainConfig, "explain", cliHost)
 
       if (explainConfig.workflow.kind === "direct") {
@@ -2008,6 +2110,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
                 )
                 : explainAllDirect(directConfig),
               null,
+              contextIndex,
+              contextCompression,
+              contextProviders,
             ), null, 2),
             stderr: "",
           }
@@ -2041,6 +2146,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
                 )
                 : explainDirectIntent(directConfig, intent),
               null,
+              contextIndex,
+              contextCompression,
+              contextProviders,
             ),
             null,
             2,
@@ -2082,6 +2190,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
                 )
                 : explainAllForCliHost(loaded.config, cliHost as ExplainCliHost, deps),
               compatibility,
+              contextIndex,
+              contextCompression,
+              contextProviders,
             ), null, 2),
             stderr: "",
         }
@@ -2134,6 +2245,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
                 )
                 : explainPhaseForCliHost(loaded.config, cliHost as ExplainCliHost, phase as BuiltInPhase, deps),
               compatibility,
+              contextIndex,
+              contextCompression,
+              contextProviders,
             ),
             null,
           2,
@@ -2308,7 +2422,13 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           return {
             exitCode: 1,
             stdout: JSON.stringify(
-              withCompatibility({ exitCode: 1 as const, warnings: [], written: [], removed: [] }, compatibilityOverride),
+              withCompatibility(
+                { exitCode: 1 as const, warnings: [], written: [], removed: [] },
+                compatibilityOverride,
+                undefined,
+                undefined,
+                summarizeContextProviders([]),
+              ),
               null,
               2,
             ),
@@ -2338,6 +2458,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           config: prepared.config,
           activePreset: fallback.activePreset,
           laneState: fallback.laneState,
+          contextProviders: fallback.contextProviders,
           effectiveSources: fallback.effectiveSources,
         }
       }
@@ -2359,7 +2480,13 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         return {
           exitCode: 1,
           stdout: JSON.stringify(
-            withCompatibility({ exitCode: 1 as const, warnings: [], written: [], removed: [] }, effectiveCompatibility),
+            withCompatibility(
+              { exitCode: 1 as const, warnings: [], written: [], removed: [] },
+              effectiveCompatibility,
+              undefined,
+              undefined,
+              summarizeContextProviders([]),
+            ),
             null,
             2,
           ),
@@ -2386,7 +2513,11 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
         return {
           exitCode: result.exitCode,
-          stdout: JSON.stringify(withCompatibility(result, effectiveCompatibility), null, 2),
+          stdout: JSON.stringify(
+            withCompatibility(result, effectiveCompatibility, undefined, undefined, summarizeContextProviders([])),
+            null,
+            2,
+          ),
           stderr: joinStderr([
             formatCompatibilityWarning(effectiveCompatibility),
             ...result.warnings,
@@ -2421,7 +2552,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         stdout: JSON.stringify(withCompatibility({
           ...result,
           ...(bootstrappedConfigPath ? { written: [bootstrappedConfigPath, ...result.written] } : {}),
-        }, effectiveCompatibility), null, 2),
+        }, effectiveCompatibility, undefined, undefined, summarizeContextProviders([])), null, 2),
         stderr: joinStderr([
           formatCompatibilityWarning(effectiveCompatibility),
           ...result.warnings,

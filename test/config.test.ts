@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { discoverConfigPath, loadControlPlaneConfig, loadRouterConfig } from "../src/config.js"
+import type { ControlPlaneConfig } from "../src/config.js"
+import { resolveContextProviders } from "../src/context-providers.js"
 
 afterEach(() => {
   vi.doUnmock("../src/capabilities.js")
@@ -35,6 +37,44 @@ describe("discoverConfigPath", () => {
 })
 
 describe("loadControlPlaneConfig", () => {
+  it("allows public ControlPlaneConfig values to omit additive compression fields", () => {
+    const config: ControlPlaneConfig = {
+      workflow: { kind: "superpowers" },
+      settings: {
+        enabled: true,
+        activePreset: "default",
+        laneSelection: { mode: "suggest" },
+        subagentExecution: { mode: "suggest" },
+        commandPrefix: "oms",
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+        superpowersCompatibility: { mode: "warn" },
+      },
+      sourcePresets: {},
+      profiles: {},
+      lanes: {},
+      presets: {
+        default: {
+          label: "Default",
+          short: "def",
+          profiles: {
+            build: { model: "openai/gpt-5" },
+          },
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+    }
+
+    expect(config.settings.contextCompression).toBeUndefined()
+    expect(config.compressionPresets).toBeUndefined()
+  })
+
   it("migrates legacy config into presets.default", async () => {
     const result = await loadControlPlaneConfig({
       cwd: "/workspace/project",
@@ -219,6 +259,509 @@ describe("loadControlPlaneConfig", () => {
     expect(result.config.presets.default.sourceRoutes).toEqual({
       "phase.plan": "gstack",
     })
+  })
+
+  it("loads contextCompression settings and reusable compression presets", async () => {
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "default",
+          "contextCompression": {
+            "preset": "balanced",
+            "mode": "auto",
+            "engine": "hybrid",
+            "inlineLevel": "standard",
+            "moments": {
+              "subagentHandoff": true,
+              "sessionResume": true
+            },
+            "safety": {
+              "allowConditional": false,
+              "requireFreshVerification": true
+            }
+          }
+        },
+        "compressionPresets": {
+          "balanced": {
+            "mode": "suggest",
+            "engine": "hybrid",
+            "inlineLevel": "standard",
+            "moments": {
+              "subagentHandoff": true,
+              "planCheckpoint": true,
+              "reviewCheckpoint": true,
+              "verificationCheckpoint": true,
+              "sessionResume": true,
+              "sourceSwitch": false,
+              "branchIntegration": true
+            },
+            "safety": {
+              "allowConditional": false,
+              "requireFreshVerification": true
+            }
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    })
+
+    expect(result.config.settings.contextCompression).toMatchObject({
+      preset: "balanced",
+      mode: "auto",
+      engine: "hybrid",
+      inlineLevel: "standard",
+    })
+    expect(result.config.compressionPresets.balanced.moments.branchIntegration).toBe(true)
+  })
+
+  it("rejects settings.contextCompression.preset when it references an unknown compression preset", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "settings": {
+            "activePreset": "default",
+            "contextCompression": {
+              "preset": "missing"
+            }
+          },
+          "compressionPresets": {
+            "balanced": {
+              "mode": "suggest",
+              "engine": "hybrid",
+              "inlineLevel": "standard"
+            }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/unknown compression preset|missing/i)
+  })
+
+  it("merges compressionPresets field-by-field across layers", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "compressionPresets": {
+          "balanced": {
+            "mode": "suggest",
+            "engine": "hybrid",
+            "inlineLevel": "standard",
+            "moments": {
+              "planCheckpoint": true,
+              "reviewCheckpoint": true
+            },
+            "safety": {
+              "allowConditional": true,
+              "requireFreshVerification": true
+            }
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Global",
+            "short": "glo",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "compressionPresets": {
+          "balanced": {
+            "mode": "auto",
+            "moments": {
+              "branchIntegration": true
+            },
+            "safety": {
+              "allowConditional": false
+            }
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Project",
+            "short": "prj",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.config.compressionPresets.balanced).toEqual({
+      mode: "auto",
+      engine: "hybrid",
+      inlineLevel: "standard",
+      moments: {
+        subagentHandoff: false,
+        planCheckpoint: true,
+        reviewCheckpoint: true,
+        verificationCheckpoint: false,
+        sessionResume: false,
+        sourceSwitch: false,
+        branchIntegration: true,
+      },
+      safety: {
+        allowConditional: false,
+        requireFreshVerification: true,
+      },
+    })
+  })
+
+  it("loads contextProviders across layered config sources", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "contextProviders": {
+          "memoryBank": {
+            "kind": "file",
+            "enabled": false,
+            "root": ".memorybank",
+            "capabilities": ["recall", "status"]
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Global",
+            "short": "glo",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "contextProviders": {
+          "memoryBank": {
+            "kind": "file",
+            "enabled": true,
+            "root": ".memorybank/project",
+            "capabilities": ["recall", "search", "status"]
+          },
+          "repomix": {
+            "kind": "cli",
+            "enabled": true,
+            "command": "repomix",
+            "args": ["--stdout"],
+            "capabilities": ["pack", "status"]
+          },
+          "graphiti": {
+            "kind": "mcp",
+            "enabled": true,
+            "command": "graphiti-mcp",
+            "capabilities": ["recall", "search", "summarize", "status"]
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Project",
+            "short": "prj",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.config.contextProviders).toEqual({
+      memoryBank: {
+        kind: "file",
+        enabled: true,
+        root: ".memorybank/project",
+        capabilities: ["recall", "search", "status"],
+      },
+      repomix: {
+        kind: "cli",
+        enabled: true,
+        command: "repomix",
+        args: ["--stdout"],
+        capabilities: ["pack", "status"],
+      },
+      graphiti: {
+        kind: "mcp",
+        enabled: true,
+        command: "graphiti-mcp",
+        capabilities: ["recall", "search", "summarize", "status"],
+      },
+    })
+  })
+
+  it("keeps global file-provider roots anchored to the layer that defined them", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "contextProviders": {
+          "memoryBank": {
+            "kind": "file",
+            "enabled": true,
+            "root": ".memorybank",
+            "capabilities": ["recall", "search", "status"]
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Global",
+            "short": "glo",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "contextProviders": {
+          "repomix": {
+            "kind": "cli",
+            "enabled": true,
+            "command": "repomix",
+            "args": ["--stdout"],
+            "capabilities": ["pack", "status"]
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Project",
+            "short": "prj",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    const checkedPaths: string[] = []
+    const providers = await resolveContextProviders({
+      baseDir: "/workspace/project",
+      config: result.config.contextProviders,
+      pathExists: async (filePath) => {
+        checkedPaths.push(filePath)
+        return true
+      },
+    })
+
+    expect(checkedPaths).toEqual(["/home/tester/.config/oh-my-superagents/.memorybank"])
+    expect(providers).toMatchObject([
+      {
+        id: "memoryBank",
+        kind: "file",
+        root: "/home/tester/.config/oh-my-superagents/.memorybank",
+        available: true,
+      },
+      {
+        id: "repomix",
+        kind: "cli",
+        command: "repomix",
+        args: ["--stdout"],
+      },
+    ])
+  })
+
+  it("rejects contextProviders with an unknown provider kind", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "contextProviders": {
+            "memoryBank": {
+              "kind": "socket",
+              "enabled": true,
+              "command": "memory-bank",
+              "capabilities": ["recall", "status"]
+            }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/contextProviders|kind|socket|Invalid discriminator value/i)
+  })
+
+  it("rejects file contextProviders that omit required roots", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "contextProviders": {
+            "memoryBank": {
+              "kind": "file",
+              "enabled": true,
+              "capabilities": ["recall", "status"]
+            }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/contextProviders|root|required/i)
+  })
+
+  it("rejects settings.commandPrefix values that are not safe command names", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "settings": {
+            "commandPrefix": "OMS invalid"
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/commandPrefix|Invalid|safe/i)
+  })
+
+  it("rejects settings.commands overrides with unsafe command names or aliases", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "settings": {
+            "commands": {
+              "status": {
+                "name": "Status",
+                "aliases": ["ok", "bad alias"]
+              }
+            }
+          },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/commands|status|name|aliases|Invalid/i)
+  })
+
+  it("rejects presets with unsafe short names", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "Bad Short",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/presets|short|Invalid/i)
   })
 
   it("rejects legacy superpowers canonical route ids in source mappings", async () => {
@@ -696,6 +1239,138 @@ describe("loadControlPlaneConfig", () => {
     expect(result.config.settings.commandPrefix).toBe("team")
     expect(result.config.presets).toHaveProperty("global")
     expect(result.config.presets).toHaveProperty("project")
+  })
+
+  it("keeps the global layer when --config targets an existing project config path", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "global"
+        },
+        "compressionPresets": {
+          "balanced": {
+            "mode": "suggest",
+            "engine": "hybrid",
+            "inlineLevel": "standard"
+          }
+        },
+        "presets": {
+          "global": {
+            "label": "Global",
+            "short": "glo",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "project"
+        },
+        "presets": {
+          "project": {
+            "label": "Project",
+            "short": "prj",
+            "profiles": {
+              "review": { "model": "anthropic/claude-sonnet-4-5" }
+            },
+            "routes": {},
+            "defaultRoute": "review"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.path).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(result.sources).toEqual([
+      "/home/tester/.config/oh-my-superagents/config.jsonc",
+      "/workspace/project/oh-my-superagents.config.jsonc",
+    ])
+    expect(result.config.settings.activePreset).toBe("project")
+    expect(result.config.presets).toHaveProperty("global")
+    expect(result.config.presets).toHaveProperty("project")
+    expect(result.config.compressionPresets).toHaveProperty("balanced")
+  })
+
+  it("treats settings.contextCompression.preset null as clearing an inherited lower-priority preset", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "default",
+          "contextCompression": {
+            "preset": "balanced",
+            "mode": "suggest",
+            "engine": "hybrid",
+            "inlineLevel": "standard",
+            "moments": {
+              "subagentHandoff": true,
+              "sessionResume": true
+            },
+            "safety": {
+              "allowConditional": false,
+              "requireFreshVerification": true
+            }
+          }
+        },
+        "compressionPresets": {
+          "balanced": {
+            "mode": "suggest",
+            "engine": "hybrid",
+            "inlineLevel": "standard",
+            "moments": {
+              "subagentHandoff": true
+            },
+            "safety": {
+              "allowConditional": false,
+              "requireFreshVerification": true
+            }
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "contextCompression": {
+            "preset": null,
+            "mode": "auto"
+          }
+        },
+        "presets": {}
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.config.settings.contextCompression.preset).toBeUndefined()
+    expect(result.config.settings.contextCompression.mode).toBe("auto")
+    expect(result.config.settings.contextCompression.engine).toBe("hybrid")
+    expect(result.config.settings.contextCompression.moments.subagentHandoff).toBe(true)
   })
 
   it("loads a layered config with global profiles, global lanes, preset lane constraints, settings.defaultLane, and laneSelection.mode", async () => {
@@ -1257,6 +1932,9 @@ describe("loadControlPlaneConfig", () => {
                   mode?: { enum?: string[]; default?: string }
                 }
               }
+              contextCompression?: {
+                $ref?: string
+              }
               commands?: {
                 properties?: {
                   status?: {
@@ -1317,6 +1995,11 @@ describe("loadControlPlaneConfig", () => {
             description?: { type?: string; minLength?: number }
           }
         }
+        contextCompression?: {
+          properties?: {
+            preset?: { type?: Array<string> | string; minLength?: number }
+          }
+        }
       }
     }
 
@@ -1351,6 +2034,9 @@ describe("loadControlPlaneConfig", () => {
     expect(layeredShape?.properties?.settings?.properties?.subagentExecution?.properties?.mode?.default).toBe(
       "suggest",
     )
+    expect(layeredShape?.properties?.settings?.properties?.contextCompression?.$ref).toBe("#/$defs/contextCompression")
+    expect(schema.$defs?.contextCompression?.properties?.preset?.type).toEqual(["string", "null"])
+    expect(schema.$defs?.contextCompression?.properties?.preset?.minLength).toBe(1)
     expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.extends?.type).toBe("string")
     expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.extends?.minLength).toBe(1)
     expect(layeredShape?.properties?.presets?.additionalProperties?.properties?.short?.pattern).toBe(

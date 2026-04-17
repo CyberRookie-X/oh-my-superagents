@@ -5,6 +5,7 @@ import path from "node:path"
 import { parse, type ParseError } from "jsonc-parser"
 import { z } from "zod"
 import { isSourceRouteSupported } from "./capabilities.js"
+import { CONTEXT_PROVIDER_CAPABILITIES, type ContextProviderCapability } from "./context-manifest.js"
 import {
   SUPERPOWERS_COMPATIBILITY_MODES,
   type SuperpowersCompatibilityMode,
@@ -27,6 +28,7 @@ const BUILT_IN_PHASE_SET = new Set<string>(SUPERPOWERS_ROUTE_CATALOG)
 export const SAFE_NAME_PATTERN = /^[a-z0-9-]+$/
 
 export const CONTROL_PLANE_COMMAND_KEYS = ["status", "use", "disable", "sync", "doctor"] as const
+const CONTEXT_PROVIDER_BASE_DIR_KEY = "baseDir" as const
 
 const LEGACY_ROUTER_ONLY_KEYS = [
   "routes",
@@ -61,6 +63,89 @@ const SubagentExecutionSchema = z
     mode: z.enum(["manual", "suggest", "auto"]).default("suggest"),
   })
   .strict()
+
+const ContextCompressionModeSchema = z.enum(["manual", "suggest", "auto"])
+
+const ContextCompressionEngineSchema = z.enum(["builtin", "external", "hybrid"])
+
+const ContextInlineLevelSchema = z.enum(["minimal", "standard", "full"])
+
+const ContextCompressionMomentsSchema = z
+  .object({
+    subagentHandoff: z.boolean().optional(),
+    planCheckpoint: z.boolean().optional(),
+    reviewCheckpoint: z.boolean().optional(),
+    verificationCheckpoint: z.boolean().optional(),
+    sessionResume: z.boolean().optional(),
+    sourceSwitch: z.boolean().optional(),
+    branchIntegration: z.boolean().optional(),
+  })
+  .strict()
+
+const ContextCompressionSafetySchema = z
+  .object({
+    allowConditional: z.boolean().optional(),
+    requireFreshVerification: z.boolean().optional(),
+  })
+  .strict()
+
+const ContextCompressionSchema = z
+  .object({
+    preset: z.union([z.string().min(1), z.null()]).optional(),
+    mode: ContextCompressionModeSchema.optional(),
+    engine: ContextCompressionEngineSchema.optional(),
+    inlineLevel: ContextInlineLevelSchema.optional(),
+    moments: ContextCompressionMomentsSchema.optional(),
+    safety: ContextCompressionSafetySchema.optional(),
+  })
+  .strict()
+
+const CompressionPresetSchema = z
+  .object({
+    mode: ContextCompressionModeSchema.optional(),
+    engine: ContextCompressionEngineSchema.optional(),
+    inlineLevel: ContextInlineLevelSchema.optional(),
+    moments: ContextCompressionMomentsSchema.optional(),
+    safety: ContextCompressionSafetySchema.optional(),
+  })
+  .strict()
+
+const ContextProviderCapabilitySchema = z.enum(CONTEXT_PROVIDER_CAPABILITIES)
+
+const FileContextProviderConfigSchema = z
+  .object({
+    kind: z.literal("file"),
+    enabled: z.boolean(),
+    root: z.string().min(1),
+    capabilities: z.array(ContextProviderCapabilitySchema),
+  })
+  .strict()
+
+const CliContextProviderConfigSchema = z
+  .object({
+    kind: z.literal("cli"),
+    enabled: z.boolean(),
+    command: z.string().min(1),
+    args: z.array(z.string()).optional(),
+    capabilities: z.array(ContextProviderCapabilitySchema),
+  })
+  .strict()
+
+const McpContextProviderConfigSchema = z
+  .object({
+    kind: z.literal("mcp"),
+    enabled: z.boolean(),
+    command: z.string().min(1),
+    args: z.array(z.string()).optional(),
+    capabilities: z.array(ContextProviderCapabilitySchema),
+  })
+  .strict()
+
+const ContextProviderConfigSchema = z.discriminatedUnion("kind", [
+  FileContextProviderConfigSchema,
+  CliContextProviderConfigSchema,
+  McpContextProviderConfigSchema,
+])
 
 const LaneSchema = z
   .object({
@@ -113,10 +198,12 @@ const LegacyRouterConfigSchema = z
   })
   .strict()
 
+const SafeNameSchema = z.string().min(1).regex(SAFE_NAME_PATTERN)
+
 const CommandEntryOverrideSchema = z
   .object({
-    name: z.string().min(1).optional(),
-    aliases: z.array(z.string().min(1)).optional(),
+    name: SafeNameSchema.optional(),
+    aliases: z.array(SafeNameSchema).optional(),
   })
   .strict()
 
@@ -137,7 +224,8 @@ const LayeredSettingsSchema = z
     defaultLane: z.union([z.string().min(1), z.null()]).optional(),
     laneSelection: LaneSelectionSchema.optional(),
     subagentExecution: SubagentExecutionSchema.optional(),
-    commandPrefix: z.string().min(1).optional(),
+    contextCompression: ContextCompressionSchema.optional(),
+    commandPrefix: SafeNameSchema.optional(),
     commands: CommandsOverrideSchema.optional(),
     superpowersCompatibility: CompatibilitySchema.optional(),
   })
@@ -146,7 +234,7 @@ const LayeredSettingsSchema = z
 const ControlPlanePresetSchema = z
   .object({
     label: z.string().min(1),
-    short: z.string().min(1),
+    short: SafeNameSchema,
     description: z.string().min(1).optional(),
     extends: z.string().min(1).optional(),
     profiles: z.record(z.string().min(1), ProfileSchema).optional(),
@@ -164,6 +252,8 @@ const LayeredControlPlaneConfigSchema = z
     workflow: WorkflowSchema.optional(),
     settings: LayeredSettingsSchema.optional(),
     sourcePresets: z.record(z.string().min(1), SourcePresetSchema).optional(),
+    compressionPresets: z.record(z.string().min(1), CompressionPresetSchema).optional(),
+    contextProviders: z.record(z.string().min(1), ContextProviderConfigSchema).optional(),
     profiles: z.record(z.string().min(1), ProfileSchema).optional(),
     lanes: z.record(z.string().min(1), LaneSchema).optional(),
     presets: z.record(z.string().min(1), ControlPlanePresetSchema),
@@ -218,9 +308,41 @@ export type ControlPlaneCommandConfig = {
 export type ControlPlaneProfile = z.infer<typeof ProfileSchema>
 export type ControlPlaneLaneSelection = z.infer<typeof LaneSelectionSchema>
 export type ControlPlaneSubagentExecution = z.infer<typeof SubagentExecutionSchema>
+export type ControlPlaneContextCompressionMode = z.infer<typeof ContextCompressionModeSchema>
+export type ControlPlaneContextCompressionEngine = z.infer<typeof ContextCompressionEngineSchema>
+export type ControlPlaneContextInlineLevel = z.infer<typeof ContextInlineLevelSchema>
+type LayeredContextCompression = z.infer<typeof ContextCompressionSchema>
+type LayeredCompressionPreset = z.infer<typeof CompressionPresetSchema>
+export type ControlPlaneContextCompressionMoments = Required<z.infer<typeof ContextCompressionMomentsSchema>>
+export type ControlPlaneContextCompressionSafety = Required<z.infer<typeof ContextCompressionSafetySchema>>
+export type ControlPlaneContextCompression = Omit<Required<LayeredContextCompression>, "preset" | "moments" | "safety"> & {
+  preset?: string
+  moments: ControlPlaneContextCompressionMoments
+  safety: ControlPlaneContextCompressionSafety
+}
+export type ControlPlaneCompressionPreset = Omit<ControlPlaneContextCompression, "preset">
 export type ControlPlaneLane = z.infer<typeof LaneSchema>
 export type ControlPlanePreset = z.infer<typeof ControlPlanePresetSchema>
 export type ControlPlaneSourcePreset = SourcePresetConfig
+export type ControlPlaneContextProviderCapability = ContextProviderCapability
+type ParsedControlPlaneFileContextProviderConfig = z.infer<typeof FileContextProviderConfigSchema>
+type ParsedControlPlaneCliContextProviderConfig = z.infer<typeof CliContextProviderConfigSchema>
+type ParsedControlPlaneMcpContextProviderConfig = z.infer<typeof McpContextProviderConfigSchema>
+export type ControlPlaneFileContextProviderConfig = Omit<ParsedControlPlaneFileContextProviderConfig, "capabilities"> & {
+  capabilities: readonly ControlPlaneContextProviderCapability[]
+}
+export type ControlPlaneCliContextProviderConfig = Omit<ParsedControlPlaneCliContextProviderConfig, "args" | "capabilities"> & {
+  args?: readonly string[]
+  capabilities: readonly ControlPlaneContextProviderCapability[]
+}
+export type ControlPlaneMcpContextProviderConfig = Omit<ParsedControlPlaneMcpContextProviderConfig, "args" | "capabilities"> & {
+  args?: readonly string[]
+  capabilities: readonly ControlPlaneContextProviderCapability[]
+}
+export type ControlPlaneContextProviderConfig =
+  | ControlPlaneFileContextProviderConfig
+  | ControlPlaneCliContextProviderConfig
+  | ControlPlaneMcpContextProviderConfig
 export type ControlPlaneConfig = {
   workflow: WorkflowConfig
   settings: {
@@ -229,11 +351,14 @@ export type ControlPlaneConfig = {
     defaultLane?: string
     laneSelection: ControlPlaneLaneSelection
     subagentExecution: ControlPlaneSubagentExecution
+    contextCompression?: ControlPlaneContextCompression
     commandPrefix: string
     commands: Record<ControlPlaneCommandKey, ControlPlaneCommandConfig>
-      superpowersCompatibility: SuperpowersCompatibilityConfig
-    }
+    superpowersCompatibility: SuperpowersCompatibilityConfig
+  }
   sourcePresets: Record<string, ControlPlaneSourcePreset>
+  compressionPresets?: Record<string, ControlPlaneCompressionPreset>
+  contextProviders?: Record<string, ControlPlaneContextProviderConfig>
   profiles: Record<string, ControlPlaneProfile>
   lanes: Record<string, ControlPlaneLane>
   presets: Record<string, ControlPlanePreset>
@@ -294,6 +419,69 @@ const DEFAULT_COMMANDS: Record<ControlPlaneCommandKey, ControlPlaneCommandConfig
   disable: { name: "off", aliases: ["o"] },
   sync: { name: "sync", aliases: ["sy"] },
   doctor: { name: "doctor", aliases: ["dr"] },
+}
+
+const DEFAULT_CONTEXT_COMPRESSION_MOMENTS: ControlPlaneContextCompressionMoments = {
+  subagentHandoff: false,
+  planCheckpoint: false,
+  reviewCheckpoint: false,
+  verificationCheckpoint: false,
+  sessionResume: false,
+  sourceSwitch: false,
+  branchIntegration: false,
+}
+
+const DEFAULT_CONTEXT_COMPRESSION_SAFETY: ControlPlaneContextCompressionSafety = {
+  allowConditional: false,
+  requireFreshVerification: true,
+}
+
+function finalizeContextCompressionMoments(
+  moments: z.infer<typeof ContextCompressionMomentsSchema> | undefined,
+): ControlPlaneContextCompressionMoments {
+  return {
+    ...DEFAULT_CONTEXT_COMPRESSION_MOMENTS,
+    ...moments,
+  }
+}
+
+function finalizeContextCompressionSafety(
+  safety: z.infer<typeof ContextCompressionSafetySchema> | undefined,
+): ControlPlaneContextCompressionSafety {
+  return {
+    ...DEFAULT_CONTEXT_COMPRESSION_SAFETY,
+    ...safety,
+  }
+}
+
+function finalizeContextCompression(
+  compression: LayeredContextCompression | undefined,
+): ControlPlaneContextCompression {
+  return {
+    ...(typeof compression?.preset === "string" ? { preset: compression.preset } : {}),
+    mode: compression?.mode ?? "manual",
+    engine: compression?.engine ?? "builtin",
+    inlineLevel: compression?.inlineLevel ?? "minimal",
+    moments: finalizeContextCompressionMoments(compression?.moments),
+    safety: finalizeContextCompressionSafety(compression?.safety),
+  }
+}
+
+function finalizeCompressionPresets(
+  compressionPresets: Record<string, LayeredCompressionPreset> | undefined,
+): Record<string, ControlPlaneCompressionPreset> {
+  return Object.fromEntries(
+    Object.entries(compressionPresets ?? {}).map(([key, preset]) => [
+      key,
+      {
+        mode: preset.mode ?? "manual",
+        engine: preset.engine ?? "builtin",
+        inlineLevel: preset.inlineLevel ?? "minimal",
+        moments: finalizeContextCompressionMoments(preset.moments),
+        safety: finalizeContextCompressionSafety(preset.safety),
+      },
+    ]),
+  )
 }
 
 export async function defaultExists(filePath: string) {
@@ -381,11 +569,14 @@ export function createDefaultControlPlaneConfig(): ControlPlaneConfig {
       activePreset: "default",
       laneSelection: { mode: "suggest" },
       subagentExecution: { mode: "suggest" },
+      contextCompression: finalizeContextCompression(undefined),
       commandPrefix: "oms",
       commands: synthesizeCommands(undefined),
       superpowersCompatibility: { mode: "warn" },
     },
     sourcePresets: {},
+    compressionPresets: {},
+    contextProviders: {},
     profiles: cloneProfiles(defaultPreset.profiles) ?? {},
     lanes: {},
     presets: {
@@ -399,7 +590,10 @@ function hasOwnKey(value: object, key: string) {
 }
 
 function isMixedShape(rawConfig: Record<string, unknown>) {
-  const isLayered = hasOwnKey(rawConfig, "settings") || hasOwnKey(rawConfig, "presets")
+  const isLayered = hasOwnKey(rawConfig, "settings")
+    || hasOwnKey(rawConfig, "presets")
+    || hasOwnKey(rawConfig, "compressionPresets")
+    || hasOwnKey(rawConfig, "contextProviders")
   const hasLegacyKeys = LEGACY_ROUTER_ONLY_KEYS.some((key) => hasOwnKey(rawConfig, key))
   return isLayered && hasLegacyKeys
 }
@@ -427,7 +621,12 @@ function migrateLegacyConfig(rawConfig: unknown): LayeredControlPlaneConfigInput
 }
 
 function getSourceFormat(rawConfig: Record<string, unknown>): ControlPlaneSourceFormat {
-  return hasOwnKey(rawConfig, "settings") || hasOwnKey(rawConfig, "presets") ? "layered" : "legacy"
+  return hasOwnKey(rawConfig, "settings")
+    || hasOwnKey(rawConfig, "presets")
+    || hasOwnKey(rawConfig, "compressionPresets")
+    || hasOwnKey(rawConfig, "contextProviders")
+    ? "layered"
+    : "legacy"
 }
 
 export function normalizeRawConfig(rawConfig: unknown): LayeredControlPlaneConfigInput {
@@ -440,7 +639,12 @@ export function normalizeRawConfig(rawConfig: unknown): LayeredControlPlaneConfi
     throw new Error("Invalid mixed-shape config: do not mix layered settings/presets with legacy routing keys")
   }
 
-  if (hasOwnKey(rawObject, "settings") || hasOwnKey(rawObject, "presets")) {
+  if (
+    hasOwnKey(rawObject, "settings")
+    || hasOwnKey(rawObject, "presets")
+    || hasOwnKey(rawObject, "compressionPresets")
+    || hasOwnKey(rawObject, "contextProviders")
+  ) {
     return LayeredControlPlaneConfigSchema.parse(rawObject)
   }
 
@@ -451,6 +655,22 @@ function mergeLayeredConfigs(
   lowerPriority: LayeredControlPlaneConfigInput,
   higherPriority: LayeredControlPlaneConfigInput,
 ): LayeredControlPlaneConfigInput {
+  const mergedContextCompression =
+    lowerPriority.settings?.contextCompression || higherPriority.settings?.contextCompression
+      ? {
+          ...lowerPriority.settings?.contextCompression,
+          ...higherPriority.settings?.contextCompression,
+          moments: {
+            ...lowerPriority.settings?.contextCompression?.moments,
+            ...higherPriority.settings?.contextCompression?.moments,
+          },
+          safety: {
+            ...lowerPriority.settings?.contextCompression?.safety,
+            ...higherPriority.settings?.contextCompression?.safety,
+          },
+        }
+      : undefined
+
   const mergedSettings = {
     ...lowerPriority.settings,
     ...higherPriority.settings,
@@ -458,10 +678,46 @@ function mergeLayeredConfigs(
       ...lowerPriority.settings?.commands,
       ...higherPriority.settings?.commands,
     },
+    contextCompression: mergedContextCompression,
   }
 
   if (higherPriority.settings && hasOwnKey(higherPriority.settings, "defaultLane") && higherPriority.settings.defaultLane === null) {
     mergedSettings.defaultLane = undefined
+  }
+
+  if (
+    mergedContextCompression
+    && higherPriority.settings?.contextCompression
+    && hasOwnKey(higherPriority.settings.contextCompression, "preset")
+    && higherPriority.settings.contextCompression.preset === null
+  ) {
+    mergedContextCompression.preset = undefined
+  }
+
+  const mergedCompressionPresets: NonNullable<LayeredControlPlaneConfigInput["compressionPresets"]> = {}
+  for (const presetKey of new Set([
+    ...Object.keys(lowerPriority.compressionPresets ?? {}),
+    ...Object.keys(higherPriority.compressionPresets ?? {}),
+  ])) {
+    const lowerPreset = lowerPriority.compressionPresets?.[presetKey]
+    const higherPreset = higherPriority.compressionPresets?.[presetKey]
+
+    if (!lowerPreset && !higherPreset) {
+      continue
+    }
+
+    mergedCompressionPresets[presetKey] = {
+      ...lowerPreset,
+      ...higherPreset,
+      moments: {
+        ...lowerPreset?.moments,
+        ...higherPreset?.moments,
+      },
+      safety: {
+        ...lowerPreset?.safety,
+        ...higherPreset?.safety,
+      },
+    }
   }
 
   return {
@@ -470,6 +726,11 @@ function mergeLayeredConfigs(
     sourcePresets: {
       ...lowerPriority.sourcePresets,
       ...higherPriority.sourcePresets,
+    },
+    compressionPresets: mergedCompressionPresets,
+    contextProviders: {
+      ...lowerPriority.contextProviders,
+      ...higherPriority.contextProviders,
     },
     profiles: {
       ...lowerPriority.profiles,
@@ -502,6 +763,17 @@ function validateLaneReferences(config: ControlPlaneConfig) {
   }
 }
 
+function validateContextCompressionPresetReferences(config: ControlPlaneConfig) {
+  const presetName = config.settings.contextCompression?.preset
+  if (!presetName) {
+    return
+  }
+
+  if (!config.compressionPresets?.[presetName]) {
+    throw new Error(`Unknown compression preset: ${presetName}`)
+  }
+}
+
 function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneConfig {
   const finalized: ControlPlaneConfig = {
     workflow: merged.workflow ?? { kind: "superpowers" },
@@ -511,11 +783,14 @@ function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneCon
       defaultLane: merged.settings?.defaultLane ?? undefined,
       laneSelection: merged.settings?.laneSelection ?? { mode: "suggest" },
       subagentExecution: merged.settings?.subagentExecution ?? { mode: "suggest" },
+      contextCompression: finalizeContextCompression(merged.settings?.contextCompression),
       commandPrefix: merged.settings?.commandPrefix ?? "oms",
       commands: synthesizeCommands(merged.settings?.commands),
       superpowersCompatibility: merged.settings?.superpowersCompatibility ?? { mode: "warn" },
     },
     sourcePresets: merged.sourcePresets ?? {},
+    compressionPresets: finalizeCompressionPresets(merged.compressionPresets),
+    contextProviders: cloneContextProviders(merged.contextProviders),
     profiles: cloneProfiles(merged.profiles) ?? {},
     lanes: cloneLanes(merged.lanes ?? {}),
     presets: merged.presets,
@@ -523,7 +798,72 @@ function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneCon
 
   validateDirectIntentIds(finalized.workflow)
   validateLaneReferences(finalized)
+  validateContextCompressionPresetReferences(finalized)
   return finalized
+}
+
+function attachContextProviderBaseDirs(
+  providers: Record<string, ControlPlaneContextProviderConfig> | undefined,
+  baseDir: string,
+): void {
+  for (const provider of Object.values(providers ?? {})) {
+    Object.defineProperty(provider, CONTEXT_PROVIDER_BASE_DIR_KEY, {
+      value: baseDir,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    })
+  }
+}
+
+function getContextProviderBaseDir(
+  provider: ControlPlaneContextProviderConfig,
+): string | undefined {
+  const baseDir = Reflect.get(provider, CONTEXT_PROVIDER_BASE_DIR_KEY)
+  return typeof baseDir === "string" ? baseDir : undefined
+}
+
+function cloneContextProvider(
+  provider: ControlPlaneContextProviderConfig,
+): ControlPlaneContextProviderConfig {
+  const baseDir = getContextProviderBaseDir(provider)
+
+  if (provider.kind === "file") {
+    const cloned = {
+      ...provider,
+      capabilities: [...provider.capabilities],
+    }
+
+    if (baseDir) {
+      attachContextProviderBaseDirs({ provider: cloned }, baseDir)
+    }
+
+    return cloned
+  }
+
+  const cloned = {
+    ...provider,
+    args: provider.args ? [...provider.args] : undefined,
+    capabilities: [...provider.capabilities],
+  }
+
+  if (baseDir) {
+    attachContextProviderBaseDirs({ provider: cloned }, baseDir)
+  }
+
+  return cloned
+}
+
+function cloneContextProviders(
+  providers: Record<string, ControlPlaneContextProviderConfig> | undefined,
+): Record<string, ControlPlaneContextProviderConfig> {
+  if (!providers) {
+    return {}
+  }
+
+  return Object.fromEntries(
+    Object.entries(providers).map(([providerId, provider]) => [providerId, cloneContextProvider(provider)]),
+  )
 }
 
 function clonePreset(preset: ControlPlanePreset): ControlPlanePreset {
@@ -727,9 +1067,12 @@ export async function readControlPlaneSourceDocument(
 
   const rawObject = rawConfig as Record<string, unknown>
 
+  const config = normalizeRawConfig(rawObject)
+  attachContextProviderBaseDirs(config.contextProviders, path.dirname(filePath))
+
   return {
     format: getSourceFormat(rawObject),
-    config: normalizeRawConfig(rawObject),
+    config,
   }
 }
 
@@ -803,15 +1146,39 @@ export async function loadControlPlaneConfig(
   const exists = input.exists ?? defaultExists
   const reader = input.readFile ?? defaultReadFile
   const homeDirectory = input.homeDir ?? homedir()
+  const globalPath = getGlobalConfigPath(homeDirectory)
+  const projectPath = getProjectConfigPath(input.cwd)
+  let overlayPath: string | undefined
+  let sources: string[]
 
-  const sources = input.explicitPath
-    ? ((await exists(input.explicitPath)) ? [input.explicitPath] : [])
-    : (
-        await Promise.all([
-          getGlobalConfigPath(homeDirectory),
-          getProjectConfigPath(input.cwd),
-        ].map(async (filePath) => ((await exists(filePath)) ? filePath : undefined)))
-      ).filter((filePath): filePath is string => Boolean(filePath))
+  if (input.explicitPath) {
+    if (input.explicitPath === projectPath) {
+      const [explicitExists, globalExists] = await Promise.all([
+        exists(input.explicitPath),
+        exists(globalPath),
+      ])
+
+      if (explicitExists) {
+        sources = globalExists
+          ? [globalPath, input.explicitPath]
+          : [input.explicitPath]
+      } else if (globalExists) {
+        overlayPath = input.explicitPath
+        sources = [globalPath]
+      } else {
+        sources = []
+      }
+    } else {
+      sources = (await exists(input.explicitPath)) ? [input.explicitPath] : []
+    }
+  } else {
+    sources = (
+      await Promise.all([
+        globalPath,
+        projectPath,
+      ].map(async (filePath) => ((await exists(filePath)) ? filePath : undefined)))
+    ).filter((filePath): filePath is string => Boolean(filePath))
+  }
 
   if (sources.length === 0) {
     throw new MissingControlPlaneConfigError()
@@ -825,12 +1192,18 @@ export async function loadControlPlaneConfig(
     merged = merged ? mergeLayeredConfigs(merged, loaded) : loaded
   }
 
+  if (overlayPath) {
+    const overlayConfig: LayeredControlPlaneConfigInput = { presets: {} }
+    layers.push({ path: overlayPath, config: overlayConfig })
+    merged = merged ? mergeLayeredConfigs(merged, overlayConfig) : overlayConfig
+  }
+
   const config = resolvePresetReuse(finalizeConfig(merged ?? { presets: {} }))
   validateSourceRouting(config)
   validateLaneTargets(config)
 
   return {
-    path: sources[sources.length - 1]!,
+    path: overlayPath ?? sources[sources.length - 1]!,
     sources,
     layers,
     hasRealSource: true,
