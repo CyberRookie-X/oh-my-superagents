@@ -34,6 +34,12 @@ export function createContextArtifact(input: ContextArtifact): ContextArtifact {
   return { ...input }
 }
 
+export function isAuthoritativeOrAdvisoryArtifact(
+  artifact: Pick<ContextArtifact, "authority">,
+) {
+  return artifact.authority === "authoritative" || artifact.authority === "advisory"
+}
+
 export function isContextArtifactFresh(input: {
   headCommit?: string
   reviewedCommit?: string

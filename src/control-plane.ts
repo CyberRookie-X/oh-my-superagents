@@ -4,6 +4,7 @@ import {
   BUILT_IN_PHASES,
   type ControlPlaneCommandKey,
   type ControlPlaneConfig,
+  type LoadedControlPlaneConfig,
   type ControlPlanePreset,
   defaultExists,
   defaultReadFile,
@@ -19,6 +20,13 @@ import {
   readControlPlaneSourceDocument,
   resolvePresetReuse,
 } from "./config.js"
+import { clonePolicyRules } from "./policy-families.js"
+import {
+  resolvePolicyFamilies,
+  type ResolvedPolicyFamilies,
+  type RuntimeSelectorProvenance,
+} from "./policy-resolution.js"
+import { buildRuntimeContextSnapshot, matchesPolicySelector } from "./policy-selectors.js"
 import {
   deriveLifecycleStage,
   type ContextLifecycleStage,
@@ -39,12 +47,14 @@ import {
 } from "./context-packs.js"
 import { buildContextIndex, summarizeContextProviders, type ContextIndex } from "./context-index.js"
 import { listLaneExecutionUnits } from "./lane-execution.js"
+import { classifyOpenSpecArtifact } from "./openspec.js"
 import { resolveEffectiveSources, resolveRoute, type BuiltInPhase } from "./router.js"
 import type { SuperpowersCompatibilityResult, SupportedSuperpowersHost } from "./superpowers-compatibility.js"
 import type { ProjectionReadiness } from "./upstream-readiness.js"
 import {
   getWorkflowSourceEntry,
   normalizeWorkflowSourceRoutes,
+  WORKFLOW_SOURCE_KINDS,
   type CanonicalRouteId,
   type WorkflowSourceEntry,
   type WorkflowSourceKind,
@@ -61,7 +71,14 @@ const NAME_PATTERN = /^[a-z0-9-]+$/
 export type ResolveControlPlaneInput = LoadControlPlaneConfigInput & {
   command: ControlPlaneCommandKey
   runtimeLane?: string
+  runtimeLifecycleStage?: ContextLifecycleStage
+  runtimeWorkflowSource?: WorkflowSourceKind
+  runtimeRelativePath?: string
+  runtimeWorkloadTags?: string[]
+  runtimeModalityRequirements?: string[]
+  runtimeAgentRole?: "primary" | "subagent"
   now?: string
+  loadControlPlaneConfig?: (input: LoadControlPlaneConfigInput) => Promise<LoadedControlPlaneConfig>
   buildContextIndex?: (input: { cwd: string; contextProviders?: readonly ResolvedContextProvider[] }) => Promise<ContextIndex>
   resolveContextProviders?: (input: ResolveContextProvidersInput) => Promise<ResolvedContextProvider[]>
 }
@@ -82,6 +99,7 @@ export type ResolvedControlPlane = {
     | { kind: "default"; hasRealSource: false; sources: [] }
     | { kind: "file"; hasRealSource: true; path?: string; sources: string[] }
   config: ControlPlaneConfig
+  recovery?: LoadedControlPlaneConfig["recovery"]
   activePreset: {
     key: string
     preset: ControlPlanePreset
@@ -105,6 +123,8 @@ export type ResolvedControlPlane = {
   }
   contextProviders: ResolvedContextProvider[]
   contextIndex?: ContextIndex
+  policyResolution?: ResolvedPolicyFamilies
+  policyDiagnostics?: PolicyDiagnostics
   contextCompression?: {
     policy: EffectiveContextCompressionPolicy
     selection: EffectiveContextPackSelection & { lifecycleStage: ContextLifecycleStage }
@@ -144,6 +164,19 @@ export type EffectiveSourceReadinessEntry = WorkflowSourceEntry & {
 
 export type EffectiveSourceReadiness = Partial<Record<CanonicalRouteId, EffectiveSourceReadinessEntry>>
 
+export type SourceToolRoleExplainability = {
+  workflowSources: WorkflowSourceKind[]
+  artifactDialects: string[]
+  externalCapabilityScope: {
+    included: string[]
+    excluded: string[]
+  }
+  lines: string[]
+}
+
+const EXTERNAL_CAPABILITY_SCOPE = ["user-installed skills", "plugins", "MCPs", "providers"] as const
+const EXCLUDED_EXTERNAL_CAPABILITY_SCOPE = ["upstream workflow-internal skills"] as const
+
 function isSupportedUnavailableReadinessEntry(
   entry: EffectiveSourceReadinessEntry | undefined,
 ): entry is EffectiveSourceReadinessEntry & {
@@ -172,6 +205,13 @@ export type SubagentExecutionDiagnostics = {
   mode: ControlPlaneConfig["settings"]["subagentExecution"]["mode"]
   availableLanes: string[]
   commandsByLane: Record<string, string>
+}
+
+export type PolicyDiagnostics = {
+  authorityWorkloadMappingCount: number
+  authorityRuleCount: number
+  evidenceDetectedPathCount: number
+  evidenceIgnoredForRuntime: boolean
 }
 
 const STAGE_1_SUGGESTION_MESSAGE =
@@ -426,6 +466,38 @@ export async function summarizeEffectiveSourceReadiness(input: {
   )
 
   return Object.fromEntries(readinessEntries) as EffectiveSourceReadiness
+}
+
+export function summarizeSourceToolRoleExplainability(
+  resolved: ResolvedControlPlane,
+): SourceToolRoleExplainability {
+  const workflowSources = [...new Set(
+    Object.values(summarizeEffectiveSourceEntries(resolved))
+      .flatMap((entry) => (entry ? [entry.source] : [])),
+  )].sort((left, right) => WORKFLOW_SOURCE_KINDS.indexOf(left) - WORKFLOW_SOURCE_KINDS.indexOf(right))
+
+  const artifactDialects = [...new Set(
+    (resolved.contextIndex?.artifacts ?? [])
+      .flatMap((artifact) => {
+        const dialect = classifyOpenSpecArtifact(artifact.path)?.dialect
+        return dialect ? [dialect] : []
+      }),
+  )].sort()
+
+  return {
+    workflowSources,
+    artifactDialects,
+    externalCapabilityScope: {
+      included: [...EXTERNAL_CAPABILITY_SCOPE],
+      excluded: [...EXCLUDED_EXTERNAL_CAPABILITY_SCOPE],
+    },
+    lines: [
+      `Workflow sources: ${workflowSources.join(", ")}`,
+      `Artifact dialects: ${artifactDialects.join(", ") || "none detected"}`,
+      "External capability policy targets user-installed skills, plugins, MCPs, and providers only.",
+      "Excluded from OMS capability policy: upstream workflow-internal skills.",
+    ],
+  }
 }
 
 export function buildControlPlaneExplainTrace(input: {
@@ -871,6 +943,25 @@ function cloneLayeredConfig(config: LayeredControlPlaneConfigInput): LayeredCont
         )
       : undefined,
     compressionPresets: cloneCompressionPresets(config.compressionPresets),
+    authority: config.authority
+      ? {
+          workloadMappings: config.authority.workloadMappings.map((mapping) => ({
+            path: [...mapping.path],
+            workloadTags: [...mapping.workloadTags],
+          })),
+          policyRules: clonePolicyRules(config.authority.policyRules) ?? [],
+        }
+      : undefined,
+    evidence: config.evidence
+      ? {
+          detectedPaths: config.evidence.detectedPaths.map((detectedPath) => ({
+            path: detectedPath.path,
+            suggestedTags: [...detectedPath.suggestedTags],
+          })),
+          notes: [...config.evidence.notes],
+        }
+      : undefined,
+    policyRules: clonePolicyRules(config.policyRules),
     profiles: cloneProfiles(config.profiles),
     lanes: cloneLanes(config.lanes),
     presets: Object.fromEntries(
@@ -905,6 +996,7 @@ function toLayeredDocument(config: ControlPlaneConfig): LayeredControlPlaneConfi
       ]),
     ),
     compressionPresets: cloneCompressionPresets(config.compressionPresets),
+    policyRules: clonePolicyRules(config.policyRules),
     profiles: cloneProfiles(config.profiles),
     lanes: cloneLanes(config.lanes),
     presets: Object.fromEntries(
@@ -1283,6 +1375,7 @@ async function resolveEffectiveContextCompression(input: {
   contextIndex: ContextIndex
   effectiveSources: Partial<Record<CanonicalRouteId, WorkflowSourceKind>>
   contextProviders: readonly ResolvedContextProvider[]
+  policyResolution?: ResolvedPolicyFamilies
 }): Promise<ResolvedControlPlane["contextCompression"]> {
   const lifecycleHint = resolveIndexedLifecycleStage(input.contextIndex, input.config.workflow.kind)
   const canonicalRoute = resolveContextCompressionCanonicalRoute({
@@ -1300,9 +1393,37 @@ async function resolveEffectiveContextCompression(input: {
     lifecycleHint,
   })
   const authoredContextCompression = resolveAuthoredContextCompressionFromLayers(input.layers)
+  let selectorCompressionPresetOverride: string | null | undefined
+  let hasSelectorCompressionPresetOverride = false
+
+  for (const rule of input.config.policyRules ?? []) {
+    if (!input.policyResolution) {
+      break
+    }
+
+    if (rule.selector.path && input.policyResolution.snapshot.relativePath.length === 0) {
+      continue
+    }
+
+    if (!matchesPolicySelector(input.policyResolution.snapshot, rule.selector)) {
+      continue
+    }
+
+    if (Object.prototype.hasOwnProperty.call(rule.policy.contextPolicy ?? {}, "compressionPreset")) {
+      hasSelectorCompressionPresetOverride = true
+      selectorCompressionPresetOverride = rule.policy.contextPolicy?.compressionPreset
+    }
+  }
+
+  const selectorContextCompression = hasSelectorCompressionPresetOverride
+    ? { preset: selectorCompressionPresetOverride ?? null }
+    : undefined
   const policy = resolveContextCompressionPolicy({
     compressionPresets: input.config.compressionPresets,
-    contextCompression: authoredContextCompression,
+    contextCompression: {
+      ...authoredContextCompression,
+      ...selectorContextCompression,
+    },
   })
   const selection = selectContextPacks({
     lifecycleStage,
@@ -1361,9 +1482,154 @@ async function resolveConfiguredContextProviders(input: {
   })
 }
 
+function buildPolicyRuntimeSnapshot(input: {
+  cwd: string
+  command: ControlPlaneCommandKey
+  config: ControlPlaneConfig
+  authorityWorkloadMappings: Array<{ path: string[]; workloadTags: string[] }>
+  contextIndex: ContextIndex
+  effectiveSources: Partial<Record<CanonicalRouteId, WorkflowSourceKind>>
+  runtimeLifecycleStage?: ContextLifecycleStage
+  runtimeWorkflowSource?: WorkflowSourceKind
+  runtimeRelativePath?: string
+  runtimeWorkloadTags?: string[]
+  runtimeModalityRequirements?: string[]
+  runtimeAgentRole?: "primary" | "subagent"
+}) {
+  function normalizeRelativePath(relativePath: string) {
+    return relativePath.replaceAll("\\", "/")
+  }
+
+  function escapeGlobPattern(pattern: string) {
+    let escaped = ""
+
+    for (let index = 0; index < pattern.length; index += 1) {
+      const current = pattern[index]
+      const next = pattern[index + 1]
+      const nextNext = pattern[index + 2]
+
+      if (current === "*" && next === "*" && nextNext === "/") {
+        escaped += "(?:.*/)?"
+        index += 2
+        continue
+      }
+
+      if (current === "*" && next === "*") {
+        escaped += ".*"
+        index += 1
+        continue
+      }
+
+      if (current === "*") {
+        escaped += "[^/]*"
+        continue
+      }
+
+      if (current === "?") {
+        escaped += "."
+        continue
+      }
+
+      if (/[|\\{}()[\]^$+?.]/.test(current)) {
+        escaped += `\\${current}`
+        continue
+      }
+
+      escaped += current
+    }
+
+    return escaped
+  }
+
+  function matchesGlobPattern(value: string, pattern: string) {
+    const regex = new RegExp(`^${escapeGlobPattern(normalizeRelativePath(pattern))}$`)
+    return regex.test(value)
+  }
+
+  const defaultLifecycleStage = input.config.workflow.kind === "superpowers" ? "plan" : "execute_task"
+  const lifecycleHint = input.runtimeLifecycleStage ?? defaultLifecycleStage
+  const canonicalRoute = resolveContextCompressionCanonicalRoute({
+    workflow: input.config.workflow,
+    effectiveSources: input.effectiveSources,
+    lifecycleStage: lifecycleHint,
+  })
+  const resolvedSource = input.runtimeWorkflowSource
+    ?? input.effectiveSources[canonicalRoute]
+    ?? (input.config.workflow.kind === "direct" ? "direct" : "superpowers")
+  const sourceEntry = getWorkflowSourceEntry(canonicalRoute, resolvedSource)
+  const lifecycleStage = input.runtimeLifecycleStage
+    ?? deriveLifecycleStage({
+      command: input.command,
+      canonicalRoute,
+      sourceEntry,
+      lifecycleHint,
+    })
+  const relativePath = input.runtimeRelativePath ?? ""
+  const authorityWorkloadTags = relativePath.length > 0
+    ? [...new Set(
+        input.authorityWorkloadMappings.flatMap((mapping) => (
+          mapping.path.some((pattern) => matchesGlobPattern(relativePath, pattern))
+            ? mapping.workloadTags
+            : []
+        ))
+      )]
+    : []
+
+  const snapshot = buildRuntimeContextSnapshot({
+    cwd: input.cwd,
+    relativePath,
+    lifecycleStage,
+    workflowSource: resolvedSource,
+    agentRole: input.runtimeAgentRole ?? "primary",
+    workloadTags: input.runtimeWorkloadTags ?? authorityWorkloadTags,
+    modalityRequirements: input.runtimeModalityRequirements ?? [],
+  })
+
+  const provenance: RuntimeSelectorProvenance = {
+    lifecycleStage: input.runtimeLifecycleStage ? "explicit" : "defaulted",
+    workflowSource: input.runtimeWorkflowSource ? "explicit" : "derived",
+    relativePath: input.runtimeRelativePath ? "explicit" : "defaulted",
+    workloadTags: input.runtimeWorkloadTags ? "explicit" : "derived",
+    modalityRequirements: input.runtimeModalityRequirements ? "explicit" : "defaulted",
+    agentRole: input.runtimeAgentRole ? "explicit" : "defaulted",
+  }
+
+  return { snapshot, provenance }
+}
+
+function buildPolicyDiagnostics(
+  config: ControlPlaneConfig,
+  layers: Array<{ path: string; config: LayeredControlPlaneConfigInput }>,
+): PolicyDiagnostics | undefined {
+  const authorityWorkloadMappingCount = layers.reduce(
+    (count, layer) => count + (layer.config.authority?.workloadMappings.length ?? 0),
+    0,
+  )
+  const authorityRuleCount = layers.reduce(
+    (count, layer) => count + (layer.config.authority?.policyRules.length ?? 0),
+    0,
+  )
+  const evidenceDetectedPathCount = layers.reduce(
+    (count, layer) => count + (layer.config.evidence?.detectedPaths.length ?? 0),
+    0,
+  )
+
+  if (authorityWorkloadMappingCount === 0 && authorityRuleCount === 0 && evidenceDetectedPathCount === 0) {
+    return undefined
+  }
+
+  return {
+    authorityWorkloadMappingCount,
+    authorityRuleCount,
+    evidenceDetectedPathCount,
+    evidenceIgnoredForRuntime: evidenceDetectedPathCount > 0,
+  }
+}
+
 export async function resolveControlPlane(input: ResolveControlPlaneInput): Promise<ResolvedControlPlane> {
   try {
-    const loaded = await loadControlPlaneConfig(input)
+    const loadConfig = input.loadControlPlaneConfig ?? loadControlPlaneConfig
+    const loaded = await loadConfig(input)
     const { activePreset, laneState } = validateControlPlaneConfig(loaded.config, input.runtimeLane)
     const effectiveSources = getEffectiveSources(loaded.config, activePreset.preset)
     const contextProviders = await resolveConfiguredContextProviders({
@@ -1375,6 +1641,28 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       ...input,
       contextProviders,
     })
+    const policyResolution = loaded.config.policyRules && loaded.config.policyRules.length > 0
+      ? (() => {
+          const authorityWorkloadMappings = loaded.layers.flatMap((layer) => layer.config.authority?.workloadMappings ?? [])
+          const policyRuntime = buildPolicyRuntimeSnapshot({
+            cwd: input.cwd,
+            command: input.command,
+            config: loaded.config,
+            authorityWorkloadMappings,
+            contextIndex,
+            effectiveSources,
+            runtimeLifecycleStage: input.runtimeLifecycleStage,
+            runtimeWorkflowSource: input.runtimeWorkflowSource,
+            runtimeRelativePath: input.runtimeRelativePath,
+            runtimeWorkloadTags: input.runtimeWorkloadTags,
+            runtimeModalityRequirements: input.runtimeModalityRequirements,
+            runtimeAgentRole: input.runtimeAgentRole,
+          })
+
+          return resolvePolicyFamilies(policyRuntime.snapshot, loaded.config.policyRules, policyRuntime.provenance)
+        })()
+      : undefined
+    const policyDiagnostics = buildPolicyDiagnostics(loaded.config, loaded.layers)
     const contextCompression = await resolveEffectiveContextCompression({
       command: input.command,
       cwd: input.cwd,
@@ -1385,6 +1673,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       contextIndex,
       effectiveSources,
       contextProviders,
+      policyResolution,
     })
     const activePresetDefinition = resolvePresetDefinitionFromLayers(loaded.layers, activePreset.key)
     const parentPresetDefinition = activePreset.preset.extends
@@ -1399,11 +1688,14 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
         sources: loaded.sources,
       },
       config: loaded.config,
+      recovery: loaded.recovery,
       activePreset,
       layers: loaded.layers,
       laneState,
       contextProviders,
       contextIndex,
+      policyResolution,
+      policyDiagnostics,
       contextCompression,
       effectiveSources,
       trace: {
@@ -1432,6 +1724,27 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       ...input,
       contextProviders,
     })
+    const policyResolution = config.policyRules && config.policyRules.length > 0
+      ? (() => {
+          const policyRuntime = buildPolicyRuntimeSnapshot({
+            cwd: input.cwd,
+            command: input.command,
+            config,
+            authorityWorkloadMappings: [],
+            contextIndex,
+            effectiveSources,
+            runtimeLifecycleStage: input.runtimeLifecycleStage,
+            runtimeWorkflowSource: input.runtimeWorkflowSource,
+            runtimeRelativePath: input.runtimeRelativePath,
+            runtimeWorkloadTags: input.runtimeWorkloadTags,
+            runtimeModalityRequirements: input.runtimeModalityRequirements,
+            runtimeAgentRole: input.runtimeAgentRole,
+          })
+
+          return resolvePolicyFamilies(policyRuntime.snapshot, config.policyRules, policyRuntime.provenance)
+        })()
+      : undefined
+    const policyDiagnostics = buildPolicyDiagnostics(config, [])
     const contextCompression = await resolveEffectiveContextCompression({
       command: input.command,
       cwd: input.cwd,
@@ -1442,6 +1755,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       contextIndex,
       effectiveSources,
       contextProviders,
+      policyResolution,
     })
 
     return {
@@ -1456,6 +1770,8 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
       laneState,
       contextProviders,
       contextIndex,
+      policyResolution,
+      policyDiagnostics,
       contextCompression,
       effectiveSources,
     }

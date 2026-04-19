@@ -1,0 +1,18 @@
+{
+  "models": {
+    "backend-text": {
+      "tags": ["backend", "reasoning-heavy"],
+      "supports": ["text", "code"]
+    },
+    "vision-review": {
+      "tags": ["frontend", "review"],
+      "supports": ["text", "vision-input"]
+    }
+  },
+  "tools": {
+    "playwright": {
+      "kind": "mcp",
+      "tags": ["browser", "visual"]
+    }
+  }
+}

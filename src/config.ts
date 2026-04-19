@@ -20,6 +20,13 @@ import {
 } from "./workflow-sources.js"
 import { toDirectCanonicalRouteId } from "./workflow-direct.js"
 import { GSTACK_SOURCE_CATALOG } from "./workflow-gstack.js"
+import { CONTEXT_LIFECYCLE_STAGES } from "./context-lifecycle.js"
+import { clonePolicyRules, type PolicyRule } from "./policy-families.js"
+import {
+  getLastKnownGoodPath,
+  shouldFallbackToLastKnownGood,
+  type ConfigRecoveryState,
+} from "./config-recovery.js"
 import { SUPERPOWERS_ROUTE_CATALOG, toSuperpowersCanonicalRouteId } from "./workflow-superpowers.js"
 
 export { SUPERPOWERS_ROUTE_CATALOG as BUILT_IN_PHASES } from "./workflow-superpowers.js"
@@ -141,11 +148,91 @@ const McpContextProviderConfigSchema = z
   })
   .strict()
 
+const EvidenceDetectedPathSchema = z
+  .object({
+    path: z.string().min(1),
+    suggestedTags: z.array(z.string().min(1)).default([]),
+  })
+  .strict()
+
+const EvidenceSchema = z
+  .object({
+    detectedPaths: z.array(EvidenceDetectedPathSchema).default([]),
+    notes: z.array(z.string().min(1)).default([]),
+  })
+  .strict()
+
 const ContextProviderConfigSchema = z.discriminatedUnion("kind", [
   FileContextProviderConfigSchema,
   CliContextProviderConfigSchema,
   McpContextProviderConfigSchema,
 ])
+
+const PolicyModelSchema = z
+  .object({
+    preferredProfiles: z.array(z.string().min(1)).optional(),
+    effort: z.enum(["fast", "balanced", "deep", "max"]).nullable().optional(),
+    preferWindowClass: z.enum(["small", "medium", "large"]).nullable().optional(),
+    requiredCapabilities: z.array(z.string().min(1)).optional(),
+  })
+  .strict()
+
+const PolicyContextSchema = z
+  .object({
+    compressionPreset: z.string().min(1).nullable().optional(),
+    packetFirst: z.boolean().nullable().optional(),
+    maxCharsBeforeCompression: z.number().int().positive().nullable().optional(),
+  })
+  .strict()
+
+const PolicyToolSchema = z
+  .object({
+    allowedSkillTags: z.array(z.string().min(1)).optional(),
+    allowedMcpTags: z.array(z.string().min(1)).optional(),
+    blockedToolTags: z.array(z.string().min(1)).optional(),
+  })
+  .strict()
+
+const PolicySelectorSchema = z
+  .object({
+    path: z.array(z.string().min(1)).min(1).optional(),
+    lifecycleStage: z.array(z.enum(CONTEXT_LIFECYCLE_STAGES)).min(1).optional(),
+    workflowSource: z.array(z.enum(WORKFLOW_SOURCE_KINDS)).min(1).optional(),
+    agentRole: z.array(z.enum(["primary", "subagent"])).min(1).optional(),
+    workloadTags: z.array(z.string().min(1)).min(1).optional(),
+    modalityRequirements: z.array(z.string().min(1)).min(1).optional(),
+  })
+  .strict()
+
+const PolicyFamiliesSchema = z
+  .object({
+    modelPolicy: PolicyModelSchema.optional(),
+    contextPolicy: PolicyContextSchema.optional(),
+    toolPolicy: PolicyToolSchema.optional(),
+  })
+  .strict()
+
+export const PolicyRuleSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    selector: PolicySelectorSchema,
+    policy: PolicyFamiliesSchema,
+  })
+  .strict()
+
+const AuthorityWorkloadMappingSchema = z
+  .object({
+    path: z.array(z.string().min(1)).min(1),
+    workloadTags: z.array(z.string().min(1)).min(1),
+  })
+  .strict()
+
+const AuthoritySchema = z
+  .object({
+    workloadMappings: z.array(AuthorityWorkloadMappingSchema).default([]),
+    policyRules: z.array(PolicyRuleSchema).default([]),
+  })
+  .strict()
 
 const LaneSchema = z
   .object({
@@ -254,6 +341,9 @@ const LayeredControlPlaneConfigSchema = z
     sourcePresets: z.record(z.string().min(1), SourcePresetSchema).optional(),
     compressionPresets: z.record(z.string().min(1), CompressionPresetSchema).optional(),
     contextProviders: z.record(z.string().min(1), ContextProviderConfigSchema).optional(),
+    authority: AuthoritySchema.optional(),
+    evidence: EvidenceSchema.optional(),
+    policyRules: z.array(PolicyRuleSchema).optional(),
     profiles: z.record(z.string().min(1), ProfileSchema).optional(),
     lanes: z.record(z.string().min(1), LaneSchema).optional(),
     presets: z.record(z.string().min(1), ControlPlanePresetSchema),
@@ -343,6 +433,7 @@ export type ControlPlaneContextProviderConfig =
   | ControlPlaneFileContextProviderConfig
   | ControlPlaneCliContextProviderConfig
   | ControlPlaneMcpContextProviderConfig
+export type ControlPlanePolicyRule = PolicyRule
 export type ControlPlaneConfig = {
   workflow: WorkflowConfig
   settings: {
@@ -359,6 +450,7 @@ export type ControlPlaneConfig = {
   sourcePresets: Record<string, ControlPlaneSourcePreset>
   compressionPresets?: Record<string, ControlPlaneCompressionPreset>
   contextProviders?: Record<string, ControlPlaneContextProviderConfig>
+  policyRules?: ControlPlanePolicyRule[]
   profiles: Record<string, ControlPlaneProfile>
   lanes: Record<string, ControlPlaneLane>
   presets: Record<string, ControlPlanePreset>
@@ -391,6 +483,7 @@ export type LoadControlPlaneConfigInput = {
   cwd: string
   homeDir?: string
   explicitPath?: string
+  allowRecovery?: boolean
   exists?: (filePath: string) => Promise<boolean>
   readFile?: (filePath: string) => Promise<string>
 }
@@ -404,6 +497,13 @@ export type LoadedControlPlaneConfig = {
   }>
   hasRealSource: boolean
   config: ControlPlaneConfig
+  recovery?: ConfigRecoveryState
+}
+
+type ControlPlaneLoadCandidate = {
+  sources: string[]
+  layers: LoadedControlPlaneConfig["layers"]
+  merged: LayeredControlPlaneConfigInput
 }
 
 export class MissingControlPlaneConfigError extends Error {
@@ -577,6 +677,7 @@ export function createDefaultControlPlaneConfig(): ControlPlaneConfig {
     sourcePresets: {},
     compressionPresets: {},
     contextProviders: {},
+    policyRules: [],
     profiles: cloneProfiles(defaultPreset.profiles) ?? {},
     lanes: {},
     presets: {
@@ -594,6 +695,9 @@ function isMixedShape(rawConfig: Record<string, unknown>) {
     || hasOwnKey(rawConfig, "presets")
     || hasOwnKey(rawConfig, "compressionPresets")
     || hasOwnKey(rawConfig, "contextProviders")
+    || hasOwnKey(rawConfig, "authority")
+    || hasOwnKey(rawConfig, "evidence")
+    || hasOwnKey(rawConfig, "policyRules")
   const hasLegacyKeys = LEGACY_ROUTER_ONLY_KEYS.some((key) => hasOwnKey(rawConfig, key))
   return isLayered && hasLegacyKeys
 }
@@ -625,6 +729,9 @@ function getSourceFormat(rawConfig: Record<string, unknown>): ControlPlaneSource
     || hasOwnKey(rawConfig, "presets")
     || hasOwnKey(rawConfig, "compressionPresets")
     || hasOwnKey(rawConfig, "contextProviders")
+    || hasOwnKey(rawConfig, "authority")
+    || hasOwnKey(rawConfig, "evidence")
+    || hasOwnKey(rawConfig, "policyRules")
     ? "layered"
     : "legacy"
 }
@@ -644,6 +751,9 @@ export function normalizeRawConfig(rawConfig: unknown): LayeredControlPlaneConfi
     || hasOwnKey(rawObject, "presets")
     || hasOwnKey(rawObject, "compressionPresets")
     || hasOwnKey(rawObject, "contextProviders")
+    || hasOwnKey(rawObject, "authority")
+    || hasOwnKey(rawObject, "evidence")
+    || hasOwnKey(rawObject, "policyRules")
   ) {
     return LayeredControlPlaneConfigSchema.parse(rawObject)
   }
@@ -720,6 +830,19 @@ function mergeLayeredConfigs(
     }
   }
 
+  const mergedAuthority = lowerPriority.authority || higherPriority.authority
+    ? {
+        workloadMappings: [
+          ...(lowerPriority.authority?.workloadMappings ?? []),
+          ...(higherPriority.authority?.workloadMappings ?? []),
+        ],
+        policyRules: [
+          ...(lowerPriority.authority?.policyRules ?? []),
+          ...(higherPriority.authority?.policyRules ?? []),
+        ],
+      }
+    : undefined
+
   return {
     workflow: higherPriority.workflow ?? lowerPriority.workflow,
     settings: mergedSettings,
@@ -732,6 +855,11 @@ function mergeLayeredConfigs(
       ...lowerPriority.contextProviders,
       ...higherPriority.contextProviders,
     },
+    authority: mergedAuthority,
+    policyRules: [
+      ...(lowerPriority.policyRules ?? []),
+      ...(higherPriority.policyRules ?? []),
+    ],
     profiles: {
       ...lowerPriority.profiles,
       ...higherPriority.profiles,
@@ -774,6 +902,21 @@ function validateContextCompressionPresetReferences(config: ControlPlaneConfig) 
   }
 }
 
+function validatePolicyRules(config: ControlPlaneConfig) {
+  for (const [index, rule] of (config.policyRules ?? []).entries()) {
+    for (const [key, value] of Object.entries(rule.selector)) {
+      if (Array.isArray(value) && value.length === 0) {
+        throw new Error(`Policy rule ${rule.id ?? index + 1} has an empty selector array for ${key}`)
+      }
+    }
+
+    const compressionPreset = rule.policy.contextPolicy?.compressionPreset
+    if (typeof compressionPreset === "string" && !config.compressionPresets?.[compressionPreset]) {
+      throw new Error(`Policy rule ${rule.id ?? index + 1} references unknown compression preset: ${compressionPreset}`)
+    }
+  }
+}
+
 function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneConfig {
   const finalized: ControlPlaneConfig = {
     workflow: merged.workflow ?? { kind: "superpowers" },
@@ -791,6 +934,10 @@ function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneCon
     sourcePresets: merged.sourcePresets ?? {},
     compressionPresets: finalizeCompressionPresets(merged.compressionPresets),
     contextProviders: cloneContextProviders(merged.contextProviders),
+    policyRules: [
+      ...(clonePolicyRules(merged.authority?.policyRules) ?? []),
+      ...(clonePolicyRules(merged.policyRules) ?? []),
+    ],
     profiles: cloneProfiles(merged.profiles) ?? {},
     lanes: cloneLanes(merged.lanes ?? {}),
     presets: merged.presets,
@@ -799,6 +946,7 @@ function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneCon
   validateDirectIntentIds(finalized.workflow)
   validateLaneReferences(finalized)
   validateContextCompressionPresetReferences(finalized)
+  validatePolicyRules(finalized)
   return finalized
 }
 
@@ -1053,6 +1201,7 @@ export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConf
 export async function readControlPlaneSourceDocument(
   filePath: string,
   reader: (filePath: string) => Promise<string>,
+  baseDir = path.dirname(filePath),
 ): Promise<LoadedControlPlaneSourceDocument> {
   const parseErrors: ParseError[] = []
   const rawConfig = parse(await reader(filePath), parseErrors)
@@ -1068,7 +1217,7 @@ export async function readControlPlaneSourceDocument(
   const rawObject = rawConfig as Record<string, unknown>
 
   const config = normalizeRawConfig(rawObject)
-  attachContextProviderBaseDirs(config.contextProviders, path.dirname(filePath))
+  attachContextProviderBaseDirs(config.contextProviders, baseDir)
 
   return {
     format: getSourceFormat(rawObject),
@@ -1079,8 +1228,9 @@ export async function readControlPlaneSourceDocument(
 async function readConfigFile(
   filePath: string,
   reader: (filePath: string) => Promise<string>,
+  baseDir = path.dirname(filePath),
 ): Promise<LayeredControlPlaneConfigInput> {
-  return (await readControlPlaneSourceDocument(filePath, reader)).config
+  return (await readControlPlaneSourceDocument(filePath, reader, baseDir)).config
 }
 
 export async function defaultIsWritable(filePath: string) {
@@ -1184,30 +1334,114 @@ export async function loadControlPlaneConfig(
     throw new MissingControlPlaneConfigError()
   }
 
-  let merged: LayeredControlPlaneConfigInput | undefined
-  const layers: LoadedControlPlaneConfig["layers"] = []
-  for (const filePath of sources) {
+  const authorityPath = sources[sources.length - 1]!
+  const baseSources = sources.slice(0, -1)
+
+  let mergedBase: LayeredControlPlaneConfigInput | undefined
+  const baseLayers: LoadedControlPlaneConfig["layers"] = []
+  for (const filePath of baseSources) {
     const loaded = await readConfigFile(filePath, reader)
-    layers.push({ path: filePath, config: loaded })
+    baseLayers.push({ path: filePath, config: loaded })
+    mergedBase = mergedBase ? mergeLayeredConfigs(mergedBase, loaded) : loaded
+  }
+
+  const loadCandidate = async (activeAuthorityPath: string): Promise<ControlPlaneLoadCandidate> => {
+    let merged = mergedBase
+    const layers: LoadedControlPlaneConfig["layers"] = [...baseLayers]
+
+    const loaded = await readConfigFile(activeAuthorityPath, reader)
+    layers.push({ path: activeAuthorityPath, config: loaded })
     merged = merged ? mergeLayeredConfigs(merged, loaded) : loaded
+
+    if (overlayPath) {
+      const overlayConfig: LayeredControlPlaneConfigInput = { presets: {} }
+      layers.push({ path: overlayPath, config: overlayConfig })
+      merged = merged ? mergeLayeredConfigs(merged, overlayConfig) : overlayConfig
+    }
+
+    return {
+      sources: [
+        ...baseSources,
+        activeAuthorityPath,
+      ],
+      layers,
+      merged: merged ?? { presets: {} },
+    }
   }
 
-  if (overlayPath) {
-    const overlayConfig: LayeredControlPlaneConfigInput = { presets: {} }
-    layers.push({ path: overlayPath, config: overlayConfig })
-    merged = merged ? mergeLayeredConfigs(merged, overlayConfig) : overlayConfig
+  const resolveValidatedConfig = (merged: LayeredControlPlaneConfigInput): ControlPlaneConfig => {
+    const config = resolvePresetReuse(finalizeConfig(merged))
+    validateSourceRouting(config)
+    validateLaneTargets(config)
+    return config
   }
 
-  const config = resolvePresetReuse(finalizeConfig(merged ?? { presets: {} }))
-  validateSourceRouting(config)
-  validateLaneTargets(config)
+  if (mergedBase) {
+    resolveValidatedConfig(mergedBase)
+  }
 
-  return {
-    path: overlayPath ?? sources[sources.length - 1]!,
-    sources,
-    layers,
-    hasRealSource: true,
-    config,
+  const finalizeLoadedConfig = (
+    candidate: ControlPlaneLoadCandidate,
+    recovery?: ConfigRecoveryState,
+  ): LoadedControlPlaneConfig => {
+    const config = resolveValidatedConfig(candidate.merged)
+
+    return {
+      path: recovery?.activeSource === "last-known-good"
+        ? authorityPath
+        : overlayPath ?? authorityPath,
+      sources: candidate.sources,
+      layers: candidate.layers,
+      hasRealSource: true,
+      config,
+      recovery: recovery ?? { activeSource: "authority" },
+    }
+  }
+
+  try {
+    return finalizeLoadedConfig(await loadCandidate(authorityPath))
+  } catch (error) {
+    if (input.allowRecovery === false) {
+      throw error
+    }
+
+    const authorityError = error instanceof Error ? error : new Error(String(error))
+    const lastKnownGoodPath = getLastKnownGoodPath(authorityPath)
+    const hasLastKnownGood = await exists(lastKnownGoodPath)
+    if (!shouldFallbackToLastKnownGood({ authorityError, hasLastKnownGood })) {
+      throw error
+    }
+
+    return finalizeLoadedConfig(
+      await (async () => {
+        let merged = mergedBase
+        const layers: LoadedControlPlaneConfig["layers"] = [...baseLayers]
+
+        const loaded = await readConfigFile(lastKnownGoodPath, reader, path.dirname(authorityPath))
+        layers.push({ path: lastKnownGoodPath, config: loaded })
+        merged = merged ? mergeLayeredConfigs(merged, loaded) : loaded
+
+        if (overlayPath) {
+          const overlayConfig: LayeredControlPlaneConfigInput = { presets: {} }
+          layers.push({ path: overlayPath, config: overlayConfig })
+          merged = merged ? mergeLayeredConfigs(merged, overlayConfig) : overlayConfig
+        }
+
+        return {
+          sources: [
+            ...baseSources,
+            lastKnownGoodPath,
+          ],
+          layers,
+          merged: merged ?? { presets: {} },
+        }
+      })(),
+      {
+        activeSource: "last-known-good",
+        authorityError: authorityError.message,
+        lastKnownGoodPath,
+      },
+    )
   }
 }
 

@@ -6,7 +6,7 @@ import type {
   ControlPlaneContextCompressionSafety,
   ControlPlaneContextInlineLevel,
 } from "./config.js"
-import type { ContextArtifact } from "./context-artifacts.js"
+import { isAuthoritativeOrAdvisoryArtifact, type ContextArtifact } from "./context-artifacts.js"
 import { summarizeContextProviders, type ContextProviderAvailabilitySummary } from "./context-index.js"
 import type { ContextLifecycleStage } from "./context-lifecycle.js"
 import type { ResolvedContextProvider } from "./context-providers.js"
@@ -97,17 +97,29 @@ export function selectContextPacks(input: {
   const packIds: ContextPackId[] = []
   const providers = summarizeContextProviders(input.contextProviders)
   const hasArtifact = (kind: ContextArtifact["kind"]) => input.artifacts.some((artifact) => artifact.kind === kind)
-  const canSelectPlanPacks = input.lifecycleStage === "plan"
+  const isPlanningPackArtifact = (artifact: ContextArtifact) => {
+    return (artifact.kind === "spec" || artifact.kind === "plan")
+      && isAuthoritativeOrAdvisoryArtifact(artifact)
+  }
+  const hasPlanningPackArtifact = (kind: "spec" | "plan") => {
+    return input.artifacts.some((artifact) => artifact.kind === kind && isPlanningPackArtifact(artifact))
+  }
+  const canSelectPlanningPacks = (
+    input.lifecycleStage === "plan"
     && input.canonicalRoute === "phase.plan"
     && (input.resolvedSource === "superpowers" || input.resolvedSource === "gstack")
     && input.policy.moments?.planCheckpoint === true
+  ) || (
+    input.lifecycleStage === "resume"
+    && input.policy.moments?.sessionResume === true
+  )
 
-  if (canSelectPlanPacks) {
-    if (hasArtifact("spec")) {
+  if (canSelectPlanningPacks) {
+    if (hasPlanningPackArtifact("spec")) {
       packIds.push("spec-core")
     }
 
-    if (hasArtifact("plan")) {
+    if (hasPlanningPackArtifact("plan")) {
       packIds.push("plan-core")
     }
   }
@@ -121,8 +133,8 @@ export function selectContextPacks(input: {
   return {
     packIds,
     artifacts: input.artifacts.filter((artifact) =>
-      (artifact.kind === "spec" && selectedPackIds.has("spec-core"))
-      || (artifact.kind === "plan" && selectedPackIds.has("plan-core"))
+      (artifact.kind === "spec" && selectedPackIds.has("spec-core") && isPlanningPackArtifact(artifact))
+      || (artifact.kind === "plan" && selectedPackIds.has("plan-core") && isPlanningPackArtifact(artifact))
       || (artifact.kind === "knowledge" && selectedPackIds.has("knowledge-support")),
     ),
     ...(providers ? { providers } : {}),

@@ -8,12 +8,14 @@ import {
   buildControlPlaneExplainTrace,
   prepareControlPlaneStateWrite,
   resolveControlPlane,
+  summarizeSourceToolRoleExplainability,
   summarizeEffectiveSourceReadiness,
   summarizeEffectiveSourceEntries,
   summarizeSubagentExecutionDiagnostics,
   summarizeRoutingValidation,
 } from "../src/control-plane.js"
 import { enhanceCompressionBundleWithSummary } from "../src/context-compression.js"
+import { createDefaultControlPlaneConfig } from "../src/config.js"
 
 const defaultSuperpowersSourceEntries = {
   "phase.brainstorm": {
@@ -211,6 +213,330 @@ describe("resolveControlPlane", () => {
     })
 
     expect(resolved.contextIndex?.artifacts).toHaveLength(2)
+  })
+
+  it("surfaces config recovery state when last-known-good is active", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/repo",
+      loadControlPlaneConfig: async () => ({
+        path: "/repo/oh-my-superagents.config.jsonc",
+        sources: ["/repo/.oms/last-known-good.json"],
+        layers: [],
+        hasRealSource: true,
+        config: createDefaultControlPlaneConfig(),
+        recovery: {
+          activeSource: "last-known-good",
+          authorityError: "Invalid JSONC",
+          lastKnownGoodPath: "/repo/.oms/last-known-good.json",
+        },
+      }),
+      buildContextIndex: async () => ({
+        artifacts: [],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.recovery?.activeSource).toBe("last-known-good")
+  })
+
+  it("surfaces selector-based policy matches in resolved control-plane state", async () => {
+    const config = createDefaultControlPlaneConfig()
+    config.policyRules = [
+      {
+        id: "frontend-verify",
+        selector: {
+          path: ["frontend/**"],
+          lifecycleStage: ["verify"],
+          workflowSource: ["superpowers"],
+          workloadTags: ["frontend"],
+          modalityRequirements: ["vision-input"],
+        },
+        policy: {
+          modelPolicy: { preferredProfiles: ["vision-review"] },
+        },
+      },
+    ]
+
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      loadControlPlaneConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        layers: [],
+        hasRealSource: true,
+        config,
+      }),
+      runtimeLifecycleStage: "verify",
+      runtimeWorkflowSource: "superpowers",
+      runtimeRelativePath: "frontend/app/page.tsx",
+      runtimeWorkloadTags: ["frontend"],
+      runtimeModalityRequirements: ["vision-input"],
+      buildContextIndex: async () => ({
+        artifacts: [{
+          kind: "spec",
+          path: "docs/superpowers/specs/frontend-verify.md",
+          authority: "authoritative",
+          source: "oms",
+          lifecycleStage: "plan",
+        }],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.policyResolution?.matchedRuleIds).toEqual(["frontend-verify"])
+    expect(resolved.policyResolution?.policy.modelPolicy?.preferredProfiles).toEqual(["vision-review"])
+    expect(resolved.policyResolution?.provenance).toEqual({
+      lifecycleStage: "explicit",
+      workflowSource: "explicit",
+      relativePath: "explicit",
+      workloadTags: "explicit",
+      modalityRequirements: "explicit",
+      agentRole: "defaulted",
+    })
+  })
+
+  it("applies matched contextPolicy overrides to effective context compression", async () => {
+    const config = createDefaultControlPlaneConfig()
+    config.policyRules = [
+      {
+        id: "verify-compression",
+        selector: {
+          lifecycleStage: ["verify"],
+        },
+        policy: {
+          contextPolicy: {
+            compressionPreset: "review",
+            maxCharsBeforeCompression: 1024,
+          },
+        },
+      },
+    ]
+    config.compressionPresets = {
+      review: {
+        mode: "auto",
+        engine: "hybrid",
+        inlineLevel: "standard",
+      },
+    }
+
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      loadControlPlaneConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        layers: [],
+        hasRealSource: true,
+        config,
+      }),
+      runtimeLifecycleStage: "verify",
+      buildContextIndex: async () => ({
+        artifacts: [],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.contextCompression?.policy).toMatchObject({
+      preset: "review",
+      mode: "auto",
+      engine: "hybrid",
+      inlineLevel: "standard",
+    })
+  })
+
+  it("allows matched selector rules to clear an authored contextCompression preset", async () => {
+    const config = createDefaultControlPlaneConfig()
+    config.settings.contextCompression = {
+      preset: "review",
+    }
+    config.policyRules = [
+      {
+        id: "clear-review-compression",
+        selector: {
+          lifecycleStage: ["verify"],
+        },
+        policy: {
+          contextPolicy: {
+            compressionPreset: null,
+          },
+        },
+      },
+    ]
+    config.compressionPresets = {
+      review: {
+        mode: "auto",
+        engine: "hybrid",
+        inlineLevel: "standard",
+      },
+    }
+
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      loadControlPlaneConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        layers: [
+          {
+            path: "/workspace/project/oh-my-superagents.config.jsonc",
+            config: {
+              settings: {
+                contextCompression: {
+                  preset: "review",
+                },
+              },
+              compressionPresets: config.compressionPresets,
+              presets: config.presets,
+            },
+          },
+        ],
+        hasRealSource: true,
+        config,
+      }),
+      runtimeLifecycleStage: "verify",
+      buildContextIndex: async () => ({
+        artifacts: [],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.policyResolution?.matchedRuleIds).toEqual(["clear-review-compression"])
+    expect(resolved.contextCompression?.policy.preset).toBeUndefined()
+    expect(resolved.contextCompression?.policy).toMatchObject({
+      mode: "manual",
+      engine: "builtin",
+      inlineLevel: "minimal",
+    })
+  })
+
+  it("does not infer selector path matches from indexed artifact paths when runtime path is absent", async () => {
+    const config = createDefaultControlPlaneConfig()
+    config.policyRules = [
+      {
+        id: "frontend-verify",
+        selector: {
+          path: ["frontend/**"],
+        },
+        policy: {
+          modelPolicy: { preferredProfiles: ["vision-review"] },
+        },
+      },
+    ]
+
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      loadControlPlaneConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        layers: [],
+        hasRealSource: true,
+        config,
+      }),
+      buildContextIndex: async () => ({
+        artifacts: [{
+          kind: "spec",
+          path: "frontend/spec.md",
+          authority: "authoritative",
+          source: "oms",
+          lifecycleStage: "plan",
+        }],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.policyResolution?.matchedRuleIds).toEqual([])
+  })
+
+  it("does not infer selector lifecycle stage from historical indexed artifacts when runtime stage is absent", async () => {
+    const config = createDefaultControlPlaneConfig()
+    config.policyRules = [
+      {
+        id: "verify-only",
+        selector: {
+          lifecycleStage: ["verify"],
+        },
+        policy: {
+          modelPolicy: { preferredProfiles: ["vision-review"] },
+        },
+      },
+    ]
+
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      loadControlPlaneConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        layers: [],
+        hasRealSource: true,
+        config,
+      }),
+      buildContextIndex: async () => ({
+        artifacts: [{
+          kind: "spec",
+          path: "docs/superpowers/specs/old-verify.md",
+          authority: "authoritative",
+          source: "oms",
+          lifecycleStage: "verify",
+        }],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.policyResolution?.snapshot.lifecycleStage).toBe("plan")
+    expect(resolved.policyResolution?.matchedRuleIds).toEqual([])
+    expect(resolved.policyResolution?.provenance).toEqual({
+      lifecycleStage: "defaulted",
+      workflowSource: "derived",
+      relativePath: "defaulted",
+      workloadTags: "derived",
+      modalityRequirements: "defaulted",
+      agentRole: "defaulted",
+    })
+  })
+
+  it("does not infer selector workload tag matches from runtime path when runtime tags are omitted", async () => {
+    const config = createDefaultControlPlaneConfig()
+    config.policyRules = [
+      {
+        id: "frontend-workload",
+        selector: {
+          workloadTags: ["frontend"],
+        },
+        policy: {
+          modelPolicy: { preferredProfiles: ["vision-review"] },
+        },
+      },
+    ]
+
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      loadControlPlaneConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        layers: [],
+        hasRealSource: true,
+        config,
+      }),
+      runtimeRelativePath: "frontend/app/page.tsx",
+      buildContextIndex: async () => ({
+        artifacts: [],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.policyResolution?.snapshot.workloadTags).toEqual([])
+    expect(resolved.policyResolution?.matchedRuleIds).toEqual([])
   })
 
   it("preserves the resolved default context compression policy in state", async () => {
@@ -1390,6 +1716,230 @@ describe("resolveControlPlane", () => {
       },
     })
     expect(result.activePreset.preset.routes).toEqual({ plan: "planner" })
+  })
+
+  it("defaults direct-workflow selector source to direct when runtime workflow source is omitted", async () => {
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "workflow": {
+          "kind": "direct",
+          "intents": {
+            "plan": { "label": "Plan" },
+            "build": { "label": "Build" }
+          }
+        },
+        "settings": {
+          "activePreset": "default"
+        },
+        "profiles": {
+          "planner": { "model": "openai/gpt-5" },
+          "builder": { "model": "gpt-5.4" }
+        },
+        "policyRules": [{
+          "id": "direct-only",
+          "selector": {
+            "workflowSource": ["direct"]
+          },
+          "policy": {
+            "modelPolicy": {
+              "preferredProfiles": ["builder"]
+            }
+          }
+        }],
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "routes": {
+              "plan": "planner"
+            },
+            "defaultRoute": "builder"
+          }
+        }
+      }`,
+      runtimeLifecycleStage: "execute_task",
+    })
+
+    expect(resolved.policyResolution?.snapshot.workflowSource).toBe("direct")
+    expect(resolved.policyResolution?.matchedRuleIds).toEqual(["direct-only"])
+  })
+
+  it("tracks authority-driven policy separately from discarded evidence diagnostics", async () => {
+    const config = createDefaultControlPlaneConfig()
+    config.policyRules = [
+      {
+        id: "frontend-verify",
+        selector: {
+          lifecycleStage: ["verify"],
+        },
+        policy: {
+          modelPolicy: { preferredProfiles: ["vision-review"] },
+        },
+      },
+    ]
+
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      loadControlPlaneConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        layers: [
+          {
+            path: "/workspace/project/oh-my-superagents.config.jsonc",
+              config: {
+                settings: { activePreset: "default" },
+                authority: {
+                  workloadMappings: [{
+                    path: ["frontend/**"],
+                    workloadTags: ["frontend", "visual"],
+                  }],
+                  policyRules: config.policyRules,
+                },
+                evidence: {
+                  detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+                  notes: ["Detected likely frontend workload"],
+              },
+              presets: config.presets,
+            },
+          },
+        ],
+        hasRealSource: true,
+        config,
+      }),
+      runtimeLifecycleStage: "verify",
+      buildContextIndex: async () => ({
+        artifacts: [],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.policyResolution?.matchedRuleIds).toEqual(["frontend-verify"])
+    expect(resolved.policyDiagnostics).toEqual({
+      authorityWorkloadMappingCount: 1,
+      authorityRuleCount: 1,
+      evidenceDetectedPathCount: 1,
+      evidenceIgnoredForRuntime: true,
+    })
+  })
+
+  it("does not count ordinary top-level policyRules as authority-backed diagnostics", async () => {
+    const config = createDefaultControlPlaneConfig()
+    config.policyRules = [
+      {
+        id: "top-level-policy",
+        selector: {
+          lifecycleStage: ["verify"],
+        },
+        policy: {
+          modelPolicy: { preferredProfiles: ["vision-review"] },
+        },
+      },
+    ]
+
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      loadControlPlaneConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        layers: [
+          {
+            path: "/workspace/project/oh-my-superagents.config.jsonc",
+            config: {
+              settings: { activePreset: "default" },
+              policyRules: config.policyRules,
+              evidence: {
+                detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+                notes: ["Detected likely frontend workload"],
+              },
+              presets: config.presets,
+            },
+          },
+        ],
+        hasRealSource: true,
+        config,
+      }),
+      runtimeLifecycleStage: "verify",
+      buildContextIndex: async () => ({
+        artifacts: [],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.policyResolution?.matchedRuleIds).toEqual(["top-level-policy"])
+    expect(resolved.policyDiagnostics).toEqual({
+      authorityWorkloadMappingCount: 0,
+      authorityRuleCount: 0,
+      evidenceDetectedPathCount: 1,
+      evidenceIgnoredForRuntime: true,
+    })
+  })
+
+  it("applies authority workload mappings to runtime workloadTags for selector matching", async () => {
+    const config = createDefaultControlPlaneConfig()
+    config.policyRules = [{
+      id: "frontend-mapped-policy",
+      selector: {
+        workloadTags: ["frontend"],
+      },
+      policy: {
+        modelPolicy: { preferredProfiles: ["vision-review"] },
+      },
+    }]
+
+    const resolved = await resolveControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      loadControlPlaneConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        layers: [
+          {
+            path: "/workspace/project/oh-my-superagents.config.jsonc",
+            config: {
+              settings: { activePreset: "default" },
+              authority: {
+                workloadMappings: [{
+                  path: ["frontend/**"],
+                  workloadTags: ["frontend", "visual"],
+                }],
+                policyRules: config.policyRules,
+              },
+              evidence: {
+                detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+                notes: ["Detected likely frontend workload"],
+              },
+              presets: config.presets,
+            },
+          },
+        ],
+        hasRealSource: true,
+        config,
+      }),
+      runtimeRelativePath: "frontend/app/page.tsx",
+      buildContextIndex: async () => ({
+        artifacts: [],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.policyResolution?.snapshot.workloadTags).toEqual(["frontend", "visual"])
+    expect(resolved.policyResolution?.matchedRuleIds).toEqual(["frontend-mapped-policy"])
+    expect(resolved.policyDiagnostics).toEqual({
+      authorityWorkloadMappingCount: 1,
+      authorityRuleCount: 1,
+      evidenceDetectedPathCount: 1,
+      evidenceIgnoredForRuntime: true,
+    })
   })
 
   it("resolves single-parent preset reuse before validation", async () => {
@@ -2645,6 +3195,171 @@ describe("resolveControlPlane", () => {
     })
   })
 
+  it("preserves policyRules when preparing a state write", async () => {
+    const files = {
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "policyRules": [{
+          "id": "frontend-verify",
+          "selector": {
+            "path": ["frontend/**"],
+            "lifecycleStage": ["verify"]
+          },
+          "policy": {
+            "modelPolicy": {
+              "preferredProfiles": ["vision-review"]
+            }
+          }
+        }],
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await prepareControlPlaneStateWrite({
+      command: "disable",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+      isWritable: createIsWritable(["/workspace/project/oh-my-superagents.config.jsonc"]),
+      nextState: {
+        activePreset: "default",
+        enabled: false,
+      },
+    })
+
+    const serialized = parse(result.content) as {
+      policyRules?: Array<{
+        id?: string
+        selector?: { path?: string[]; lifecycleStage?: string[] }
+        policy?: { modelPolicy?: { preferredProfiles?: string[] } }
+      }>
+    }
+
+    expect(serialized.policyRules).toEqual([{
+      id: "frontend-verify",
+      selector: {
+        path: ["frontend/**"],
+        lifecycleStage: ["verify"],
+      },
+      policy: {
+        modelPolicy: {
+          preferredProfiles: ["vision-review"],
+        },
+      },
+    }])
+  })
+
+  it("preserves authority and evidence when preparing a state write", async () => {
+    const files = {
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "authority": {
+          "workloadMappings": [{
+            "path": ["frontend/**"],
+            "workloadTags": ["frontend", "visual"]
+          }],
+          "policyRules": [{
+            "id": "verify-vision",
+            "selector": {
+              "lifecycleStage": ["verify"]
+            },
+            "policy": {
+              "modelPolicy": {
+                "requiredCapabilities": ["vision-input"]
+              }
+            }
+          }]
+        },
+        "evidence": {
+          "detectedPaths": [{
+            "path": "frontend/**",
+            "suggestedTags": ["frontend", "visual"]
+          }],
+          "notes": ["Detected likely frontend workload"]
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        },
+        "presets": {
+          "default": {
+            "label": "Default",
+            "short": "def",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await prepareControlPlaneStateWrite({
+      command: "disable",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+      isWritable: createIsWritable(["/workspace/project/oh-my-superagents.config.jsonc"]),
+      nextState: {
+        activePreset: "default",
+        enabled: false,
+      },
+    })
+
+    const serialized = parse(result.content) as {
+      authority?: {
+        workloadMappings?: Array<{ path?: string[]; workloadTags?: string[] }>
+        policyRules?: Array<{
+          id?: string
+          selector?: { lifecycleStage?: string[] }
+          policy?: { modelPolicy?: { requiredCapabilities?: string[] } }
+        }>
+      }
+      evidence?: {
+        detectedPaths?: Array<{ path?: string; suggestedTags?: string[] }>
+        notes?: string[]
+      }
+    }
+
+    expect(serialized.authority).toEqual({
+      workloadMappings: [{
+        path: ["frontend/**"],
+        workloadTags: ["frontend", "visual"],
+      }],
+      policyRules: [{
+        id: "verify-vision",
+        selector: {
+          lifecycleStage: ["verify"],
+        },
+        policy: {
+          modelPolicy: {
+            requiredCapabilities: ["vision-input"],
+          },
+        },
+      }],
+    })
+    expect(serialized.evidence).toEqual({
+      detectedPaths: [{
+        path: "frontend/**",
+        suggestedTags: ["frontend", "visual"],
+      }],
+      notes: ["Detected likely frontend workload"],
+    })
+  })
+
   it("preserves contextCompression settings and compressionPresets when preparing a state write", async () => {
     const files = {
       "/workspace/project/oh-my-superagents.config.jsonc": `{
@@ -3548,6 +4263,96 @@ describe("summarizeEffectiveSourceReadiness", () => {
           compatibility: null,
         },
       },
+    })
+  })
+})
+
+describe("summarizeSourceToolRoleExplainability", () => {
+  it("distinguishes workflow sources from artifact dialects and external capability scope", () => {
+    const diagnostics = summarizeSourceToolRoleExplainability({
+      source: {
+        kind: "default",
+        hasRealSource: false,
+        sources: [],
+      },
+      config: {
+        workflow: { kind: "superpowers" },
+        settings: {
+          enabled: true,
+          activePreset: "default",
+          ...defaultControlPlaneSettings,
+          commandPrefix: "oms",
+          commands: {
+            status: { name: "status", aliases: ["st"] },
+            use: { name: "use", aliases: ["u"] },
+            disable: { name: "off", aliases: ["o"] },
+            sync: { name: "sync", aliases: ["sy"] },
+            doctor: { name: "doctor", aliases: ["dr"] },
+          },
+          superpowersCompatibility: { mode: "warn" },
+        },
+        sourcePresets: {},
+        compressionPresets: {},
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        lanes: {},
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+      },
+      activePreset: {
+        key: "default",
+        preset: {
+          label: "Default",
+          short: "def",
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+      contextIndex: {
+        artifacts: [
+          {
+            kind: "spec",
+            path: "openspec/specs/auth/spec.md",
+            authority: "authoritative",
+            source: "external",
+            lifecycleStage: "design",
+          },
+        ],
+        warnings: [],
+      },
+      laneState: {
+        allowedLanes: [],
+        defaultLane: undefined,
+        effectiveLane: undefined,
+        presetDefaultLane: undefined,
+        runtimeLane: undefined,
+        mode: "suggest",
+      },
+      effectiveSources: {
+        "phase.plan": "gstack",
+      },
+    })
+
+    expect(diagnostics).toEqual({
+      workflowSources: ["superpowers", "gstack"],
+      artifactDialects: ["openspec"],
+      externalCapabilityScope: {
+        included: ["user-installed skills", "plugins", "MCPs", "providers"],
+        excluded: ["upstream workflow-internal skills"],
+      },
+      lines: [
+        "Workflow sources: superpowers, gstack",
+        "Artifact dialects: openspec",
+        "External capability policy targets user-installed skills, plugins, MCPs, and providers only.",
+        "Excluded from OMS capability policy: upstream workflow-internal skills.",
+      ],
     })
   })
 })

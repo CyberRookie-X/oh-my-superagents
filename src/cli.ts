@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises"
+import { homedir } from "node:os"
 import path from "node:path"
 import { cwd as getCwd } from "node:process"
 import { parse, type ParseError } from "jsonc-parser"
@@ -10,14 +11,19 @@ import {
   renderRoutingConfigDocument,
   type ModelInventory,
 } from "./author-routing.js"
+import { buildPolicyAuthoringProposal } from "./author-policy.js"
 import {
   BUILT_IN_PHASES,
   CONTROL_PLANE_COMMAND_KEYS,
   type ControlPlaneCommandKey,
+  createDefaultControlPlaneConfig,
   discoverConfigPath,
+  getGlobalConfigPath,
   getProjectConfigPath,
+  loadControlPlaneConfig,
   loadRouterConfig,
   readControlPlaneSourceDocument,
+  type LayeredControlPlaneConfigInput,
 } from "./config.js"
 import {
   getHostProjectionDecision,
@@ -34,17 +40,21 @@ import {
   summarizeEffectiveSourceEntries,
   summarizeEffectiveSourceReadiness,
   summarizeLaneExplainability,
+  summarizeSourceToolRoleExplainability,
   summarizeSubagentExecutionDiagnostics,
   summarizeRoutingValidation,
   summarizeControlPlaneArtifacts,
   type ExplainTrace,
   type LaneExplainability,
+  type ResolveControlPlaneInput,
   type ResolvedControlPlane,
 } from "./control-plane.js"
+import { writeAuthorityWithRecoverySnapshotAtomically } from "./config-write.js"
 import type { ContextIndex } from "./context-index.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildClaudeArtifacts } from "./claude.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
+import { CONTEXT_LIFECYCLE_STAGES } from "./context-lifecycle.js"
 import { detectClaudeGstackAvailability } from "./gstack-detectors.js"
 import { isOmsOwnedArtifactFile, isOmsOwnedSkillFile, isOpenCodeRuntimeMetadataContent, materializeArtifacts } from "./materialize.js"
 import {
@@ -55,7 +65,7 @@ import {
 } from "./opencode.js"
 import { buildQwenArtifacts, discoverQwenUpstreamSkills } from "./qwen.js"
 import { explainAll, explainPhase, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
-import { normalizeWorkflowSourceRoutes, type WorkflowSourceEntry } from "./workflow-sources.js"
+import { normalizeWorkflowSourceRoutes, WORKFLOW_SOURCE_KINDS, type WorkflowSourceEntry } from "./workflow-sources.js"
 import {
   evaluateSuperpowersCompatibility,
   toSuperpowersAvailabilityResult,
@@ -94,15 +104,20 @@ const nodeFs = {
   mkdir: async (filePath: string, options?: { recursive?: boolean }) => {
     await fs.mkdir(filePath, { recursive: options?.recursive })
   },
-  writeFile: async (filePath: string, content: string) => {
-    await fs.writeFile(filePath, content)
+  chmod: async (filePath: string, mode: number) => {
+    await fs.chmod(filePath, mode)
+  },
+  lstat: async (filePath: string) => fs.lstat(filePath),
+  readlink: async (filePath: string) => fs.readlink(filePath),
+  stat: async (filePath: string) => fs.stat(filePath),
+  writeFile: async (filePath: string, content: string, options?: { mode?: number }) => {
+    await fs.writeFile(filePath, content, options)
   },
   rename: async (from: string, to: string) => {
     await fs.rename(from, to)
   },
   readdir: async (directory: string) => fs.readdir(directory),
   readFile: async (filePath: string) => fs.readFile(filePath, "utf8"),
-  stat: async (filePath: string) => fs.stat(filePath),
   unlink: async (filePath: string) => {
     await fs.unlink(filePath)
   },
@@ -110,7 +125,13 @@ const nodeFs = {
 
 type CliDeps = {
   mkdir: (filePath: string, options?: { recursive?: boolean }) => Promise<void>
+  chmod: (filePath: string, mode: number) => Promise<void>
+  lstat: (filePath: string) => Promise<{ isSymbolicLink: () => boolean }>
+  readlink: (filePath: string) => Promise<string>
+  rename: (from: string, to: string) => Promise<void>
+  stat: (filePath: string) => Promise<{ mode: number }>
   getCwd: () => string
+  homeDir?: () => string
   discoverConfigPath: typeof discoverConfigPath
   loadConfig: typeof loadRouterConfig
   resolveControlPlane: typeof resolveControlPlane
@@ -128,7 +149,7 @@ type CliDeps = {
   readdir: (directory: string) => Promise<string[]>
   readArtifactFile: (filePath: string) => Promise<string>
   artifactStat: (filePath: string) => Promise<{ isFile: () => boolean }>
-  writeFile: (filePath: string, content: string) => Promise<void>
+  writeFile: (filePath: string, content: string, options?: { mode?: number }) => Promise<void>
   unlink: (filePath: string) => Promise<void>
   detectOpenCodeSuperpowers: typeof detectOpenCodeSuperpowers
   detectCodexSuperpowers: typeof detectCodexSuperpowers
@@ -137,9 +158,24 @@ type CliDeps = {
   evaluateSuperpowersCompatibility: typeof evaluateSuperpowersCompatibility
 }
 
+type CliRuntimeSelectorInputs = Pick<ResolveControlPlaneInput,
+  | "runtimeLifecycleStage"
+  | "runtimeWorkflowSource"
+  | "runtimeRelativePath"
+  | "runtimeWorkloadTags"
+  | "runtimeModalityRequirements"
+  | "runtimeAgentRole"
+>
+
 const defaultDeps: CliDeps = {
   mkdir: nodeFs.mkdir,
+  chmod: nodeFs.chmod,
+  lstat: nodeFs.lstat,
+  readlink: nodeFs.readlink,
+  rename: nodeFs.rename,
+  stat: nodeFs.stat,
   getCwd: getCwd,
+  homeDir: homedir,
   discoverConfigPath,
   loadConfig: loadRouterConfig,
   resolveControlPlane,
@@ -168,8 +204,8 @@ const defaultDeps: CliDeps = {
   readdir: async (directory) => fs.readdir(directory),
   readArtifactFile: async (filePath) => fs.readFile(filePath, "utf8"),
   artifactStat: async (filePath) => fs.stat(filePath),
-  writeFile: async (filePath, content) => {
-    await fs.writeFile(filePath, content)
+  writeFile: async (filePath, content, options) => {
+    await fs.writeFile(filePath, content, options)
   },
   unlink: async (filePath) => {
     await fs.unlink(filePath)
@@ -209,6 +245,16 @@ function parseArgs(argv: string[]) {
 function getStringFlag(flags: Map<string, string | true>, name: string) {
   const value = flags.get(name)
   return typeof value === "string" ? value : undefined
+}
+
+function getCommaSeparatedFlag(flags: Map<string, string | true>, name: string) {
+  const value = getStringFlag(flags, name)
+  if (!value) {
+    return undefined
+  }
+
+  const parts = value.split(",").map((part) => part.trim()).filter((part) => part.length > 0)
+  return parts.length > 0 ? parts : undefined
 }
 
 function isAuthorRoutingMode(value: string | undefined): value is "superpowers" | "direct" {
@@ -492,6 +538,8 @@ function withCompatibility<T extends Record<string, unknown>>(
   contextIndex: ReturnType<typeof summarizeContextIndex>,
   contextCompression: ReturnType<typeof summarizeContextCompression>,
   contextProviders: ReturnType<typeof summarizeContextProviders>,
+  policyResolution?: ReturnType<typeof summarizePolicyResolution>,
+  policyDiagnostics?: ResolvedControlPlane["policyDiagnostics"],
 ) {
   return {
     ...payload,
@@ -499,6 +547,8 @@ function withCompatibility<T extends Record<string, unknown>>(
     ...(contextIndex ? { contextIndex } : {}),
     ...(contextCompression ? { contextCompression } : {}),
     ...(contextProviders ? { contextProviders } : {}),
+    ...(policyResolution ? { policyResolution } : {}),
+    ...(policyDiagnostics ? { policyDiagnostics } : {}),
   }
 }
 
@@ -561,23 +611,106 @@ function summarizeContextProviders(contextProviders: ResolvedControlPlane["conte
   return summarizedProviders.length > 0 ? summarizedProviders : undefined
 }
 
+function summarizeRecoveryWarnings(recovery: ResolvedControlPlane["recovery"]) {
+  if (recovery?.activeSource !== "last-known-good" || !recovery.lastKnownGoodPath) {
+    return undefined
+  }
+
+  return [
+    `Authority config failed to load; using last-known-good from ${recovery.lastKnownGoodPath}.`,
+  ]
+}
+
+function summarizePolicyResolution(policyResolution: ResolvedControlPlane["policyResolution"]) {
+  if (!policyResolution) {
+    return undefined
+  }
+
+  return {
+    snapshot: {
+      cwd: policyResolution.snapshot.cwd,
+      relativePath: policyResolution.snapshot.relativePath,
+      lifecycleStage: policyResolution.snapshot.lifecycleStage,
+      workflowSource: policyResolution.snapshot.workflowSource,
+      agentRole: policyResolution.snapshot.agentRole,
+      workloadTags: [...policyResolution.snapshot.workloadTags],
+      modalityRequirements: [...policyResolution.snapshot.modalityRequirements],
+    },
+    ...(policyResolution.provenance ? { provenance: { ...policyResolution.provenance } } : {}),
+    matchedRuleIds: [...policyResolution.matchedRuleIds],
+    policy: {
+      ...(policyResolution.policy.modelPolicy ? {
+        modelPolicy: {
+          ...policyResolution.policy.modelPolicy,
+          preferredProfiles: policyResolution.policy.modelPolicy.preferredProfiles
+            ? [...policyResolution.policy.modelPolicy.preferredProfiles]
+            : undefined,
+          requiredCapabilities: policyResolution.policy.modelPolicy.requiredCapabilities
+            ? [...policyResolution.policy.modelPolicy.requiredCapabilities]
+            : undefined,
+        },
+      } : {}),
+      ...(policyResolution.policy.contextPolicy ? { contextPolicy: { ...policyResolution.policy.contextPolicy } } : {}),
+      ...(policyResolution.policy.toolPolicy ? {
+        toolPolicy: {
+          ...policyResolution.policy.toolPolicy,
+          allowedSkillTags: policyResolution.policy.toolPolicy.allowedSkillTags
+            ? [...policyResolution.policy.toolPolicy.allowedSkillTags]
+            : undefined,
+          allowedMcpTags: policyResolution.policy.toolPolicy.allowedMcpTags
+            ? [...policyResolution.policy.toolPolicy.allowedMcpTags]
+            : undefined,
+          blockedToolTags: policyResolution.policy.toolPolicy.blockedToolTags
+            ? [...policyResolution.policy.toolPolicy.blockedToolTags]
+            : undefined,
+        },
+      } : {}),
+    },
+  }
+}
+
 function formatExplainOutput(
   payload: unknown,
   compatibility: SuperpowersCompatibilityResult | null,
   contextIndex: ReturnType<typeof summarizeContextIndex>,
   contextCompression: ReturnType<typeof summarizeContextCompression>,
   contextProviders: ReturnType<typeof summarizeContextProviders>,
+  warnings?: string[],
+  policyResolution?: ReturnType<typeof summarizePolicyResolution>,
+  policyDiagnostics?: ResolvedControlPlane["policyDiagnostics"],
 ) {
   if (Array.isArray(payload)) {
     return payload.map((item) => (
       item && typeof item === "object" && !Array.isArray(item)
-        ? withCompatibility(item as Record<string, unknown>, compatibility, contextIndex, contextCompression, contextProviders)
+        ? {
+            ...withCompatibility(
+            item as Record<string, unknown>,
+            compatibility,
+            contextIndex,
+            contextCompression,
+            contextProviders,
+            policyResolution,
+            policyDiagnostics,
+          ),
+            ...(warnings ? { warnings } : {}),
+          }
         : item
     ))
   }
 
   if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    return withCompatibility(payload as Record<string, unknown>, compatibility, contextIndex, contextCompression, contextProviders)
+    return {
+      ...withCompatibility(
+      payload as Record<string, unknown>,
+      compatibility,
+      contextIndex,
+      contextCompression,
+      contextProviders,
+      policyResolution,
+      policyDiagnostics,
+    ),
+      ...(warnings ? { warnings } : {}),
+    }
   }
 
   return {
@@ -586,7 +719,308 @@ function formatExplainOutput(
     ...(contextIndex ? { contextIndex } : {}),
     ...(contextCompression ? { contextCompression } : {}),
     ...(contextProviders ? { contextProviders } : {}),
+    ...(warnings ? { warnings } : {}),
+    ...(policyResolution ? { policyResolution } : {}),
+    ...(policyDiagnostics ? { policyDiagnostics } : {}),
   }
+}
+
+async function validateAuthorPolicyWriteCandidate(
+  cwd: string,
+  targetPath: string,
+  sourcePath: string,
+  renderedDocument: string,
+  homeDirectory: string | undefined,
+  deps: CliDeps,
+) {
+  const exists = async (filePath: string) => (
+    filePath === targetPath || filePath === sourcePath ? true : deps.artifactExists(filePath)
+  )
+  const readFile = async (filePath: string) => (
+    filePath === targetPath ? renderedDocument : deps.readArtifactFile(filePath)
+  )
+
+  await resolveControlPlane({
+    command: "status",
+    cwd,
+    explicitPath: targetPath,
+    ...(homeDirectory ? { homeDir: homeDirectory } : {}),
+    exists,
+    readFile,
+    loadControlPlaneConfig: (input) => loadControlPlaneConfig({ ...input, allowRecovery: false }),
+    buildContextIndex: async () => ({ artifacts: [], warnings: [] }),
+    resolveContextProviders: async () => [],
+  })
+}
+
+function inferHomeDirFromGlobalConfigPath(filePath: string) {
+  const configDirectory = path.dirname(filePath)
+  const parentDirectory = path.dirname(configDirectory)
+
+  if (path.basename(configDirectory) !== "oh-my-superagents" || path.basename(parentDirectory) !== ".config") {
+    return undefined
+  }
+
+  return path.dirname(parentDirectory)
+}
+
+function sortObjectKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortObjectKeys)
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nestedValue]) => [key, sortObjectKeys(nestedValue)]),
+    )
+  }
+
+  return value
+}
+
+function canonicalizeStringArray(values: string[] | undefined) {
+  return values ? [...values].sort() : undefined
+}
+
+function canonicalizeAuthorityWorkloadMapping(mapping: { path: string[]; workloadTags: string[] }) {
+  return {
+    path: canonicalizeStringArray(mapping.path) ?? [],
+    workloadTags: canonicalizeStringArray(mapping.workloadTags) ?? [],
+  }
+}
+
+function canonicalizePolicyRule(rule: Record<string, unknown>) {
+  const canonical = sortObjectKeys(rule) as Record<string, unknown>
+
+  const normalizeStringArrayProperties = (value: unknown): unknown => {
+    if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+      return [...value].sort()
+    }
+
+    if (Array.isArray(value)) {
+      return value.map(normalizeStringArrayProperties)
+    }
+
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => [key, normalizeStringArrayProperties(nestedValue)]),
+      )
+    }
+
+    return value
+  }
+
+  return normalizeStringArrayProperties(canonical) as Record<string, unknown>
+}
+
+function authorityWorkloadMappingsEqual(
+  left: { path: string[]; workloadTags: string[] },
+  right: { path: string[]; workloadTags: string[] },
+) {
+  return JSON.stringify(canonicalizeAuthorityWorkloadMapping(left)) === JSON.stringify(canonicalizeAuthorityWorkloadMapping(right))
+}
+
+function authorityPolicyRulesEqual(left: Record<string, unknown>, right: Record<string, unknown>) {
+  return JSON.stringify(canonicalizePolicyRule(left)) === JSON.stringify(canonicalizePolicyRule(right))
+}
+
+async function buildAuthorPolicyPreview(
+  cwd: string,
+  explicitPath: string | undefined,
+  deps: CliDeps,
+  write: boolean,
+  answers: {
+    verifyNeedsVision: boolean
+    subagentsUsePackets: boolean
+  },
+) {
+  const projectPath = getProjectConfigPath(cwd)
+  const globalPath = deps.homeDir ? getGlobalConfigPath(deps.homeDir()) : undefined
+  const explicitProjectOverlay = explicitPath === projectPath
+  const explicitRuntimeLayer = explicitPath === projectPath || (globalPath !== undefined && explicitPath === globalPath)
+  const discoveredPath = explicitProjectOverlay
+    ? await deps.discoverConfigPath({
+        cwd,
+        exists: async (filePath: string) => filePath === projectPath ? false : deps.artifactExists(filePath),
+      })
+      ?? projectPath
+    : explicitPath
+      ?? await deps.discoverConfigPath({ cwd, exists: deps.artifactExists })
+      ?? projectPath
+  const targetPath = explicitPath && explicitPath !== projectPath
+    ? projectPath
+    : (explicitPath ?? projectPath)
+  const emptyDocument: Awaited<ReturnType<typeof readControlPlaneSourceDocument>> = {
+    format: "layered",
+    config: { presets: {} },
+  }
+  const readDocumentOrEmpty = async (filePath: string) => {
+    try {
+      return await readControlPlaneSourceDocument(filePath, deps.readArtifactFile)
+    } catch (error) {
+      if (isMissingFsError(error)) {
+        return emptyDocument
+      }
+
+      throw error
+    }
+  }
+  const sourceDocument = await readDocumentOrEmpty(discoveredPath)
+  const targetDocument = discoveredPath === targetPath
+    ? sourceDocument
+    : await deps.artifactExists(targetPath)
+      ? await readDocumentOrEmpty(targetPath)
+      : emptyDocument
+  const layeredSourceDocument = explicitProjectOverlay && discoveredPath !== targetPath
+    ? {
+        config: {
+          ...sourceDocument.config,
+          settings: {
+            ...sourceDocument.config.settings,
+            ...targetDocument.config.settings,
+          },
+          authority: targetDocument.config.authority
+            ? {
+                workloadMappings: [
+                  ...(sourceDocument.config.authority?.workloadMappings ?? []),
+                  ...(targetDocument.config.authority?.workloadMappings ?? []),
+                ],
+                policyRules: [
+                  ...(sourceDocument.config.authority?.policyRules ?? []),
+                  ...(targetDocument.config.authority?.policyRules ?? []),
+                ],
+              }
+            : sourceDocument.config.authority,
+          evidence: targetDocument.config.evidence ?? sourceDocument.config.evidence,
+        } satisfies LayeredControlPlaneConfigInput,
+      }
+    : sourceDocument
+  const evidence = layeredSourceDocument.config.evidence
+  const existingAuthority = targetDocument.config.authority
+  const inheritedAuthority = layeredSourceDocument.config.authority
+  const bootstrapDocument = (() => {
+    const defaults = createDefaultControlPlaneConfig()
+    return {
+      settings: { activePreset: defaults.settings.activePreset },
+      profiles: { build: { ...defaults.profiles.build! } },
+      presets: {
+        default: {
+          label: defaults.presets.default.label,
+          short: defaults.presets.default.short,
+          routes: {},
+          defaultRoute: "build",
+        },
+      },
+    } satisfies LayeredControlPlaneConfigInput
+  })()
+  const standaloneSourceBootstrap = (() => {
+    if (explicitPath === undefined || explicitRuntimeLayer || discoveredPath === targetPath) {
+      return undefined
+    }
+
+    if (
+      sourceDocument.config.settings
+      && Object.keys(sourceDocument.config.presets).length > 0
+      && sourceDocument.config.profiles
+      && Object.keys(sourceDocument.config.profiles).length > 0
+    ) {
+      return sourceDocument.config
+    }
+
+    return undefined
+  })()
+
+  const proposal = buildPolicyAuthoringProposal({
+    detectedPaths: evidence?.detectedPaths ?? [],
+    answers,
+  })
+  const hasTargetOverlayState = Boolean(
+    targetDocument.config.authority
+    || targetDocument.config.settings
+    || targetDocument.config.evidence
+    || targetDocument.config.workflow
+    || targetDocument.config.profiles
+    || targetDocument.config.lanes
+    || targetDocument.config.sourcePresets
+    || targetDocument.config.compressionPresets
+    || targetDocument.config.contextProviders
+    || targetDocument.config.policyRules
+    || Object.keys(targetDocument.config.presets).length > 0,
+  )
+  const mergedAuthority = {
+    workloadMappings: [
+      ...(existingAuthority?.workloadMappings ?? []),
+      ...proposal.authority.workloadMappings.filter((mapping) => ![
+        ...(inheritedAuthority?.workloadMappings ?? []),
+        ...(existingAuthority?.workloadMappings ?? []),
+      ].some((existing) => authorityWorkloadMappingsEqual(existing, mapping))),
+    ],
+    policyRules: [
+      ...(existingAuthority?.policyRules ?? []),
+      ...proposal.authority.policyRules.filter((rule) => ![
+        ...(inheritedAuthority?.policyRules ?? []),
+        ...(existingAuthority?.policyRules ?? []),
+      ].some((existing) => authorityPolicyRulesEqual(existing as Record<string, unknown>, rule as Record<string, unknown>))),
+    ],
+  }
+  const nextDocument: LayeredControlPlaneConfigInput = {
+    ...(hasTargetOverlayState
+      ? targetDocument.config
+      : (standaloneSourceBootstrap
+          ?? (discoveredPath !== targetPath ? { presets: {} } satisfies LayeredControlPlaneConfigInput : bootstrapDocument))),
+    authority: mergedAuthority,
+  }
+  if (!hasTargetOverlayState && sourceDocument.config.settings?.defaultLane) {
+    nextDocument.settings = {
+      ...nextDocument.settings,
+      defaultLane: null,
+    }
+  }
+  const renderedDocument = `${JSON.stringify(nextDocument, null, 2)}\n`
+  const operation = hasTargetOverlayState ? "update" as const : "create" as const
+
+  if (write) {
+    await validateAuthorPolicyWriteCandidate(
+      cwd,
+      targetPath,
+      discoveredPath,
+      renderedDocument,
+      deps.homeDir?.() ?? inferHomeDirFromGlobalConfigPath(discoveredPath),
+      deps,
+    )
+    await writeAuthorityWithRecoverySnapshotAtomically(targetPath, renderedDocument, deps)
+  }
+
+  return {
+    proposal,
+    preview: {
+      path: targetPath,
+      operation,
+      rendered: renderedDocument,
+    },
+    written: write,
+    summaryText: [
+      `Authority authoring ${write ? "write" : "preview"}`,
+      `Source: ${discoveredPath}`,
+      `Target: ${targetPath}`,
+      `Detected paths: ${evidence?.detectedPaths.length ?? 0}`,
+      `Notes: ${proposal.notes.length}`,
+    ].join("\n"),
+  }
+}
+
+function formatAuthorPolicyOutput(result: Awaited<ReturnType<typeof buildAuthorPolicyPreview>>) {
+  return [
+    "Summary",
+    result.summaryText,
+    "",
+    "Result",
+    `Target: ${result.preview.path}`,
+    `Operation: ${result.preview.operation}`,
+    `Written: ${result.written ? "yes" : "no"}`,
+  ].join("\n")
 }
 
 function withExplainTrace(payload: Record<string, unknown>, trace: ExplainTrace) {
@@ -1659,8 +2093,7 @@ async function writePreparedConfig(
   prepared: Awaited<ReturnType<typeof prepareControlPlaneStateWrite>>,
   deps: CliDeps,
 ) {
-  await deps.mkdir(path.dirname(prepared.path), { recursive: true })
-  await deps.writeFile(prepared.path, prepared.content)
+  await writeAuthorityWithRecoverySnapshotAtomically(prepared.path, prepared.content, deps)
 }
 
 function resolvePresetKey(resolved: ResolvedControlPlane, selector: string) {
@@ -1776,13 +2209,17 @@ async function buildControlPlaneStatus(
   explicitPath: string | undefined,
   host: CliHost,
   runtimeLane: string | undefined,
+  runtimeSelectorInputs: CliRuntimeSelectorInputs,
   deps: CliDeps,
 ) {
-  const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
+  const resolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane, ...runtimeSelectorInputs })
   assertWorkflowSupport(resolved.config, "status", host)
   const contextIndex = summarizeContextIndex(resolved.contextIndex)
   const contextCompression = summarizeContextCompression(resolved.contextCompression)
   const contextProviders = summarizeContextProviders(resolved.contextProviders)
+  const warnings = summarizeRecoveryWarnings(resolved.recovery)
+  const policyResolution = summarizePolicyResolution(resolved.policyResolution)
+  const policyDiagnostics = resolved.policyDiagnostics
   const compatibility = await maybeResolveCompatibility(
     resolved.config,
     host,
@@ -1852,9 +2289,13 @@ async function buildControlPlaneStatus(
       .map(([key, preset]) => ({ key, label: preset.label, short: preset.short, description: preset.description }))
       .sort((left, right) => left.key.localeCompare(right.key)),
     source: formatControlPlaneSource(resolved),
+    sourceToolRoles: summarizeSourceToolRoleExplainability(resolved),
     ...(contextProviders ? { contextProviders } : {}),
     ...(contextIndex ? { contextIndex } : {}),
     ...(contextCompression ? { contextCompression } : {}),
+    ...(policyResolution ? { policyResolution } : {}),
+    ...(policyDiagnostics ? { policyDiagnostics } : {}),
+    ...(warnings ? { warnings } : {}),
     effectiveSources: resolved.effectiveSources,
     effectiveSourceEntries: summarizeEffectiveSourceEntries(resolved),
     effectiveSourceReadiness,
@@ -1872,13 +2313,17 @@ async function buildControlPlaneDoctor(
   explicitPath: string | undefined,
   host: CliHost,
   runtimeLane: string | undefined,
+  runtimeSelectorInputs: CliRuntimeSelectorInputs,
   deps: CliDeps,
 ) {
-  const resolved = await deps.resolveControlPlane({ command: "doctor", cwd, explicitPath, runtimeLane })
+  const resolved = await deps.resolveControlPlane({ command: "doctor", cwd, explicitPath, runtimeLane, ...runtimeSelectorInputs })
   assertWorkflowSupport(resolved.config, "doctor", host)
   const contextIndex = summarizeContextIndex(resolved.contextIndex)
   const contextCompression = summarizeContextCompression(resolved.contextCompression)
   const contextProviders = summarizeContextProviders(resolved.contextProviders)
+  const warnings = summarizeRecoveryWarnings(resolved.recovery)
+  const policyResolution = summarizePolicyResolution(resolved.policyResolution)
+  const policyDiagnostics = resolved.policyDiagnostics
   const compatibility = await maybeResolveCompatibility(
     resolved.config,
     host,
@@ -1928,6 +2373,9 @@ async function buildControlPlaneDoctor(
     ...(contextProviders ? { contextProviders } : {}),
     ...(contextIndex ? { contextIndex } : {}),
     ...(contextCompression ? { contextCompression } : {}),
+    ...(policyResolution ? { policyResolution } : {}),
+    ...(policyDiagnostics ? { policyDiagnostics } : {}),
+    ...(warnings ? { warnings } : {}),
     effectiveSources: resolved.effectiveSources,
     effectiveSourceEntries: summarizeEffectiveSourceEntries(resolved),
     effectiveSourceReadiness,
@@ -1968,12 +2416,40 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     const host = getStringFlag(flags, "--host")
     const explicitPath = getStringFlag(flags, "--config")
     const runtimeLane = getStringFlag(flags, "--lane")
+    const rawRuntimeRelativePath = getStringFlag(flags, "--path")
+    const rawRuntimeLifecycleStage = getStringFlag(flags, "--lifecycle-stage")
+    const rawRuntimeWorkflowSource = getStringFlag(flags, "--workflow-source")
+    const rawRuntimeWorkloadTags = getCommaSeparatedFlag(flags, "--workload-tags")
+    const rawRuntimeModalityRequirements = getCommaSeparatedFlag(flags, "--modality-requirements")
+    const rawRuntimeAgentRole = getStringFlag(flags, "--agent-role")
+
+    if (rawRuntimeLifecycleStage && !(CONTEXT_LIFECYCLE_STAGES as readonly string[]).includes(rawRuntimeLifecycleStage)) {
+      return { exitCode: 1, stdout: "", stderr: `Invalid --lifecycle-stage: ${rawRuntimeLifecycleStage}` }
+    }
+
+    if (rawRuntimeWorkflowSource && !(WORKFLOW_SOURCE_KINDS as readonly string[]).includes(rawRuntimeWorkflowSource)) {
+      return { exitCode: 1, stdout: "", stderr: `Invalid --workflow-source: ${rawRuntimeWorkflowSource}` }
+    }
+
+    if (rawRuntimeAgentRole && rawRuntimeAgentRole !== "primary" && rawRuntimeAgentRole !== "subagent") {
+      return { exitCode: 1, stdout: "", stderr: `Invalid --agent-role: ${rawRuntimeAgentRole}` }
+    }
+
+    const runtimeSelectorInputs = {
+      runtimeRelativePath: rawRuntimeRelativePath,
+      runtimeLifecycleStage: rawRuntimeLifecycleStage as ResolveControlPlaneInput["runtimeLifecycleStage"],
+      runtimeWorkflowSource: rawRuntimeWorkflowSource as ResolveControlPlaneInput["runtimeWorkflowSource"],
+      runtimeWorkloadTags: rawRuntimeWorkloadTags,
+      runtimeModalityRequirements: rawRuntimeModalityRequirements,
+      runtimeAgentRole: rawRuntimeAgentRole as ResolveControlPlaneInput["runtimeAgentRole"],
+    }
 
     if (
       command !== "sync"
       && command !== "explain"
       && command !== "bootstrap"
       && command !== "author"
+      && command !== "config"
       && command !== "status"
       && command !== "doctor"
       && command !== "use"
@@ -2010,7 +2486,32 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       }
     }
 
+    if (command === "config") {
+      if (positionals[0] === "author") {
+        const preview = flags.get("--preview") === true
+        const write = flags.get("--write") === true
+        if (preview === write) {
+          return { exitCode: 1, stdout: "", stderr: "Specify exactly one of --preview or --write" }
+        }
+        const output = await buildAuthorPolicyPreview(cwd, explicitPath, deps, write, {
+          verifyNeedsVision: flags.get("--verify-needs-vision") === true,
+          subagentsUsePackets: flags.get("--subagents-use-packets") === true,
+        })
+
+        return {
+          exitCode: 0,
+          stdout: write
+            ? `Wrote authority config to ${output.preview.path}\n\n${output.preview.rendered}`
+            : `Proposed authority config\n\n${output.preview.rendered}`,
+          stderr: formatAuthorPolicyOutput(output),
+        }
+      }
+
+      return { exitCode: 1, stdout: "", stderr: "Unknown config subcommand" }
+    }
+
     if (command === "author") {
+      
       if (positionals[0] !== "routing") {
         return { exitCode: 1, stdout: "", stderr: "Unknown author subcommand" }
       }
@@ -2056,7 +2557,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     if (command === "status") {
       return {
         exitCode: 0,
-        stdout: JSON.stringify(await buildControlPlaneStatus(cwd, explicitPath, cliHost, runtimeLane, deps), null, 2),
+        stdout: JSON.stringify(await buildControlPlaneStatus(cwd, explicitPath, cliHost, runtimeLane, runtimeSelectorInputs, deps), null, 2),
         stderr: "",
       }
     }
@@ -2064,14 +2565,14 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     if (command === "doctor") {
       return {
         exitCode: 0,
-        stdout: JSON.stringify(await buildControlPlaneDoctor(cwd, explicitPath, cliHost, runtimeLane, deps), null, 2),
+        stdout: JSON.stringify(await buildControlPlaneDoctor(cwd, explicitPath, cliHost, runtimeLane, runtimeSelectorInputs, deps), null, 2),
         stderr: "",
       }
     }
 
     if (command === "explain") {
       const loaded = await deps.loadConfig({ cwd, explicitPath })
-      const explainResolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane })
+      const explainResolved = await deps.resolveControlPlane({ command: "status", cwd, explicitPath, runtimeLane, ...runtimeSelectorInputs })
       const shouldAttachExplainControlPlaneDiagnostics = host === "opencode"
         || runtimeLane !== undefined
         || (host === "codex" && loaded.config.workflow.kind === "direct")
@@ -2082,6 +2583,9 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       const contextIndex = summarizeContextIndex(explainResolved.contextIndex)
       const contextCompression = summarizeContextCompression(explainResolved.contextCompression)
       const contextProviders = summarizeContextProviders(explainResolved.contextProviders)
+      const warnings = summarizeRecoveryWarnings(explainResolved.recovery)
+      const policyResolution = summarizePolicyResolution(explainResolved.policyResolution)
+      const policyDiagnostics = explainResolved.policyDiagnostics
       assertWorkflowSupport(explainConfig, "explain", cliHost)
 
       if (explainConfig.workflow.kind === "direct") {
@@ -2109,11 +2613,14 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
                   resolved,
                 )
                 : explainAllDirect(directConfig),
-              null,
-              contextIndex,
-              contextCompression,
-              contextProviders,
-            ), null, 2),
+               null,
+               contextIndex,
+               contextCompression,
+               contextProviders,
+               warnings,
+               policyResolution,
+               policyDiagnostics,
+             ), null, 2),
             stderr: "",
           }
         }
@@ -2145,11 +2652,14 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
                   resolved,
                 )
                 : explainDirectIntent(directConfig, intent),
-              null,
-              contextIndex,
-              contextCompression,
-              contextProviders,
-            ),
+               null,
+               contextIndex,
+               contextCompression,
+               contextProviders,
+               warnings,
+               policyResolution,
+               policyDiagnostics,
+             ),
             null,
             2,
           ),
@@ -2189,11 +2699,14 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
                   resolved,
                 )
                 : explainAllForCliHost(loaded.config, cliHost as ExplainCliHost, deps),
-              compatibility,
-              contextIndex,
-              contextCompression,
-              contextProviders,
-            ), null, 2),
+               compatibility,
+               contextIndex,
+               contextCompression,
+               contextProviders,
+               warnings,
+               policyResolution,
+               policyDiagnostics,
+             ), null, 2),
             stderr: "",
         }
       }
@@ -2244,11 +2757,14 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
                   resolved,
                 )
                 : explainPhaseForCliHost(loaded.config, cliHost as ExplainCliHost, phase as BuiltInPhase, deps),
-              compatibility,
-              contextIndex,
-              contextCompression,
-              contextProviders,
-            ),
+               compatibility,
+               contextIndex,
+               contextCompression,
+               contextProviders,
+               warnings,
+               policyResolution,
+               policyDiagnostics,
+             ),
             null,
           2,
         ),

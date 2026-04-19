@@ -248,6 +248,21 @@ const defaultSuperpowersCompatibleReadiness = Object.fromEntries(
   ])),
 )
 
+const defaultSourceToolRoles = {
+  workflowSources: ["superpowers"],
+  artifactDialects: [],
+  externalCapabilityScope: {
+    included: ["user-installed skills", "plugins", "MCPs", "providers"],
+    excluded: ["upstream workflow-internal skills"],
+  },
+  lines: [
+    "Workflow sources: superpowers",
+    "Artifact dialects: none detected",
+    "External capability policy targets user-installed skills, plugins, MCPs, and providers only.",
+    "Excluded from OMS capability policy: upstream workflow-internal skills.",
+  ],
+} as const
+
 function createDirectCliDeps(overrides: Record<string, unknown> = {}) {
   return createCliDeps({
     loadConfig: async () => ({
@@ -520,6 +535,9 @@ const defaultArtifactFs = createArtifactFs({
 function createCliDeps(overrides: Record<string, unknown> = {}) {
   return {
     mkdir: async () => {},
+    chmod: async () => {},
+    rename: async () => {},
+    stat: async () => ({ mode: 0o644 }),
     getCwd: () => "/workspace/project",
     discoverConfigPath: async () => undefined,
     loadConfig: async () => ({
@@ -1193,6 +1211,65 @@ describe("runCli", () => {
     })
   })
 
+  it("explains openspec as an artifact dialect and not a workflow source", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          presets: {
+            ...controlPlaneConfig.presets,
+            default: {
+              ...controlPlaneConfig.presets.default,
+              sourceRoutes: {
+                "phase.plan": "gstack" as const,
+              },
+            },
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: {
+            ...controlPlaneConfig.presets.default,
+            sourceRoutes: {
+              "phase.plan": "gstack" as const,
+            },
+          },
+        },
+        contextIndex: {
+          artifacts: [
+            {
+              kind: "spec" as const,
+              path: "openspec/specs/auth/spec.md",
+              authority: "authoritative" as const,
+              source: "external" as const,
+              lifecycleStage: "design" as const,
+            },
+          ],
+          warnings: [],
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {
+          "phase.plan": "gstack" as const,
+        },
+      }),
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Workflow sources: superpowers, gstack")
+    expect(result.stdout).toContain("Artifact dialects: openspec")
+    expect(result.stdout).toContain(
+      "External capability policy targets user-installed skills, plugins, MCPs, and providers only.",
+    )
+    expect(result.stdout).toContain("Excluded from OMS capability policy: upstream workflow-internal skills.")
+    expect(result.stdout).not.toContain("workflow source: openspec")
+  })
+
   it("includes effective source information in doctor output", async () => {
     const result = await runCli(["doctor", "--host", "opencode"], createCliDeps({
       resolveControlPlane: async () => ({
@@ -1236,6 +1313,71 @@ describe("runCli", () => {
     expect(output.effectiveSources).toEqual({
       "phase.brainstorm": "gstack",
     })
+  })
+
+  it("surfaces last-known-good recovery warnings in status and doctor output", async () => {
+    const recoveryWarning =
+      "Authority config failed to load; using last-known-good from /workspace/project/.oms/last-known-good.json."
+    const deps = createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/.oms/last-known-good.json"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        recovery: {
+          activeSource: "last-known-good" as const,
+          authorityError: "Invalid JSONC",
+          lastKnownGoodPath: "/workspace/project/.oms/last-known-good.json",
+        },
+      }),
+    })
+
+    const status = await runCli(["status", "--host", "opencode"], deps)
+    const doctor = await runCli(["doctor", "--host", "opencode"], deps)
+
+    expect(status.exitCode).toBe(0)
+    expect(doctor.exitCode).toBe(0)
+    expect(JSON.parse(status.stdout).warnings).toEqual([recoveryWarning])
+    expect(JSON.parse(doctor.stdout).warnings).toEqual([recoveryWarning])
+  })
+
+  it("surfaces last-known-good recovery warnings in explain output", async () => {
+    const recoveryWarning =
+      "Authority config failed to load; using last-known-good from /workspace/project/.oms/last-known-good.json."
+    const deps = createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/.oms/last-known-good.json"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        recovery: {
+          activeSource: "last-known-good" as const,
+          authorityError: "Invalid JSONC",
+          lastKnownGoodPath: "/workspace/project/.oms/last-known-good.json",
+        },
+      }),
+    })
+
+    const explain = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], deps)
+
+    expect(explain.exitCode).toBe(0)
+    expect(JSON.parse(explain.stdout).warnings).toEqual([recoveryWarning])
   })
 
   it("shows indexed context artifacts in doctor output", async () => {
@@ -1297,6 +1439,206 @@ describe("runCli", () => {
       authoritativePaths: indexedContextArtifacts.artifacts.map((artifact) => artifact.path),
       warnings: [],
     })
+  })
+
+  it("includes matched selector rule ids in status output", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        policyResolution: {
+          snapshot: {
+            cwd: "/workspace/project",
+            relativePath: "frontend/app/page.tsx",
+            lifecycleStage: "verify",
+            workflowSource: "superpowers",
+            agentRole: "subagent",
+            workloadTags: ["frontend"],
+            modalityRequirements: ["vision-input"],
+          },
+          provenance: {
+            lifecycleStage: "explicit",
+            workflowSource: "explicit",
+            relativePath: "explicit",
+            workloadTags: "explicit",
+            modalityRequirements: "explicit",
+            agentRole: "explicit",
+          },
+          matchedRuleIds: ["frontend-verify"],
+          policy: {
+            modelPolicy: { preferredProfiles: ["vision-review"] },
+          },
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.policyResolution).toEqual({
+      snapshot: {
+        cwd: "/workspace/project",
+        relativePath: "frontend/app/page.tsx",
+        lifecycleStage: "verify",
+        workflowSource: "superpowers",
+        agentRole: "subagent",
+        workloadTags: ["frontend"],
+        modalityRequirements: ["vision-input"],
+      },
+      provenance: {
+        lifecycleStage: "explicit",
+        workflowSource: "explicit",
+        relativePath: "explicit",
+        workloadTags: "explicit",
+        modalityRequirements: "explicit",
+        agentRole: "explicit",
+      },
+      matchedRuleIds: ["frontend-verify"],
+      policy: {
+        modelPolicy: { preferredProfiles: ["vision-review"] },
+      },
+    })
+  })
+
+  it("includes selector snapshot diagnostics in status output even when no rules match", async () => {
+    const result = await runCli(["status", "--host", "opencode"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        policyResolution: {
+          snapshot: {
+            cwd: "/workspace/project",
+            relativePath: "backend/service.ts",
+            lifecycleStage: "verify",
+            workflowSource: "superpowers",
+            agentRole: "primary",
+            workloadTags: ["backend"],
+            modalityRequirements: [],
+          },
+          provenance: {
+            lifecycleStage: "explicit",
+            workflowSource: "explicit",
+            relativePath: "explicit",
+            workloadTags: "explicit",
+            modalityRequirements: "explicit",
+            agentRole: "explicit",
+          },
+          matchedRuleIds: [],
+          policy: {},
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.policyResolution).toEqual({
+      snapshot: {
+        cwd: "/workspace/project",
+        relativePath: "backend/service.ts",
+        lifecycleStage: "verify",
+        workflowSource: "superpowers",
+        agentRole: "primary",
+        workloadTags: ["backend"],
+        modalityRequirements: [],
+      },
+      provenance: {
+        lifecycleStage: "explicit",
+        workflowSource: "explicit",
+        relativePath: "explicit",
+        workloadTags: "explicit",
+        modalityRequirements: "explicit",
+        agentRole: "explicit",
+      },
+      matchedRuleIds: [],
+      policy: {},
+    })
+  })
+
+  it("forwards explicit runtime selector inputs from CLI status flags", async () => {
+    let capturedInput: Record<string, unknown> | undefined
+
+    const result = await runCli([
+      "status",
+      "--host",
+      "opencode",
+      "--path",
+      "frontend/app/page.tsx",
+      "--lifecycle-stage",
+      "verify",
+      "--workflow-source",
+      "superpowers",
+      "--workload-tags",
+      "frontend,visual",
+      "--modality-requirements",
+      "vision-input,browser-observation",
+      "--agent-role",
+      "subagent",
+    ], createCliDeps({
+      resolveControlPlane: async (input) => {
+        capturedInput = input as Record<string, unknown>
+
+        return {
+          source: {
+            kind: "file" as const,
+            hasRealSource: true,
+            path: "/workspace/project/oh-my-superagents.config.jsonc",
+            sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+          },
+          config: controlPlaneConfig,
+          activePreset: {
+            key: "default",
+            preset: controlPlaneConfig.presets.default,
+          },
+          laneState: defaultLaneState,
+          contextProviders: [],
+          effectiveSources: {},
+        }
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(capturedInput).toMatchObject({
+      runtimeRelativePath: "frontend/app/page.tsx",
+      runtimeLifecycleStage: "verify",
+      runtimeWorkflowSource: "superpowers",
+      runtimeWorkloadTags: ["frontend", "visual"],
+      runtimeModalityRequirements: ["vision-input", "browser-observation"],
+      runtimeAgentRole: "subagent",
+    })
+  })
+
+  it("rejects invalid runtime selector flag values", async () => {
+    const result = await runCli([
+      "status",
+      "--host",
+      "opencode",
+      "--lifecycle-stage",
+      "verfiy",
+    ], createCliDeps())
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toMatch(/lifecycle-stage/i)
   })
 
   it("shows context providers in status output", async () => {
@@ -1512,6 +1854,110 @@ describe("runCli", () => {
         ],
         warnings: [],
       },
+    })
+  })
+
+  it("attaches a shared policyResolution blob to explain output when available", async () => {
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        policyResolution: {
+          snapshot: {
+            cwd: "/workspace/project",
+            relativePath: "frontend/app/page.tsx",
+            lifecycleStage: "verify",
+            workflowSource: "superpowers",
+            agentRole: "subagent",
+            workloadTags: ["frontend"],
+            modalityRequirements: ["vision-input"],
+          },
+          provenance: {
+            lifecycleStage: "explicit",
+            workflowSource: "explicit",
+            relativePath: "explicit",
+            workloadTags: "explicit",
+            modalityRequirements: "explicit",
+            agentRole: "explicit",
+          },
+          matchedRuleIds: ["frontend-verify"],
+          policy: {
+            modelPolicy: { preferredProfiles: ["vision-review"] },
+          },
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.policyResolution).toEqual({
+      snapshot: {
+        cwd: "/workspace/project",
+        relativePath: "frontend/app/page.tsx",
+        lifecycleStage: "verify",
+        workflowSource: "superpowers",
+        agentRole: "subagent",
+        workloadTags: ["frontend"],
+        modalityRequirements: ["vision-input"],
+      },
+      provenance: {
+        lifecycleStage: "explicit",
+        workflowSource: "explicit",
+        relativePath: "explicit",
+        workloadTags: "explicit",
+        modalityRequirements: "explicit",
+        agentRole: "explicit",
+      },
+      matchedRuleIds: ["frontend-verify"],
+      policy: {
+        modelPolicy: { preferredProfiles: ["vision-review"] },
+      },
+    })
+  })
+
+  it("emits policyDiagnostics in explain output when available", async () => {
+    const result = await runCli(["explain", "--host", "opencode", "--phase", "brainstorming"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        policyDiagnostics: {
+          authorityRuleCount: 2,
+          authorityWorkloadMappingCount: 1,
+          evidenceDetectedPathCount: 3,
+          evidenceIgnoredForRuntime: true,
+        },
+      }),
+    }))
+
+    const output = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(output.policyDiagnostics).toEqual({
+      authorityRuleCount: 2,
+      authorityWorkloadMappingCount: 1,
+      evidenceDetectedPathCount: 3,
+      evidenceIgnoredForRuntime: true,
     })
   })
 
@@ -2394,10 +2840,11 @@ describe("runCli", () => {
   })
 
   it("bootstraps a default layered config during first-run opencode sync", async () => {
-    let persistedPath = ""
-    let persistedContent = ""
+    const tempContent = new Map<string, string>()
+    const persistedContents = new Map<string, string>()
     let materializeCalled = false
     const createdDirectories: string[] = []
+    const renamedPaths: string[] = []
 
     const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
       resolveControlPlane: async ({ command }: { command: string }) => {
@@ -2430,8 +2877,11 @@ describe("runCli", () => {
         if (!createdDirectories.includes(path.dirname(filePath))) {
           throw new Error(`ENOENT: missing parent directory for ${filePath}`)
         }
-        persistedPath = filePath
-        persistedContent = content
+        tempContent.set(filePath, content)
+      },
+      rename: async (from: string, to: string) => {
+        renamedPaths.push(to)
+        persistedContents.set(to, tempContent.get(from) ?? "")
       },
       materializeArtifacts: async () => {
         materializeCalled = true
@@ -2449,8 +2899,19 @@ describe("runCli", () => {
     expect(result.exitCode).toBe(0)
     expect(parsed.compatibility).toEqual(compatibleOpencode)
     expect(createdDirectories).toContain("/home/tester/.config/oh-my-superagents")
-    expect(persistedPath).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
-    expect(JSON.parse(persistedContent)).toEqual({
+    expect(createdDirectories).toContain("/home/tester/.config/oh-my-superagents/.oms")
+    expect(renamedPaths).toEqual(expect.arrayContaining([
+      "/home/tester/.config/oh-my-superagents/config.jsonc",
+      "/home/tester/.config/oh-my-superagents/.oms/last-known-good.json",
+    ]))
+    expect(JSON.parse(persistedContents.get("/home/tester/.config/oh-my-superagents/config.jsonc") ?? "null")).toEqual({
+      settings: {
+        activePreset: "default",
+        enabled: true,
+      },
+      presets: controlPlaneConfig.presets,
+    })
+    expect(JSON.parse(persistedContents.get("/home/tester/.config/oh-my-superagents/.oms/last-known-good.json") ?? "null")).toEqual({
       settings: {
         activePreset: "default",
         enabled: true,
@@ -2991,6 +3452,1365 @@ describe("runCli", () => {
     expect(result.stderr).toContain("Result")
     expect(result.stderr).toContain("Written: no")
     expect(result.stderr).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
+  })
+
+  it("renders an authority proposal preview before write", async () => {
+    const result = await runCli([
+      "config",
+      "author",
+      "--preview",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+              notes: ["Detected likely frontend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Proposed authority config")
+    expect(result.stdout).toContain("workloadMappings")
+    expect(result.stdout).toContain("frontend/**")
+    expect(result.stderr).toContain("Authority authoring preview")
+    expect(result.stderr).toContain("Written: no")
+  })
+
+  it("includes answer-driven authority rules in config author preview when flags are provided", async () => {
+    const result = await runCli([
+      "config",
+      "author",
+      "--preview",
+      "--verify-needs-vision",
+      "--subagents-use-packets",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+              notes: ["Detected likely frontend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain('"id": "verify-vision"')
+    expect(result.stdout).toContain('"id": "subagent-packet-default"')
+    expect(result.stderr).toContain("Notes: 3")
+  })
+
+  it("rejects config author when neither --preview nor --write is provided", async () => {
+    const result = await runCli([
+      "config",
+      "author",
+    ], createCliDeps())
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toBe("")
+    expect(result.stderr).toContain("Specify exactly one of --preview or --write")
+  })
+
+  it("rejects config author when both --preview and --write are provided", async () => {
+    const result = await runCli([
+      "config",
+      "author",
+      "--preview",
+      "--write",
+    ], createCliDeps())
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toBe("")
+    expect(result.stderr).toContain("Specify exactly one of --preview or --write")
+  })
+
+  it("reads authority authoring inputs from an explicit config path", async () => {
+    const result = await runCli([
+      "config",
+      "author",
+      "--preview",
+      "--config",
+      "/workspace/project/custom.config.jsonc",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/workspace/project/custom.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "backend/**", suggestedTags: ["backend"] }],
+              notes: ["Detected likely backend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("backend/**")
+    expect(result.stderr).toContain("Source: /workspace/project/custom.config.jsonc")
+  })
+
+  it("keeps confirmed authority writes project-scoped even when --config points at a non-project source path", async () => {
+    let writtenPath = ""
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+      "--config",
+      "/tmp/custom.config.jsonc",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/tmp/custom.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "backend/**", suggestedTags: ["backend"] }],
+              notes: ["Detected likely backend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async (filePath: string, content: string) => {
+        writtenPath = filePath
+        writtenContent = content
+      },
+      rename: async (_from: string, to: string) => {
+        writtenPath = to
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenPath).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(writtenContent).toContain("backend/**")
+    expect(result.stderr).toContain("Source: /tmp/custom.config.jsonc")
+    expect(result.stderr).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
+  })
+
+  it("writes a standalone-loadable project config when --config points at a non-project source path", async () => {
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+      "--config",
+      "/tmp/custom.config.jsonc",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/tmp/custom.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "backend/**", suggestedTags: ["backend"] }],
+              notes: ["Detected likely backend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async (_filePath: string, content: string) => {
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenContent).toContain('"activePreset": "default"')
+    expect(writtenContent).toContain('"default": {')
+    expect(writtenContent).toContain('"build": {')
+
+    const resolved = await resolveOmsControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async (filePath: string) => filePath === "/workspace/project/oh-my-superagents.config.jsonc",
+      readFile: async (filePath: string) => {
+        if (filePath !== "/workspace/project/oh-my-superagents.config.jsonc") {
+          throw new Error(`Unexpected read: ${filePath}`)
+        }
+
+        return writtenContent
+      },
+      buildContextIndex: async () => ({
+        artifacts: [],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.activePreset.key).toBe("default")
+    expect(resolved.config.profiles.build).toMatchObject({ model: "openai/gpt-5" })
+  })
+
+  it("previews confirmed authority writes as project-scoped even when --config points at a non-project source path", async () => {
+    const result = await runCli([
+      "config",
+      "author",
+      "--preview",
+      "--config",
+      "/tmp/custom.config.jsonc",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/tmp/custom.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "backend/**", suggestedTags: ["backend"] }],
+              notes: ["Detected likely backend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("backend/**")
+    expect(result.stdout).toContain('"activePreset": "default"')
+    expect(result.stdout).toContain('"default": {')
+    expect(result.stdout).toContain('"build": {')
+    expect(result.stderr).toContain("Source: /tmp/custom.config.jsonc")
+    expect(result.stderr).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
+    expect(result.stderr).toContain("Operation: create")
+  })
+
+  it("uses the global config as source and the explicit missing project config path as overlay target", async () => {
+    let writtenPath = ""
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+      "--config",
+      "/workspace/project/oh-my-superagents.config.jsonc",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => filePath === "/home/tester/.config/oh-my-superagents/config.jsonc",
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "global-base" },
+            presets: {
+              "global-base": {
+                label: "GlobalPreset",
+                short: "glo",
+                routes: {
+                  brainstorming: "reviewer",
+                },
+                defaultRoute: "reviewer",
+              },
+            },
+            profiles: {
+              reviewer: { model: "anthropic/claude-sonnet-4-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "global/**", suggestedTags: ["shared"] }],
+              notes: ["Detected shared workload"],
+            },
+          })
+        }
+
+        const error = new Error(`ENOENT: ${filePath}`) as Error & { code?: string }
+        error.code = "ENOENT"
+        throw error
+      },
+      writeFile: async (filePath: string, content: string) => {
+        writtenPath = filePath
+        writtenContent = content
+      },
+      rename: async (_from: string, to: string) => {
+        writtenPath = to
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenPath).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(writtenContent).toContain("global/**")
+    expect(writtenContent).not.toContain("GlobalPreset")
+    expect(result.stderr).toContain("Source: /home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(result.stderr).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
+  })
+
+  it("uses layered global-plus-project semantics for explicit project config paths", async () => {
+    let writtenPath = ""
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+      "--config",
+      "/workspace/project/oh-my-superagents.config.jsonc",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => (
+        filePath === "/workspace/project/oh-my-superagents.config.jsonc"
+        || filePath === "/home/tester/.config/oh-my-superagents/config.jsonc"
+      ),
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "global-base" },
+            presets: {
+              "global-base": {
+                label: "GlobalPreset",
+                short: "glo",
+                routes: {},
+                defaultRoute: "reviewer",
+              },
+              review: {
+                label: "Review",
+                short: "rev",
+                routes: {},
+                defaultRoute: "reviewer",
+              },
+            },
+            profiles: {
+              reviewer: { model: "anthropic/claude-sonnet-4-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "global/**", suggestedTags: ["shared"] }],
+              notes: ["Detected shared workload"],
+            },
+          })
+        }
+
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "review" },
+            presets: {},
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async (filePath: string, content: string) => {
+        writtenPath = filePath
+        writtenContent = content
+      },
+      rename: async (_from: string, to: string) => {
+        writtenPath = to
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenPath).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(writtenContent).toContain('"activePreset": "review"')
+    expect(writtenContent).toContain("global/**")
+    expect(writtenContent).not.toContain("GlobalPreset")
+    expect(result.stderr).toContain("Source: /home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(result.stderr).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
+  })
+
+  it("discovers the existing config path for authority authoring preview", async () => {
+    const result = await runCli([
+      "config",
+      "author",
+      "--preview",
+    ], createCliDeps({
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "global/**", suggestedTags: ["shared"] }],
+              notes: ["Detected shared workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("global/**")
+    expect(result.stderr).toContain("Source: /home/tester/.config/oh-my-superagents/config.jsonc")
+  })
+
+  it("starts authority preview from an empty layered project document when no config exists yet", async () => {
+    const result = await runCli([
+      "config",
+      "author",
+      "--preview",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        const error = new Error(`ENOENT: ${filePath}`) as Error & { code?: string }
+        error.code = "ENOENT"
+        throw error
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Proposed authority config")
+    expect(result.stdout).toContain('"authority": {')
+    expect(result.stdout).toContain('"settings": {')
+    expect(result.stdout).toContain('"activePreset": "default"')
+    expect(result.stdout).toContain('"presets": {')
+    expect(result.stdout).toContain('"default": {')
+    expect(result.stderr).toContain("Source: /workspace/project/oh-my-superagents.config.jsonc")
+    expect(result.stderr).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
+    expect(result.stderr).toContain("Operation: create")
+    expect(result.stderr).toContain("Written: no")
+  })
+
+  it("writes an initial layered project authority document when no config exists yet", async () => {
+    let writtenPath = ""
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        const error = new Error(`ENOENT: ${filePath}`) as Error & { code?: string }
+        error.code = "ENOENT"
+        throw error
+      },
+      writeFile: async (filePath: string, content: string) => {
+        writtenPath = filePath
+        writtenContent = content
+      },
+      rename: async (_from: string, to: string) => {
+        writtenPath = to
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Wrote authority config")
+    expect(writtenPath).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(writtenContent).toContain('"authority": {')
+    expect(writtenContent).toContain('"settings": {')
+    expect(writtenContent).toContain('"activePreset": "default"')
+    expect(writtenContent).toContain('"presets": {')
+    expect(writtenContent).toContain('"default": {')
+    expect(result.stderr).toContain("Operation: create")
+    expect(result.stderr).toContain("Written: yes")
+
+    const resolved = await resolveOmsControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async (filePath: string) => filePath === "/workspace/project/oh-my-superagents.config.jsonc",
+      readFile: async (filePath: string) => {
+        if (filePath !== "/workspace/project/oh-my-superagents.config.jsonc") {
+          throw new Error(`Unexpected read: ${filePath}`)
+        }
+
+        return writtenContent
+      },
+      buildContextIndex: async () => ({
+        artifacts: [],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.activePreset.key).toBe("default")
+  })
+
+  it("returns a distinct write confirmation for config author --write", async () => {
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+              notes: ["Detected likely frontend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Wrote authority config")
+    expect(result.stdout).not.toContain("Proposed authority config")
+  })
+
+  it("writes answer-driven authority rules when config author --write receives answer flags", async () => {
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+      "--verify-needs-vision",
+      "--subagents-use-packets",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+              notes: ["Detected likely frontend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async (_filePath: string, content: string) => {
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenContent).toContain('"id": "verify-vision"')
+    expect(writtenContent).toContain('"id": "subagent-packet-default"')
+  })
+
+  it("writes a no-config authority bootstrap that remains loadable by the real control-plane path", async () => {
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        const error = new Error(`ENOENT: ${filePath}`) as Error & { code?: string }
+        error.code = "ENOENT"
+        throw error
+      },
+      writeFile: async (_filePath: string, content: string) => {
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenContent).toContain('"settings": {')
+    expect(writtenContent).toContain('"activePreset": "default"')
+    expect(writtenContent).toContain('"presets": {')
+    expect(writtenContent).toContain('"default": {')
+    expect(writtenContent).toContain('"profiles": {')
+    expect(writtenContent).toContain('"build": {')
+  })
+
+  it("fails closed when config author --write would keep the merged config unloadable", async () => {
+    let wrote = false
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+    ], createCliDeps({
+      homeDir: () => "/home/tester",
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      artifactExists: async (filePath: string) => filePath === "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "missing" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+              notes: ["Detected likely frontend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async () => {
+        wrote = true
+      },
+      rename: async () => {
+        wrote = true
+      },
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("settings.activePreset must reference an existing preset: missing")
+    expect(wrote).toBe(false)
+  })
+
+  it("fails closed when config author --write would only validate via last-known-good recovery", async () => {
+    let wrote = false
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => (
+        filePath === "/workspace/project/oh-my-superagents.config.jsonc"
+        || filePath === "/workspace/project/.oms/last-known-good.json"
+      ),
+      discoverConfigPath: async () => "/workspace/project/oh-my-superagents.config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Broken",
+                short: "brk",
+                extends: "missing",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+              notes: ["Detected likely frontend workload"],
+            },
+          })
+        }
+
+        if (filePath === "/workspace/project/.oms/last-known-good.json") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Recovered",
+                short: "rec",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async () => {
+        wrote = true
+      },
+      rename: async () => {
+        wrote = true
+      },
+    }))
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain("Preset default extends unknown preset: missing")
+    expect(wrote).toBe(false)
+  })
+
+  it("writes discovered global authority input into the project config path instead of mutating the global config", async () => {
+    let writtenPath = ""
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => filePath === "/home/tester/.config/oh-my-superagents/config.jsonc",
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "global-base" },
+            presets: {
+              "global-base": {
+                label: "GlobalPreset",
+                short: "glo",
+                routes: {
+                  brainstorming: "reviewer",
+                },
+                defaultRoute: "reviewer",
+              },
+            },
+            profiles: {
+              reviewer: { model: "anthropic/claude-sonnet-4-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "global/**", suggestedTags: ["shared"] }],
+              notes: ["Detected shared workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async (filePath: string, content: string) => {
+        writtenPath = filePath
+        writtenContent = content
+      },
+      rename: async (_from: string, to: string) => {
+        writtenPath = to
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("Wrote authority config")
+    expect(writtenPath).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(writtenContent).toContain("global/**")
+    expect(writtenContent).toContain('"authority": {')
+    expect(writtenContent).toContain('"presets": {}')
+    expect(writtenContent).not.toContain('"activePreset": "default"')
+    expect(writtenContent).not.toContain('"default": {')
+    expect(writtenContent).not.toContain("GlobalPreset")
+    expect(writtenContent).not.toContain('"reviewer"')
+    expect(writtenContent).not.toContain('"brainstorming": "reviewer"')
+    expect(writtenContent).not.toContain('"evidence"')
+    expect(result.stderr).toContain("Source: /home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(result.stderr).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
+  })
+
+  it("preserves inherited effective routing and model behavior after writing a project authority overlay over a global source", async () => {
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => filePath === "/home/tester/.config/oh-my-superagents/config.jsonc",
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "review" },
+            profiles: {
+              reviewer: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+            },
+            presets: {
+              review: {
+                label: "Review",
+                short: "rev",
+                routes: { brainstorming: "reviewer" },
+                defaultRoute: "reviewer",
+              },
+            },
+            evidence: {
+              detectedPaths: [{ path: "global/**", suggestedTags: ["shared"] }],
+              notes: ["Detected shared workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async (_filePath: string, content: string) => {
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenContent).not.toContain('"activePreset": "default"')
+    expect(writtenContent).not.toContain('"default": {')
+    expect(writtenContent).not.toContain('"build": {')
+
+    const resolved = await resolveOmsControlPlane({
+      command: "status",
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: async (filePath: string) => (
+        filePath === "/workspace/project/oh-my-superagents.config.jsonc"
+        || filePath === "/home/tester/.config/oh-my-superagents/config.jsonc"
+      ),
+      readFile: async (filePath: string) => {
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return writtenContent
+        }
+
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "review" },
+            profiles: {
+              reviewer: { model: "anthropic/claude-sonnet-4-5-20250929", variant: "high" },
+            },
+            presets: {
+              review: {
+                label: "Review",
+                short: "rev",
+                routes: { brainstorming: "reviewer" },
+                defaultRoute: "reviewer",
+              },
+            },
+            evidence: {
+              detectedPaths: [{ path: "global/**", suggestedTags: ["shared"] }],
+              notes: ["Detected shared workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      buildContextIndex: async () => ({
+        artifacts: [],
+        warnings: [],
+      }),
+    })
+
+    expect(resolved.activePreset.key).toBe("review")
+    expect(resolved.activePreset.preset.defaultRoute).toBe("reviewer")
+    expect(resolved.config.profiles.reviewer).toMatchObject({ model: "anthropic/claude-sonnet-4-5-20250929" })
+  })
+
+  it("writes a defaultLane null sentinel when bootstrapping a local authority overlay over a global defaultLane", async () => {
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+    ], createCliDeps({
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            settings: {
+              activePreset: "global-base",
+              defaultLane: "ops",
+            },
+            presets: {
+              "global-base": {
+                label: "GlobalPreset",
+                short: "glo",
+                routes: {},
+                defaultRoute: "reviewer",
+                usesLanes: ["ops"],
+                defaultLane: "ops",
+              },
+            },
+            lanes: {
+              ops: {
+                label: "Ops",
+                description: "Operations lane",
+                routes: {},
+                defaultRoute: "reviewer",
+              },
+            },
+            profiles: {
+              reviewer: { model: "anthropic/claude-sonnet-4-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "global/**", suggestedTags: ["shared"] }],
+              notes: ["Detected shared workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async (_filePath: string, content: string) => {
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenContent).toContain('"defaultLane": null')
+  })
+
+  it("previews the project-scoped authority layer instead of copying unrelated global config", async () => {
+    const result = await runCli([
+      "config",
+      "author",
+      "--preview",
+    ], createCliDeps({
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "global-base" },
+            presets: {
+              "global-base": {
+                label: "GlobalPreset",
+                short: "glo",
+                routes: {
+                  brainstorming: "reviewer",
+                },
+                defaultRoute: "reviewer",
+              },
+            },
+            profiles: {
+              reviewer: { model: "anthropic/claude-sonnet-4-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "global/**", suggestedTags: ["shared"] }],
+              notes: ["Detected shared workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain('"authority": {')
+    expect(result.stdout).toContain('"global/**"')
+    expect(result.stdout).toContain('"presets": {}')
+    expect(result.stdout).not.toContain('"activePreset": "default"')
+    expect(result.stdout).not.toContain('"default": {')
+    expect(result.stdout).not.toContain("GlobalPreset")
+    expect(result.stdout).not.toContain('"reviewer"')
+    expect(result.stdout).not.toContain('"evidence"')
+    expect(result.stderr).toContain("Source: /home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(result.stderr).toContain("Target: /workspace/project/oh-my-superagents.config.jsonc")
+    expect(result.stderr).toContain("Operation: create")
+  })
+
+  it("writes the proposed authority config into the real layered config path", async () => {
+    let writtenPath = ""
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+              notes: ["Detected likely frontend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async (filePath: string, content: string) => {
+        writtenPath = filePath
+        writtenContent = content
+      },
+      rename: async (_from: string, to: string) => {
+        writtenPath = to
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenPath).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(writtenContent).toContain("workloadMappings")
+    expect(writtenContent).toContain("policyRules")
+    expect(writtenContent).toContain("frontend")
+    expect(result.stderr).toContain("Authority authoring write")
+    expect(result.stderr).toContain("Written: yes")
+  })
+
+  it("writes authority config through a temp path before renaming into place", async () => {
+    const writeCalls: Array<{ filePath: string; content: string; options?: { mode?: number } }> = []
+    const renameCalls: Array<{ from: string; to: string }> = []
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            evidence: {
+              detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+              notes: ["Detected likely frontend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      stat: async (filePath: string) => {
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return { mode: 0o600 }
+        }
+
+        throw new Error(`Unexpected stat: ${filePath}`)
+      },
+      writeFile: async (filePath: string, content: string, options?: { mode?: number }) => {
+        writeCalls.push({ filePath, content, options })
+      },
+      rename: async (from: string, to: string) => {
+        renameCalls.push({ from, to })
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writeCalls).toHaveLength(2)
+    expect(writeCalls[0]?.filePath).toMatch(/^\/workspace\/project\/\.oms\/last-known-good\.json\./)
+    expect(writeCalls[1]?.filePath).toMatch(/^\/workspace\/project\/oh-my-superagents\.config\.jsonc\./)
+    expect(writeCalls.map((call) => call.filePath)).toSatisfy((paths: string[]) => paths.every((filePath) => /\.tmp$/.test(filePath)))
+    expect(writeCalls.map((call) => call.options)).toEqual([{ mode: 0o600 }, { mode: 0o600 }])
+    expect(writeCalls.map((call) => call.content)).toEqual([
+      expect.stringContaining("workloadMappings"),
+      expect.stringContaining("workloadMappings"),
+    ])
+    expect(renameCalls).toEqual([
+      {
+        from: writeCalls[0]!.filePath,
+        to: "/workspace/project/.oms/last-known-good.json",
+      },
+      {
+        from: writeCalls[1]!.filePath,
+        to: "/workspace/project/oh-my-superagents.config.jsonc",
+      },
+    ])
+  })
+
+  it("merges authority authoring updates with existing authority content instead of replacing it", async () => {
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+    ], createCliDeps({
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            authority: {
+              workloadMappings: [{ path: ["docs/**"], workloadTags: ["docs"] }],
+              policyRules: [{
+                id: "existing-rule",
+                selector: { lifecycleStage: ["verify"] },
+                policy: { contextPolicy: { packetFirst: true } },
+              }],
+            },
+            evidence: {
+              detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+              notes: ["Detected likely frontend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async (_filePath: string, content: string) => {
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenContent).toContain('"docs/**"')
+    expect(writtenContent).toContain('"frontend/**"')
+    expect(writtenContent).toContain('"existing-rule"')
+  })
+
+  it("does not duplicate semantically equivalent authority content when existing mappings and rules are reordered", async () => {
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+      "--verify-needs-vision",
+      "--subagents-use-packets",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => filePath === "/workspace/project/oh-my-superagents.config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            authority: {
+              workloadMappings: [{
+                workloadTags: ["visual", "frontend"],
+                path: ["frontend/**"],
+              }],
+              policyRules: [
+                {
+                  id: "verify-vision",
+                  policy: {
+                    modelPolicy: { requiredCapabilities: ["vision-input"] },
+                  },
+                  selector: {
+                    modalityRequirements: ["vision-input"],
+                    lifecycleStage: ["verify"],
+                  },
+                },
+                {
+                  id: "subagent-packet-default",
+                  policy: {
+                    contextPolicy: { packetFirst: true },
+                  },
+                  selector: {
+                    agentRole: ["subagent"],
+                  },
+                },
+              ],
+            },
+            evidence: {
+              detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+              notes: ["Detected likely frontend workload"],
+            },
+          })
+        }
+
+        throw new Error(`Unexpected read: ${filePath}`)
+      },
+      writeFile: async (_filePath: string, content: string) => {
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenContent).toContain('"workloadMappings": [')
+    expect(writtenContent).toContain('"path": [')
+    expect(writtenContent).toContain('"workloadTags": [')
+    expect(writtenContent.match(/"verify-vision"/g)).toHaveLength(1)
+    expect(writtenContent.match(/"subagent-packet-default"/g)).toHaveLength(1)
+  })
+
+  it("does not duplicate semantically equivalent inherited authority from lower-priority layers", async () => {
+    let writtenContent = ""
+
+    const result = await runCli([
+      "config",
+      "author",
+      "--write",
+      "--verify-needs-vision",
+      "--subagents-use-packets",
+      "--config",
+      "/workspace/project/oh-my-superagents.config.jsonc",
+    ], createCliDeps({
+      artifactExists: async (filePath: string) => filePath === "/home/tester/.config/oh-my-superagents/config.jsonc",
+      discoverConfigPath: async () => "/home/tester/.config/oh-my-superagents/config.jsonc",
+      readArtifactFile: async (filePath: string) => {
+        if (filePath === "/home/tester/.config/oh-my-superagents/config.jsonc") {
+          return JSON.stringify({
+            settings: { activePreset: "default" },
+            presets: {
+              default: {
+                label: "Default",
+                short: "def",
+                routes: {},
+                defaultRoute: "build",
+              },
+            },
+            profiles: {
+              build: { model: "openai/gpt-5" },
+            },
+            authority: {
+              workloadMappings: [{
+                workloadTags: ["visual", "frontend"],
+                path: ["frontend/**"],
+              }],
+              policyRules: [
+                {
+                  id: "verify-vision",
+                  policy: {
+                    modelPolicy: { requiredCapabilities: ["vision-input"] },
+                  },
+                  selector: {
+                    modalityRequirements: ["vision-input"],
+                    lifecycleStage: ["verify"],
+                  },
+                },
+                {
+                  id: "subagent-packet-default",
+                  policy: {
+                    contextPolicy: { packetFirst: true },
+                  },
+                  selector: {
+                    agentRole: ["subagent"],
+                  },
+                },
+              ],
+            },
+            evidence: {
+              detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+              notes: ["Detected likely frontend workload"],
+            },
+          })
+        }
+
+        const error = new Error(`ENOENT: ${filePath}`) as Error & { code?: string }
+        error.code = "ENOENT"
+        throw error
+      },
+      writeFile: async (_filePath: string, content: string) => {
+        writtenContent = content
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(writtenContent).toContain('"presets": {}')
+    expect(writtenContent.match(/"frontend\/\*\*"/g)).toBeNull()
+    expect(writtenContent.match(/"verify-vision"/g)).toBeNull()
+    expect(writtenContent.match(/"subagent-packet-default"/g)).toBeNull()
   })
 
   it("accepts a JSONC model inventory for routing preview", async () => {
@@ -3781,8 +5601,10 @@ describe("runCli", () => {
   })
 
   it("matches a unique preset short in use and writes activePreset plus enabled true", async () => {
-    let persistedContent = ""
+    const tempContent = new Map<string, string>()
+    const persistedContents = new Map<string, string>()
     const createdDirectories: string[] = []
+    const renamedPaths: string[] = []
 
     const result = await runCli(["use", "def", "--host", "opencode"], createCliDeps({
       prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
@@ -3797,13 +5619,29 @@ describe("runCli", () => {
         if (!createdDirectories.includes(path.dirname(filePath))) {
           throw new Error(`ENOENT: missing parent directory for ${filePath}`)
         }
-        persistedContent = content
+        tempContent.set(filePath, content)
+      },
+      rename: async (from: string, to: string) => {
+        renamedPaths.push(to)
+        persistedContents.set(to, tempContent.get(from) ?? "")
       },
     }))
 
     expect(result.exitCode).toBe(0)
     expect(createdDirectories).toContain("/home/tester/.config/oh-my-superagents")
-    expect(JSON.parse(persistedContent)).toEqual({
+    expect(createdDirectories).toContain("/home/tester/.config/oh-my-superagents/.oms")
+    expect(renamedPaths).toEqual(expect.arrayContaining([
+      "/home/tester/.config/oh-my-superagents/config.jsonc",
+      "/home/tester/.config/oh-my-superagents/.oms/last-known-good.json",
+    ]))
+    expect(JSON.parse(persistedContents.get("/home/tester/.config/oh-my-superagents/config.jsonc") ?? "null")).toEqual({
+      settings: {
+        activePreset: "default",
+        enabled: true,
+      },
+      presets: controlPlaneConfig.presets,
+    })
+    expect(JSON.parse(persistedContents.get("/home/tester/.config/oh-my-superagents/.oms/last-known-good.json") ?? "null")).toEqual({
       settings: {
         activePreset: "default",
         enabled: true,
@@ -3843,6 +5681,11 @@ describe("runCli", () => {
         }
 
         persistedPath = filePath
+      },
+      rename: async (_from: string, to: string) => {
+        if (to.endsWith("/config.jsonc")) {
+          persistedPath = to
+        }
       },
     }))
 
@@ -4407,17 +6250,34 @@ describe("runCli", () => {
   })
 
   it("writes enabled false for disable", async () => {
-    let persistedContent = ""
+    const tempContent = new Map<string, string>()
+    const persistedContents = new Map<string, string>()
+    const renamedPaths: string[] = []
 
     const result = await runCli(["disable", "--host", "opencode"], createCliDeps({
       artifactExists: async () => false,
-      writeFile: async (_filePath: string, content: string) => {
-        persistedContent = content
+      writeFile: async (filePath: string, content: string) => {
+        tempContent.set(filePath, content)
+      },
+      rename: async (from: string, to: string) => {
+        renamedPaths.push(to)
+        persistedContents.set(to, tempContent.get(from) ?? "")
       },
     }))
 
     expect(result.exitCode).toBe(0)
-    expect(JSON.parse(persistedContent)).toEqual({
+    expect(renamedPaths).toEqual(expect.arrayContaining([
+      "/workspace/project/oh-my-superagents.config.jsonc",
+      "/workspace/project/.oms/last-known-good.json",
+    ]))
+    expect(JSON.parse(persistedContents.get("/workspace/project/oh-my-superagents.config.jsonc") ?? "null")).toEqual({
+      settings: {
+        activePreset: "default",
+        enabled: false,
+      },
+      presets: controlPlaneConfig.presets,
+    })
+    expect(JSON.parse(persistedContents.get("/workspace/project/.oms/last-known-good.json") ?? "null")).toEqual({
       settings: {
         activePreset: "default",
         enabled: false,
@@ -4779,6 +6639,7 @@ describe("runCli", () => {
         path: "/workspace/project/oh-my-superagents.config.jsonc",
         sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
       },
+      sourceToolRoles: defaultSourceToolRoles,
       effectiveSourceEntries: defaultSuperpowersEffectiveSourceEntries,
       effectiveSourceReadiness: defaultSuperpowersCompatibleReadiness,
       host: "opencode",

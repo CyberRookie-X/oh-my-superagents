@@ -1,0 +1,50 @@
+# OMS Full AI Reference
+
+Generated from stable OMS catalogs and schemas. Use the JSON catalogs and schemas as the source of truth.
+
+## Capability Catalog Contract
+- Source: `schemas/oms-capability-catalog.schema.json`
+- Title: OMS Capability Catalog
+- Required top-level fields: none
+- Top-level properties: models, tools
+- Definitions: model, tool
+
+## Onboarding Question Graph Contract
+- Source: `schemas/oms-onboarding-question-graph.schema.json`
+- Title: OMS Onboarding Question Graph
+- Required top-level fields: version, questions
+- Top-level properties: version, questions
+- Definitions: question, write
+
+## Capability Models
+- backend-text: tags=backend, reasoning-heavy; supports=text, code
+- vision-review: tags=frontend, review; supports=text, vision-input
+
+## Capability Tools
+- playwright: kind=mcp; tags=browser, visual
+
+## Onboarding Questions
+### frontend-visual-verification
+Do verify flows need screenshots or visual review?
+- policyRules[0].id => "verify-vision"
+- policyRules[0].selector.lifecycleStage => ["verify"]
+- policyRules[0].selector.modalityRequirements => ["vision-input"]
+- policyRules[0].policy.modelPolicy.requiredCapabilities => ["vision-input"]
+
+### subagent-packet-first
+Should subagents default to packet-first context handoff?
+- policyRules[1].id => "subagent-packet-default"
+- policyRules[1].selector.agentRole => ["subagent"]
+- policyRules[1].policy.contextPolicy.packetFirst => true
+
+### review-vs-build-workload
+Is the workload more review-heavy than build-heavy?
+- policyRules[2].id => "review-workload-default"
+- policyRules[2].selector.workloadTags => ["review"]
+- policyRules[2].policy.modelPolicy.preferredProfiles => ["vision-review"]
+
+### browser-external-tools
+Will the workflow rely on browser-oriented external tools?
+- policyRules[3].id => "browser-tooling-default"
+- policyRules[3].selector => {}
+- policyRules[3].policy.toolPolicy.allowedMcpTags => ["browser","visual"]

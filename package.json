@@ -8,19 +8,25 @@
     ".": "./dist/plugin.js",
     "./plugin": "./dist/plugin.js",
     "./library": "./dist/index.js",
-    "./schema": "./schemas/oh-my-superagents.schema.json"
+    "./schema": "./schemas/oh-my-superagents.schema.json",
+    "./catalogs/oms-capabilities.json": "./catalogs/oms-capabilities.json",
+    "./catalogs/oms-onboarding-question-graph.json": "./catalogs/oms-onboarding-question-graph.json",
+    "./schemas/oms-capability-catalog.schema.json": "./schemas/oms-capability-catalog.schema.json",
+    "./schemas/oms-onboarding-question-graph.schema.json": "./schemas/oms-onboarding-question-graph.schema.json"
   },
   "bin": {
     "oh-my-superagents": "dist/bin.js"
   },
   "files": [
     "dist",
+    "catalogs",
     "schemas",
     "README.md"
   ],
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit && tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 --strict --esModuleInterop true --skipLibCheck true test/public-api-config-typecheck.ts test/public-api-context-providers-typecheck.ts",
+    "docs:ai": "node --experimental-strip-types scripts/generate-ai-docs.ts",
     "test": "vitest run"
   },
   "dependencies": {

@@ -85,6 +85,81 @@ describe("selectContextPacks", () => {
     ])
   })
 
+  it("admits authoritative or advisory external openspec artifacts into planning packs", () => {
+    const selection = selectContextPacks({
+      lifecycleStage: "plan",
+      canonicalRoute: "phase.plan",
+      resolvedSource: "superpowers",
+      artifacts: [
+        { kind: "spec", path: "openspec/specs/auth/spec.md", authority: "authoritative", source: "external" },
+        { kind: "plan", path: "openspec/changes/add-auth/tasks.md", authority: "advisory", source: "external" },
+        { kind: "plan", path: ".memorybank/derived-plan.md", authority: "derived", source: "external" },
+      ],
+      policy: {
+        mode: "auto",
+        engine: "hybrid",
+        inlineLevel: "minimal",
+        moments: { planCheckpoint: true },
+        safety: { allowConditional: false, requireFreshVerification: true },
+      },
+    })
+
+    expect(selection.packIds).toEqual(["spec-core", "plan-core"])
+    expect(selection.artifacts.map((artifact) => artifact.path)).toEqual([
+      "openspec/specs/auth/spec.md",
+      "openspec/changes/add-auth/tasks.md",
+    ])
+  })
+
+  it("does not select plan-centric packIds for pure-derived external spec or plan artifacts", () => {
+    const selection = selectContextPacks({
+      lifecycleStage: "plan",
+      canonicalRoute: "phase.plan",
+      resolvedSource: "superpowers",
+      artifacts: [
+        { kind: "spec", path: ".memorybank/derived-spec.md", authority: "derived", source: "external" },
+        { kind: "plan", path: ".memorybank/derived-plan.md", authority: "derived", source: "external" },
+      ],
+      policy: {
+        mode: "auto",
+        engine: "hybrid",
+        inlineLevel: "minimal",
+        moments: { planCheckpoint: true },
+        safety: { allowConditional: false, requireFreshVerification: true },
+      },
+    })
+
+    expect(selection.packIds).toEqual([])
+    expect(selection.artifacts).toEqual([])
+  })
+
+  it("admits authoritative or advisory external openspec artifacts into resume packs", () => {
+    const selection = selectContextPacks({
+      lifecycleStage: "resume",
+      canonicalRoute: "phase.plan",
+      resolvedSource: "superpowers",
+      artifacts: [
+        { kind: "spec", path: "openspec/specs/auth/spec.md", authority: "authoritative", source: "external" },
+        { kind: "plan", path: "openspec/changes/add-auth/tasks.md", authority: "advisory", source: "external" },
+        { kind: "knowledge", path: ".gsd/KNOWLEDGE.md", authority: "derived", source: "gsd" },
+      ],
+      policy: {
+        mode: "auto",
+        engine: "hybrid",
+        inlineLevel: "standard",
+        moments: { sessionResume: true },
+        safety: { allowConditional: false, requireFreshVerification: true },
+      },
+    })
+
+    expect(selection.packIds).toEqual(["spec-core", "plan-core", "knowledge-support"])
+    expect(selection.artifacts.map((artifact) => artifact.path)).toEqual([
+      "openspec/specs/auth/spec.md",
+      "openspec/changes/add-auth/tasks.md",
+      ".gsd/KNOWLEDGE.md",
+    ])
+  })
+
   it("does not select plan packs for non-planning routes", () => {
     const selection = selectContextPacks({
       lifecycleStage: "plan",

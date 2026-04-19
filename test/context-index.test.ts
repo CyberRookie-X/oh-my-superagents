@@ -85,6 +85,76 @@ describe("buildContextIndex", () => {
     expect(index.artifacts).toEqual([])
   })
 
+  it("indexes openspec artifacts as external authoritative or advisory inputs", async () => {
+    const index = await buildContextIndex({
+      cwd: "/repo",
+      walkFiles: async () => [
+        "openspec/specs/auth/spec.md",
+        "openspec/changes/add-auth/tasks.md",
+      ],
+    })
+
+    expect(index.artifacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "openspec/specs/auth/spec.md",
+        kind: "spec",
+        authority: "authoritative",
+        source: "external",
+      }),
+      expect.objectContaining({
+        path: "openspec/changes/add-auth/tasks.md",
+        kind: "plan",
+        authority: "advisory",
+        source: "external",
+      }),
+    ]))
+  })
+
+  it("does not classify nested openspec lookalikes outside the openspec root as openspec artifacts", async () => {
+    const nestedLookalikePath = "docs/superpowers/specs/examples/openspec/specs/auth/spec.md"
+    const index = await buildContextIndex({
+      cwd: "/repo",
+      walkFiles: async () => [nestedLookalikePath],
+    })
+
+    expect(index.artifacts).toEqual([
+      expect.objectContaining({
+        path: nestedLookalikePath,
+        kind: "spec",
+        authority: "authoritative",
+        source: "oms",
+      }),
+    ])
+  })
+
+  it("walks openspec root content from disk without treating nested lookalikes as openspec artifacts", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "context-index-"))
+
+    try {
+      await createFile(cwd, "openspec/specs/auth/spec.md")
+      await createFile(cwd, "docs/superpowers/specs/examples/openspec/specs/auth/spec.md")
+
+      const index = await buildContextIndex({ cwd })
+
+      expect(index.artifacts).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          path: "openspec/specs/auth/spec.md",
+          kind: "spec",
+          authority: "authoritative",
+          source: "external",
+        }),
+        expect.objectContaining({
+          path: "docs/superpowers/specs/examples/openspec/specs/auth/spec.md",
+          kind: "spec",
+          authority: "authoritative",
+          source: "oms",
+        }),
+      ]))
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
   it("walks optional roots from disk in stable order while ignoring missing roots", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "context-index-"))
 

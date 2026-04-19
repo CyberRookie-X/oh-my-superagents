@@ -2,6 +2,7 @@ import { readdir, stat } from "node:fs/promises"
 import path from "node:path"
 import { createContextArtifact, type ContextArtifact } from "./context-artifacts.js"
 import type { ContextProviderCapability } from "./context-manifest.js"
+import { classifyOpenSpecArtifact } from "./openspec.js"
 import type { ResolvedContextProvider } from "./context-providers.js"
 
 export type ContextProviderAvailabilitySummary = {
@@ -58,6 +59,18 @@ export function summarizeContextProviders(
 }
 
 function classifyIndexedFile(filePath: string): ContextArtifact[] {
+  const openSpecArtifact = classifyOpenSpecArtifact(filePath)
+
+  if (openSpecArtifact) {
+    return [createContextArtifact({
+      kind: openSpecArtifact.kind,
+      path: filePath,
+      authority: openSpecArtifact.kind === "spec" ? "authoritative" : "advisory",
+      source: "external",
+      lifecycleStage: openSpecArtifact.kind === "spec" ? "design" : "plan",
+    })]
+  }
+
   if (filePath.startsWith("docs/superpowers/specs/")) {
     return [createContextArtifact({ kind: "spec", path: filePath, authority: "authoritative", source: "oms", lifecycleStage: "design" })]
   }
@@ -89,6 +102,7 @@ async function defaultWalkFiles(cwd: string) {
   const roots = [
     "docs/superpowers/specs",
     "docs/superpowers/plans",
+    "openspec",
     ".gsd",
     ".planning",
     ".memorybank",

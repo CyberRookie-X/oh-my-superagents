@@ -90,6 +90,18 @@
         "$ref": "#/$defs/contextProvider"
       }
     },
+    "authority": {
+      "$ref": "#/$defs/authority"
+    },
+    "evidence": {
+      "$ref": "#/$defs/evidence"
+    },
+    "policyRules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/policyRule"
+      }
+    },
     "presets": {
       "type": "object",
       "propertyNames": {
@@ -353,6 +365,18 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/contextProvider"
+          }
+        },
+        "authority": {
+          "$ref": "#/$defs/authority"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "policyRules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/policyRule"
           }
         },
         "profiles": {
@@ -626,6 +650,174 @@
         { "$ref": "#/$defs/cliContextProvider" },
         { "$ref": "#/$defs/mcpContextProvider" }
       ]
+    },
+    "evidenceDetectedPath": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "suggestedTags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "detectedPaths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidenceDetectedPath" }
+        },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "authorityWorkloadMapping": {
+      "type": "object",
+      "required": ["path", "workloadTags"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "workloadTags": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workloadMappings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/authorityWorkloadMapping" }
+        },
+        "policyRules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/policyRule" }
+        }
+      }
+    },
+    "policySelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "lifecycleStage": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "bootstrap",
+              "design",
+              "prepare_workspace",
+              "plan",
+              "execute_task",
+              "review",
+              "verify",
+              "integrate_branch",
+              "checkpoint",
+              "resume"
+            ]
+          }
+        },
+        "workflowSource": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/workflowSourceKind" }
+        },
+        "agentRole": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["primary", "subagent"] }
+        },
+        "workloadTags": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "modalityRequirements": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "policyModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preferredProfiles": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "effort": { "enum": ["fast", "balanced", "deep", "max", null] },
+        "preferWindowClass": { "enum": ["small", "medium", "large", null] },
+        "requiredCapabilities": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "policyContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compressionPreset": { "type": ["string", "null"], "minLength": 1 },
+        "packetFirst": { "type": ["boolean", "null"] },
+        "maxCharsBeforeCompression": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "policyTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowedSkillTags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "allowedMcpTags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "blockedToolTags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "policyFamilies": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "modelPolicy": { "$ref": "#/$defs/policyModel" },
+        "contextPolicy": { "$ref": "#/$defs/policyContext" },
+        "toolPolicy": { "$ref": "#/$defs/policyTool" }
+      }
+    },
+    "policyRule": {
+      "type": "object",
+      "required": ["selector", "policy"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "selector": { "$ref": "#/$defs/policySelector" },
+        "policy": { "$ref": "#/$defs/policyFamilies" }
+      }
     },
     "fileContextProvider": {
       "type": "object",

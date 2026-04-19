@@ -25,6 +25,10 @@ export * from "./context-provider-mcp.js"
 export * from "./context-packs.js"
 export * from "./context-manifest.js"
 export * from "./context-compression.js"
+export * from "./policy-families.js"
+export * from "./policy-resolution.js"
+export * from "./policy-selectors.js"
+export * from "./authority-config.js"
 export { createDirectSourceEntries, createDirectWorkflowSourceEntries, toDirectCanonicalRouteId } from "./workflow-direct.js"
 export {
   SUPERPOWERS_CANONICAL_ROUTE_CATALOG,

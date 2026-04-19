@@ -75,6 +75,271 @@ describe("loadControlPlaneConfig", () => {
     expect(config.compressionPresets).toBeUndefined()
   })
 
+  it("accepts selector-based policy rules", async () => {
+    const loaded = await loadControlPlaneConfig({
+      cwd: "/repo",
+      explicitPath: "/repo/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => JSON.stringify({
+        settings: { activePreset: "default" },
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        policyRules: [{
+          selector: { path: ["frontend/**"], lifecycleStage: ["verify"] },
+          policy: { modelPolicy: { preferredProfiles: ["frontend-vision"] } },
+        }],
+      }),
+    })
+
+    expect(loaded.config.policyRules?.[0]?.policy.modelPolicy?.preferredProfiles).toEqual(["frontend-vision"])
+  })
+
+  it("rejects selector-based policy rules with unknown lifecycle stages", async () => {
+    await expect(loadControlPlaneConfig({
+      cwd: "/repo",
+      explicitPath: "/repo/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => JSON.stringify({
+        settings: { activePreset: "default" },
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        policyRules: [{
+          selector: { lifecycleStage: ["verfiy"] },
+          policy: { modelPolicy: { preferredProfiles: ["frontend-vision"] } },
+        }],
+      }),
+    })).rejects.toThrow(/lifecycle/i)
+  })
+
+  it("rejects selector-based policy rules with empty selector arrays", async () => {
+    await expect(loadControlPlaneConfig({
+      cwd: "/repo",
+      explicitPath: "/repo/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => JSON.stringify({
+        settings: { activePreset: "default" },
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        policyRules: [{
+          selector: { path: [] },
+          policy: { modelPolicy: { preferredProfiles: ["frontend-vision"] } },
+        }],
+      }),
+    })).rejects.toThrow(/path/i)
+  })
+
+  it("accepts empty list overrides for list-valued policy families", async () => {
+    const loaded = await loadControlPlaneConfig({
+      cwd: "/repo",
+      explicitPath: "/repo/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => JSON.stringify({
+        settings: { activePreset: "default" },
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        policyRules: [{
+          selector: { lifecycleStage: ["verify"] },
+          policy: { modelPolicy: { preferredProfiles: [] } },
+        }],
+      }),
+    })
+
+    expect(loaded.config.policyRules?.[0]?.policy.modelPolicy?.preferredProfiles).toEqual([])
+  })
+
+  it("accepts null scalar overrides for policy families so narrower rules can clear broader values", async () => {
+    const loaded = await loadControlPlaneConfig({
+      cwd: "/repo",
+      explicitPath: "/repo/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => JSON.stringify({
+        settings: { activePreset: "default" },
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        policyRules: [{
+          selector: { lifecycleStage: ["verify"] },
+          policy: {
+            modelPolicy: { effort: null, preferWindowClass: null },
+            contextPolicy: { compressionPreset: null, maxCharsBeforeCompression: null },
+          },
+        }],
+      }),
+    })
+
+    expect(loaded.config.policyRules?.[0]?.policy.modelPolicy?.effort).toBeNull()
+    expect(loaded.config.policyRules?.[0]?.policy.contextPolicy?.compressionPreset).toBeNull()
+  })
+
+  it("accepts evidence in layered config without merging it into active policy", async () => {
+    const loaded = await loadControlPlaneConfig({
+      cwd: "/repo",
+      explicitPath: "/repo/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => JSON.stringify({
+        settings: { activePreset: "default" },
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        evidence: {
+          detectedPaths: [{ path: "frontend/**", suggestedTags: ["frontend", "visual"] }],
+          notes: ["Detected likely frontend workload"],
+        },
+      }),
+    })
+
+    expect(loaded.config.policyRules).toEqual([])
+    expect(Object.prototype.hasOwnProperty.call(loaded.config, "evidence")).toBe(false)
+  })
+
+  it("loads authority policyRules into active runtime policy", async () => {
+    const loaded = await loadControlPlaneConfig({
+      cwd: "/repo",
+      homeDir: "/home/tester",
+      explicitPath: "/repo/oh-my-superagents.config.jsonc",
+      exists: async (filePath) => filePath === "/repo/oh-my-superagents.config.jsonc",
+      readFile: async (filePath) => {
+        if (filePath !== "/repo/oh-my-superagents.config.jsonc") {
+          throw new Error(`Unexpected read: ${filePath}`)
+        }
+
+        return JSON.stringify({
+          settings: { activePreset: "default" },
+          profiles: {
+            build: { model: "openai/gpt-5" },
+          },
+          presets: {
+            default: {
+              label: "Default",
+              short: "def",
+              routes: {},
+              defaultRoute: "build",
+            },
+          },
+          authority: {
+            workloadMappings: [{ path: ["frontend/**"], workloadTags: ["frontend", "visual"] }],
+            policyRules: [{
+              id: "verify-vision",
+              selector: { lifecycleStage: ["verify"] },
+              policy: { modelPolicy: { requiredCapabilities: ["vision-input"] } },
+            }],
+          },
+        })
+      },
+    })
+
+    expect(loaded.config.policyRules).toEqual([{
+      id: "verify-vision",
+      selector: { lifecycleStage: ["verify"] },
+      policy: { modelPolicy: { requiredCapabilities: ["vision-input"] } },
+    }])
+  })
+
+  it("loads a bootstrap authority-write document through the normal control-plane path", async () => {
+    const loaded = await loadControlPlaneConfig({
+      cwd: "/repo",
+      explicitPath: "/repo/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => JSON.stringify({
+        settings: { activePreset: "default" },
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        authority: {
+          workloadMappings: [],
+          policyRules: [],
+        },
+      }),
+    })
+
+    expect(loaded.config.settings.activePreset).toBe("default")
+    expect(loaded.config.presets.default).toMatchObject({
+      label: "Default",
+      short: "def",
+      defaultRoute: "build",
+    })
+    expect(loaded.config.profiles.build).toEqual({ model: "openai/gpt-5" })
+  })
+
+  it("treats policyRules as a layered-config discriminator before legacy migration", async () => {
+    await expect(loadControlPlaneConfig({
+      cwd: "/repo",
+      explicitPath: "/repo/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => JSON.stringify({
+        profiles: {
+          build: { model: "openai/gpt-5" },
+        },
+        routes: {},
+        defaultRoute: "build",
+        policyRules: [{
+          selector: { lifecycleStage: ["verify"] },
+          policy: { modelPolicy: { preferredProfiles: ["frontend-vision"] } },
+        }],
+      }),
+    })).rejects.toThrow(/mixed-shape|presets/i)
+  })
+
   it("migrates legacy config into presets.default", async () => {
     const result = await loadControlPlaneConfig({
       cwd: "/workspace/project",
@@ -349,6 +614,48 @@ describe("loadControlPlaneConfig", () => {
               "inlineLevel": "standard"
             }
           },
+          "presets": {
+            "default": {
+              "label": "Default",
+              "short": "def",
+              "profiles": {
+                "build": { "model": "openai/gpt-5" }
+              },
+              "routes": {},
+              "defaultRoute": "build"
+            }
+          }
+        }`,
+      }),
+    ).rejects.toThrow(/unknown compression preset|missing/i)
+  })
+
+  it("rejects selector policy contextPolicy.compressionPreset when it references an unknown compression preset", async () => {
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => `{
+          "compressionPresets": {
+            "balanced": {
+              "mode": "suggest",
+              "engine": "hybrid",
+              "inlineLevel": "standard"
+            }
+          },
+          "policyRules": [{
+            "id": "verify-compression",
+            "selector": {
+              "lifecycleStage": ["verify"]
+            },
+            "policy": {
+              "contextPolicy": {
+                "compressionPreset": "missing"
+              }
+            }
+          }],
           "presets": {
             "default": {
               "label": "Default",
@@ -1241,6 +1548,144 @@ describe("loadControlPlaneConfig", () => {
     expect(result.config.presets).toHaveProperty("project")
   })
 
+  it("keeps the global config path when no project authority exists", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "global"
+        },
+        "presets": {
+          "global": {
+            "label": "Global",
+            "short": "glo",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.path).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(result.sources).toEqual(["/home/tester/.config/oh-my-superagents/config.jsonc"])
+    expect(result.recovery).toEqual({ activeSource: "authority" })
+  })
+
+  it("does not trigger project last-known-good recovery for a broken global layer", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": "{",
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "project"
+        },
+        "presets": {
+          "project": {
+            "label": "Project",
+            "short": "prj",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+      "/workspace/project/.oms/last-known-good.json": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Recovered",
+            "short": "rec",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    await expect(loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })).rejects.toThrow("Invalid JSONC in /home/tester/.config/oh-my-superagents/config.jsonc")
+  })
+
+  it("does not trigger authority recovery for a semantically invalid lower-priority layer", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Broken Global",
+            "short": "glo",
+            "extends": "missing",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        }
+      }`,
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "project"
+        },
+        "presets": {
+          "project": {
+            "label": "Project",
+            "short": "prj",
+            "profiles": {
+              "review": { "model": "anthropic/claude-sonnet-4-5" }
+            },
+            "routes": {},
+            "defaultRoute": "review"
+          }
+        }
+      }`,
+      "/workspace/project/.oms/last-known-good.json": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Recovered",
+            "short": "rec",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    await expect(loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })).rejects.toThrow("Preset default extends unknown preset: missing")
+  })
+
   it("keeps the global layer when --config targets an existing project config path", async () => {
     const files = {
       "/home/tester/.config/oh-my-superagents/config.jsonc": `{
@@ -1301,6 +1746,195 @@ describe("loadControlPlaneConfig", () => {
     expect(result.config.presets).toHaveProperty("global")
     expect(result.config.presets).toHaveProperty("project")
     expect(result.config.compressionPresets).toHaveProperty("balanced")
+  })
+
+  it("falls back to last-known-good when authority config fails to load", async () => {
+    const files = {
+      "/workspace/project/oh-my-superagents.config.jsonc": "{",
+      "/workspace/project/.oms/last-known-good.json": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Recovered",
+            "short": "rec",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.path).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(result.sources).toEqual(["/workspace/project/.oms/last-known-good.json"])
+    expect(result.config.presets.default.label).toBe("Recovered")
+    expect(result.recovery).toEqual({
+      activeSource: "last-known-good",
+      authorityError: "Invalid JSONC in /workspace/project/oh-my-superagents.config.jsonc",
+      lastKnownGoodPath: "/workspace/project/.oms/last-known-good.json",
+    })
+  })
+
+  it("falls back to last-known-good when authority semantic validation fails", async () => {
+    const files = {
+      "/workspace/project/oh-my-superagents.config.jsonc": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Broken",
+            "short": "brk",
+            "extends": "missing",
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        },
+        "profiles": {
+          "build": { "model": "openai/gpt-5" }
+        }
+      }`,
+      "/workspace/project/.oms/last-known-good.json": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Recovered",
+            "short": "rec",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.path).toBe("/workspace/project/oh-my-superagents.config.jsonc")
+    expect(result.sources).toEqual(["/workspace/project/.oms/last-known-good.json"])
+    expect(result.config.presets.default.label).toBe("Recovered")
+    expect(result.recovery).toEqual({
+      activeSource: "last-known-good",
+      authorityError: "Preset default extends unknown preset: missing",
+      lastKnownGoodPath: "/workspace/project/.oms/last-known-good.json",
+    })
+  })
+
+  it("uses the global-scoped last-known-good path when the global authority fails", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": "{",
+      "/home/tester/.config/oh-my-superagents/.oms/last-known-good.json": `{
+        "settings": {
+          "activePreset": "default"
+        },
+        "presets": {
+          "default": {
+            "label": "Recovered Global",
+            "short": "rec",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.path).toBe("/home/tester/.config/oh-my-superagents/config.jsonc")
+    expect(result.sources).toEqual(["/home/tester/.config/oh-my-superagents/.oms/last-known-good.json"])
+    expect(result.config.presets.default.label).toBe("Recovered Global")
+    expect(result.recovery).toEqual({
+      activeSource: "last-known-good",
+      authorityError: "Invalid JSONC in /home/tester/.config/oh-my-superagents/config.jsonc",
+      lastKnownGoodPath: "/home/tester/.config/oh-my-superagents/.oms/last-known-good.json",
+    })
+  })
+
+  it("keeps recovered file-provider roots anchored to the original authority directory", async () => {
+    const files = {
+      "/workspace/project/oh-my-superagents.config.jsonc": "{",
+      "/workspace/project/.oms/last-known-good.json": `{
+        "contextProviders": {
+          "memoryBank": {
+            "kind": "file",
+            "enabled": true,
+            "root": ".memorybank",
+            "capabilities": ["recall", "search", "status"]
+          }
+        },
+        "presets": {
+          "default": {
+            "label": "Recovered",
+            "short": "rec",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" }
+            },
+            "routes": {},
+            "defaultRoute": "build"
+          }
+        }
+      }`,
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    const checkedPaths: string[] = []
+    const providers = await resolveContextProviders({
+      baseDir: "/workspace/project",
+      config: result.config.contextProviders,
+      pathExists: async (filePath) => {
+        checkedPaths.push(filePath)
+        return true
+      },
+    })
+
+    expect(result.recovery).toEqual({
+      activeSource: "last-known-good",
+      authorityError: "Invalid JSONC in /workspace/project/oh-my-superagents.config.jsonc",
+      lastKnownGoodPath: "/workspace/project/.oms/last-known-good.json",
+    })
+    expect(checkedPaths).toEqual(["/workspace/project/.memorybank"])
+    expect(providers).toMatchObject([
+      {
+        id: "memoryBank",
+        kind: "file",
+        root: "/workspace/project/.memorybank",
+        available: true,
+      },
+    ])
   })
 
   it("treats settings.contextCompression.preset null as clearing an inherited lower-priority preset", async () => {
@@ -2069,6 +2703,122 @@ describe("loadControlPlaneConfig", () => {
     expect(schema.$defs?.directIntent?.properties?.label?.minLength).toBe(1)
     expect(schema.$defs?.directIntent?.properties?.description?.type).toBe("string")
     expect(schema.$defs?.directIntent?.properties?.description?.minLength).toBe(1)
+  })
+
+  it("keeps schema parity for selector-based policy rules", async () => {
+    const schema = JSON.parse(
+      await readFile(
+        new URL("../schemas/oh-my-superagents.schema.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      properties?: {
+        policyRules?: {
+          type?: string
+          items?: { $ref?: string }
+        }
+      }
+      anyOf?: Array<{
+        required?: string[]
+        properties?: {
+          policyRules?: {
+            type?: string
+            items?: { $ref?: string }
+          }
+        }
+      }>
+      $defs?: {
+        policyRule?: {
+          properties?: {
+            selector?: { $ref?: string }
+            policy?: { $ref?: string }
+          }
+        }
+        policySelector?: {
+          properties?: {
+            lifecycleStage?: {
+              items?: { enum?: string[] }
+            }
+          }
+        }
+      }
+    }
+
+    const layeredShape = schema.anyOf?.find((entry) => entry.required?.includes("presets"))
+
+    expect(schema.properties?.policyRules?.type).toBe("array")
+    expect(schema.properties?.policyRules?.items?.$ref).toBe("#/$defs/policyRule")
+    expect(layeredShape?.properties?.policyRules?.type).toBe("array")
+    expect(layeredShape?.properties?.policyRules?.items?.$ref).toBe("#/$defs/policyRule")
+    expect(schema.$defs?.policyRule?.properties?.selector?.$ref).toBe("#/$defs/policySelector")
+    expect(schema.$defs?.policyRule?.properties?.policy?.$ref).toBe("#/$defs/policyFamilies")
+    expect(schema.$defs?.policySelector?.properties?.lifecycleStage?.items?.enum).toContain("verify")
+  })
+
+  it("keeps schema parity for layered evidence documents", async () => {
+    const schema = JSON.parse(
+      await readFile(
+        new URL("../schemas/oh-my-superagents.schema.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      properties?: {
+        evidence?: { $ref?: string }
+      }
+      anyOf?: Array<{
+        required?: string[]
+        properties?: {
+          evidence?: { $ref?: string }
+        }
+      }>
+      $defs?: {
+        evidence?: {
+          properties?: {
+            detectedPaths?: { items?: { $ref?: string } }
+          }
+        }
+      }
+    }
+
+    const layeredShape = schema.anyOf?.find((entry) => entry.required?.includes("presets"))
+
+    expect(schema.properties?.evidence?.$ref).toBe("#/$defs/evidence")
+    expect(layeredShape?.properties?.evidence?.$ref).toBe("#/$defs/evidence")
+    expect(schema.$defs?.evidence?.properties?.detectedPaths?.items?.$ref).toBe("#/$defs/evidenceDetectedPath")
+  })
+
+  it("keeps schema parity for layered authority documents", async () => {
+    const schema = JSON.parse(
+      await readFile(
+        new URL("../schemas/oh-my-superagents.schema.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      properties?: {
+        authority?: { $ref?: string }
+      }
+      anyOf?: Array<{
+        required?: string[]
+        properties?: {
+          authority?: { $ref?: string }
+        }
+      }>
+      $defs?: {
+        authority?: {
+          properties?: {
+            workloadMappings?: { items?: { $ref?: string } }
+            policyRules?: { items?: { $ref?: string } }
+          }
+        }
+      }
+    }
+
+    const layeredShape = schema.anyOf?.find((entry) => entry.required?.includes("presets"))
+
+    expect(schema.properties?.authority?.$ref).toBe("#/$defs/authority")
+    expect(layeredShape?.properties?.authority?.$ref).toBe("#/$defs/authority")
+    expect(schema.$defs?.authority?.properties?.workloadMappings?.items?.$ref).toBe("#/$defs/authorityWorkloadMapping")
+    expect(schema.$defs?.authority?.properties?.policyRules?.items?.$ref).toBe("#/$defs/policyRule")
   })
 })
 
