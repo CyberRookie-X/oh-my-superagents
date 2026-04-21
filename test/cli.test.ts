@@ -8935,6 +8935,351 @@ describe("runCli", () => {
     expect(removedPaths).toEqual(parsed.removed)
   })
 
+  it("supports explain --host copilot with phase", async () => {
+    const result = await runCli(["explain", "--host", "copilot", "--phase", "brainstorming"], createCliDeps())
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed).toMatchObject({
+      phase: "brainstorming",
+      canonicalRoute: "phase.brainstorm",
+      profileId: "build",
+      model: "openai/gpt-5",
+      agentName: "oms-brainstorm",
+      compatibility: null,
+    })
+  })
+
+  it("supports explain --host copilot --all", async () => {
+    const result = await runCli(["explain", "--host", "copilot", "--all"], createCliDeps())
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          phase: "brainstorming",
+          agentName: "oms-brainstorm",
+          compatibility: null,
+        }),
+      ]),
+    )
+  })
+
+  it("includes context index in copilot explain output", async () => {
+    const result = await runCli(["explain", "--host", "copilot", "--phase", "brainstorming"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: controlPlaneConfig,
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        contextIndex: indexedContextArtifacts,
+      }),
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.contextIndex).toEqual({
+      artifactCount: 2,
+      authoritativePaths: indexedContextArtifacts.artifacts.map((artifact) => artifact.path),
+      warnings: [],
+    })
+  })
+
+  it("supports sync --host copilot and materializes Copilot agents and skills", async () => {
+    let materializedPaths: string[] = []
+
+    const result = await runCli(["sync", "--host", "copilot"], createCliDeps({
+      buildCopilotArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".copilot/agents",
+            fileName: "oms-brainstorm.agent.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+        skills: [
+          {
+            kind: "command" as const,
+            directory: ".copilot/skills",
+            fileName: "oms-sync.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+      }),
+      materializeArtifacts: async ({ artifacts }: { artifacts: Array<{ directory: string; fileName: string }> }) => {
+        materializedPaths = artifacts.map((artifact) => `${artifact.directory}/${artifact.fileName}`)
+        return {
+          exitCode: 0 as const,
+          warnings: [],
+          written: artifacts.map((artifact) => path.join("/workspace/project", artifact.directory, artifact.fileName)),
+          removed: [],
+        }
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(materializedPaths).toContain(".copilot/agents/oms-brainstorm.agent.md")
+    expect(materializedPaths).toContain(".copilot/skills/oms-sync.md")
+    expect(parsed.written).toContain("/workspace/project/.copilot/agents/oms-brainstorm.agent.md")
+    expect(parsed.written).toContain("/workspace/project/.copilot/skills/oms-sync.md")
+  })
+
+  it("supports use --host copilot and rewrites Copilot artifacts for the selected preset", async () => {
+    let materializedPaths: string[] = []
+
+    const copilotConfig = {
+      ...controlPlaneConfig,
+      presets: {
+        ...controlPlaneConfig.presets,
+        review: {
+          ...controlPlaneConfig.presets.review,
+          routes: {
+            brainstorming: "review",
+          },
+        },
+      },
+    }
+
+    const result = await runCli(["use", "review", "--host", "copilot"], createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: copilotConfig,
+        activePreset: {
+          key: "default",
+          preset: copilotConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {},
+      }),
+      prepareControlPlaneStateWrite: async ({ nextState }: { nextState: { activePreset: string; enabled: boolean } }) => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        content: JSON.stringify({ settings: nextState }, null, 2),
+        config: {
+          ...copilotConfig,
+          settings: {
+            ...copilotConfig.settings,
+            activePreset: nextState.activePreset,
+            enabled: nextState.enabled,
+          },
+        },
+      }),
+      buildCopilotArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".copilot/agents",
+            fileName: "oms-review.agent.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+        skills: [],
+      }),
+      materializeArtifacts: async ({ artifacts }: { artifacts: Array<{ directory: string; fileName: string }> }) => {
+        materializedPaths = artifacts.map((artifact) => `${artifact.directory}/${artifact.fileName}`)
+        return { exitCode: 0 as const, warnings: [], written: [], removed: [] }
+      },
+    }))
+
+    expect(result.exitCode).toBe(0)
+    expect(materializedPaths).toContain(".copilot/agents/oms-review.agent.md")
+  })
+
+  it("supports disable --host copilot and removes managed Copilot artifacts", async () => {
+    const removedPaths: string[] = []
+
+    const result = await runCli(["disable", "--host", "copilot"], createCliDeps({
+      ...createArtifactFs({
+        "/workspace/project/.copilot/agents/oms-brainstorm.agent.md": renderOwnedMarkdownArtifact("oms-brainstorm"),
+        "/workspace/project/.copilot/skills/oms-sync.md": renderOwnedMarkdownArtifact("oms-sync"),
+      }),
+      unlink: async (filePath: string) => {
+        removedPaths.push(filePath)
+      },
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.removed).toContain("/workspace/project/.copilot/agents/oms-brainstorm.agent.md")
+    expect(parsed.removed).toContain("/workspace/project/.copilot/skills/oms-sync.md")
+    expect(removedPaths).toContain("/workspace/project/.copilot/agents/oms-brainstorm.agent.md")
+    expect(removedPaths).toContain("/workspace/project/.copilot/skills/oms-sync.md")
+  })
+
+  it("supports status --host copilot and inspects OMS-managed Copilot artifacts", async () => {
+    const files = {
+      "/workspace/project/.copilot/agents/oms-brainstorm.agent.md": renderOwnedMarkdownArtifact("oms-brainstorm"),
+      "/workspace/project/.copilot/skills/oms-status.md": renderOwnedMarkdownArtifact("oms-status"),
+    }
+
+    const deps = createCliDeps({
+      buildCopilotArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".copilot/agents",
+            fileName: "oms-brainstorm.agent.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+        skills: [
+          {
+            kind: "command" as const,
+            directory: ".copilot/skills",
+            fileName: "oms-status.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+      }),
+      ...createArtifactFs(files),
+    })
+
+    const status = await runCli(["status", "--host", "copilot"], deps)
+
+    expect(status.exitCode).toBe(0)
+    expect(JSON.parse(status.stdout)).toMatchObject({
+      host: "copilot",
+      artifacts: {
+        present: expect.arrayContaining([
+          "/workspace/project/.copilot/agents/oms-brainstorm.agent.md",
+          "/workspace/project/.copilot/skills/oms-status.md",
+        ]),
+      },
+    })
+  })
+
+  it("supports doctor --host copilot and reports OMS-managed Copilot artifacts", async () => {
+    const files = {
+      "/workspace/project/.copilot/agents/oms-brainstorm.agent.md": renderOwnedMarkdownArtifact("oms-brainstorm"),
+      "/workspace/project/.copilot/skills/oms-doctor.md": renderOwnedMarkdownArtifact("oms-doctor"),
+    }
+
+    const deps = createCliDeps({
+      buildCopilotArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".copilot/agents",
+            fileName: "oms-brainstorm.agent.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+        skills: [
+          {
+            kind: "command" as const,
+            directory: ".copilot/skills",
+            fileName: "oms-doctor.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+      }),
+      ...createArtifactFs(files),
+    })
+
+    const doctor = await runCli(["doctor", "--host", "copilot"], deps)
+
+    expect(doctor.exitCode).toBe(0)
+    expect(JSON.parse(doctor.stdout)).toMatchObject({
+      host: "copilot",
+      artifacts: {
+        present: expect.arrayContaining([
+          "/workspace/project/.copilot/agents/oms-brainstorm.agent.md",
+          "/workspace/project/.copilot/skills/oms-doctor.md",
+        ]),
+      },
+    })
+  })
+
+  it("does not report missing Copilot artifacts in status when Copilot is disabled", async () => {
+    const deps = createCliDeps({
+      resolveControlPlane: async () => ({
+        source: {
+          kind: "file" as const,
+          hasRealSource: true,
+          path: "/workspace/project/oh-my-superagents.config.jsonc",
+          sources: ["/workspace/project/oh-my-superagents.config.jsonc"],
+        },
+        config: {
+          ...controlPlaneConfig,
+          settings: {
+            ...controlPlaneConfig.settings,
+            enabled: false,
+          },
+        },
+        activePreset: {
+          key: "default",
+          preset: controlPlaneConfig.presets.default,
+        },
+        laneState: defaultLaneState,
+        effectiveSources: {},
+      }),
+      ...createArtifactFs({
+        "/workspace/project/.copilot/agents/oms-brainstorm.agent.md": renderOwnedMarkdownArtifact("oms-brainstorm"),
+      }),
+    })
+
+    const status = await runCli(["status", "--host", "copilot"], deps)
+    const doctor = await runCli(["doctor", "--host", "copilot"], deps)
+
+    expect(status.exitCode).toBe(0)
+    expect(doctor.exitCode).toBe(0)
+    expect(JSON.parse(status.stdout).artifacts.missing).toEqual([])
+    expect(JSON.parse(doctor.stdout).artifacts.missing).toEqual([])
+  })
+
+  it("surfaces stale Copilot artifacts in doctor output", async () => {
+    const result = await runCli(["doctor", "--host", "copilot"], createCliDeps({
+      buildCopilotArtifacts: () => ({
+        agents: [
+          {
+            kind: "agent" as const,
+            directory: ".copilot/agents",
+            fileName: "oms-brainstorm.agent.md",
+            ownerPrefix: "oms-",
+            content: "",
+          },
+        ],
+        skills: [],
+      }),
+      ...createArtifactFs({
+        "/workspace/project/.copilot/agents/oms-brainstorm.agent.md": renderOwnedMarkdownArtifact("oms-brainstorm"),
+        "/workspace/project/.copilot/skills/oms-legacy.md": renderOwnedMarkdownArtifact("oms-legacy"),
+      }),
+    }))
+
+    const parsed = JSON.parse(result.stdout)
+
+    expect(result.exitCode).toBe(0)
+    expect(parsed.artifacts.stale).toContain("/workspace/project/.copilot/skills/oms-legacy.md")
+  })
+
   it("removes OMS-managed Qwen commands plus agents during disabled sync", async () => {
     const removedPaths: string[] = []
     let materializeCalled = false
