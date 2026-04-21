@@ -5,7 +5,7 @@
 采用 superpowers 工作流，完成"完善本项目中 Claude Code 宿主支持"开发所需的全部文档。
 
 ## Task 3
-实施 Task 2 中计划的所有开发工作，完成"完善本项目中 Claude Code 宿主支持"。采用 superpowers 工作流 subagent driven development 模式，不要在 主 agent 中直接进行开发工作。
+实施 Task 2 中计划的所有开发工作，完成"完善本项目中 Claude Code 宿主支持"。采用 superpowers 的 TDD workflow 以 subagent driven development 模式，不要在 主 agent 中直接进行开发工作。
 
 ## Task 4
 完善并更新项目文档。
