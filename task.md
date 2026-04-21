@@ -1,5 +1,5 @@
 ## Task 1
-深入分析本项目的代码架构与设计，输出一份中文分析报告。
+深入分析本项目的代码架构与设计，输出一份中文分析报告 analysis-report.md 放到根目录。
 
 ## Task 2
 采用 superpowers 工作流，完成" 用 Agent + Plugin + Hooks 方案实现完整的 Copilot CLI 宿主深度支持"开发所需的全部文档。
