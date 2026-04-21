@@ -2,7 +2,7 @@
 
 ## 1. 项目概述
 
-`oh-my-superagents` 是一个 **OMS (Oh My Superpowers) 控制面与路由系统**，为 AI 编码 CLI 工具提供跨宿主（host）路由能力。它充当 `superpowers` 工作流系统的"操作系统层"，实现统一的工作流编排、配置管理、策略控制与兼容性检测，支持四种宿主平台：**OpenCode**、**Codex**、**Qwen**、**Claude Code**。
+`oh-my-superagents` 是一个 **OMS (Oh My Superpowers) 控制面与路由系统**，为 AI 编码 CLI 工具提供跨宿主（host）路由能力。它充当 `superpowers` 工作流系统的"操作系统层"，实现统一的工作流编排、配置管理、策略控制与兼容性检测，支持五种宿主平台：**OpenCode**、**Codex**、**Qwen**、**Claude Code**、**Copilot CLI**。
 
 - **语言**: TypeScript (ESM, NodeNext)
 - **包管理**: pnpm 10.32+
@@ -59,7 +59,8 @@ oh-my-superagents/
 │   ├── codex.ts            # Codex 宿主适配器
 │   ├── codex-bootstrap.ts  # Codex 引导脚手架
 │   ├── qwen.ts             # Qwen 宿主适配器
-│   └── claude.ts           # Claude 宿主适配器
+│   ├── claude.ts           # Claude 宿主适配器
+│   └── copilot.ts          # Copilot CLI 宿主适配器
 ├── test/                   # 测试（45 文件）
 ├── schemas/                # JSON Schema 文件
 ├── catalogs/               # 静态能力/入职目录
@@ -131,6 +132,7 @@ oh-my-superagents/
 | Codex | `codex.ts` + `codex-bootstrap.ts` | `.codex/agents/*.toml`, 插件清单, 技能目录 |
 | Qwen | `qwen.ts` | `.qwen/agents/*.md`, `.qwen/commands/*.md` |
 | Claude | `claude.ts` | `.claude/skills/*/SKILL.md` |
+| Copilot CLI | `copilot.ts` | `.copilot/agents/*.agent.md`, `.copilot/skills/*.md`, 插件包 (`plugin.json`, `hooks.json`) |
 
 ### 第五层：兼容性监控（~1,093 LOC，中等）
 
@@ -274,13 +276,12 @@ CLI 模块使用 `CliDeps` 接口注入所有外部依赖（文件系统、配�
 
 ### 改进空间
 
-1. **缺少 Copilot CLI 宿主适配器**：当前仅支持 OpenCode、Codex、Qwen、Claude 四种宿主，尚未覆盖 GitHub Copilot CLI
-2. **文档分散**：AI 生成文档、架构文档、Superpowers 规范分散在多个目录
-3. **上下文子系统未完全集成**：上下文压缩、上下文提供者等模块定义完整但尚未在核心流程中完全落地
-4. **策略引擎为骨架实现**：策略解析和选择器框架已建立，但实际策略规则较少
+1. **文档分散**：AI 生成文档、架构文档、Superpowers 规范分散在多个目录
+2. **上下文子系统未完全集成**：上下文压缩、上下文提供者等模块定义完整但尚未在核心流程中完全落地
+3. **策略引擎为骨架实现**：策略解析和选择器框架已建立，但实际策略规则较少
 
 ---
 
 ## 10. 结论
 
-`oh-my-superagents` 是一个设计精良的控制面系统，其分层架构、规范路由模型、宿主适配器模式使其天然具备多平台扩展能力。当前最关键的缺失是 **Copilot CLI 宿主深度支持**——这需要新增 Copilot CLI 适配器，并完善 Agent + Plugin + Hooks 架构以支持 Copilot CLI 独特的扩展机制。
+`oh-my-superagents` 是一个设计精良的控制面系统，其分层架构、规范路由模型、宿主适配器模式使其天然具备多平台扩展能力。Copilot CLI 宿主支持已通过新增 `copilot.ts` 适配器实现，采用插件式集成，支持 Agent + Plugin + Hooks 架构以适配 Copilot CLI 独特的扩展机制。

@@ -67,6 +67,8 @@ bash scripts/run-codex-debian-canary.sh
 - `src/codex.ts`
 - `src/codex-bootstrap.ts`
 - `src/qwen.ts`
+- `src/claude.ts`
+- `src/copilot.ts`
 
 职责：
 
@@ -170,6 +172,35 @@ bash scripts/run-codex-debian-canary.sh
 - Qwen 目前实现为薄适配层
 - 当前支持范围刻意比 OpenCode/Codex 更窄
 
+### Claude
+
+主要特征：
+
+- 项目级 `.claude/skills/*/SKILL.md` wrappers
+- 当前切片中不支持 direct workflow 投影
+- 没有重型 bootstrap 或 CLAUDE.md 接管流程
+
+架构后果：
+
+- Claude 保持薄宿主适配层
+- Claude 消费与其他宿主相同的规范路由与来源条目模型
+- 当前支持集中在 `superpowers` workflow slice 与控制平面工件管理
+
+### Copilot CLI
+
+主要特征：
+
+- 通过 `.copilot/plugins/oh-my-superagents-copilot/` 进行插件式集成
+- 项目内 agents（`.copilot/agents/*.agent.md`）与 skills（`.copilot/skills/*.md`）
+- `plugin.json` 清单与 `hooks.json` 用于 session-start 与 pre-tool-use 钩子
+- 支持 `superpowers` 与 direct-mode 两种工作流路由
+
+架构后果：
+
+- Copilot CLI 保持薄宿主适配层
+- Copilot CLI 消费与其他宿主相同的规范路由与来源条目模型
+- 生成工件包括 agents、skills 以及 `.copilot/` 下的插件元数据
+
 ## 用源码规模表示厚度
 
 下面的统计是实现文件的大致源码行数。
@@ -177,12 +208,14 @@ bash scripts/run-codex-debian-canary.sh
 
 | 层 | 主要文件 | 大致源码行数 | 厚度 |
 | --- | --- | ---: | --- |
-| OMS 控制平面核心 | `src/control-plane.ts`、`src/config.ts`、`src/cli.ts` | 1853 | 中等 |
-| OpenCode 适配层 | `src/opencode.ts` | 242 | 薄 |
-| Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 565 | 中等 |
-| Qwen 适配层 | `src/qwen.ts` | 220 | 薄 |
-| 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1051 | 中等 |
-| 共享工件协调层 | `src/materialize.ts` | 345 | 薄到中等 |
+| OMS 控制平面核心 | `src/control-plane.ts`、`src/config.ts`、`src/cli.ts` | 4316 | 中等 |
+| OpenCode 适配层 | `src/opencode.ts` | 633 | 薄 |
+| Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 760 | 中等 |
+| Qwen 适配层 | `src/qwen.ts` | 424 | 薄 |
+| Claude 适配层 | `src/claude.ts` | 138 | 薄 |
+| Copilot CLI 适配层 | `src/copilot.ts` | 274 | 薄 |
+| 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1093 | 中等 |
+| 共享工件协调层 | `src/materialize.ts` | 712 | 薄到中等 |
 
 解释方式：
 

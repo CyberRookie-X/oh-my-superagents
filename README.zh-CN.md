@@ -4,20 +4,20 @@
 
 架构说明：[English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Claude Code 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen 的实验性、宿主原生 direct mode。
+`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Claude Code、Copilot CLI 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen 的实验性、宿主原生 direct mode。
 
 ## 支持矩阵
 
-| 能力 | OpenCode | Codex | Qwen | Claude Code |
-| --- | --- | --- | --- | --- |
-| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 |
-| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 |
-| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 |
-| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 |
-| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills |
-| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
+| 能力 | OpenCode | Codex | Qwen | Claude Code | Copilot CLI |
+| --- | --- | --- | --- | --- | --- |
+| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 | 完整支持 |
+| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 | 实验性支持 |
+| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 | 完整支持 |
+| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 | 暂未实现 |
+| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
+| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills | Agents + Skills |
+| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
+| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
 
 支持等级说明：
 
@@ -32,7 +32,7 @@
 - 临时停用 helper 是宿主本地、会话级的提示便捷功能，不会改变持久化的 OMS 状态。
 - `codexFast` 在 OpenCode 和 Codex 上都属于完整支持；Qwen 目前还不支持。
 - Direct mode 会保持宿主原生形态：OpenCode 生成 commands + agents，Codex 生成 agent TOML + 本地 bootstrap skills，Qwen 生成项目内 commands + agents。
-- `gstack` 是一等公民级别的 first-party workflow source。当前这个切片里，gstack 路由投影支持 OpenCode、Codex、Claude Code，Qwen 暂不支持。
+- `gstack` 是一等公民级别的 first-party workflow source。当前这个切片里，gstack 路由投影支持 OpenCode、Codex、Claude Code、Copilot CLI，Qwen 暂不支持。
 
 ## 实现厚度
 
@@ -48,6 +48,7 @@
 | Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 760 | 中等 |
 | Qwen 适配层 | `src/qwen.ts` | 424 | 薄 |
 | Claude 适配层 | `src/claude.ts` | 138 | 薄 |
+| Copilot CLI 适配层 | `src/copilot.ts` | 274 | 薄 |
 | 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1093 | 中等 |
 | 共享工件协调层 | `src/materialize.ts` | 712 | 薄到中等 |
 
@@ -85,6 +86,7 @@
 - Codex：支持 `superpowers` 工作流路由，也支持实验性的 direct mode 切片
 - Qwen：支持，但目前仍是有边界的 Stage 2 `superpowers` 工作流形态，同时也支持实验性的 direct mode 切片
 - Claude Code：当前已经以薄宿主适配层的方式支持 `superpowers` slice，并支持 source-aware route projection，但 direct workflow 投影暂未支持
+- Copilot CLI：当前以薄宿主适配层的方式支持 `superpowers` 工作流路由与实验性 direct mode 切片，通过 `.copilot/plugins/oh-my-superagents-copilot/` 插件方式集成
 
 ## 它能做什么
 
@@ -94,6 +96,7 @@
 - 生成 `.codex/agents/*.toml`
 - 生成 `.qwen/agents/*.md` 与 `.qwen/commands/*.md`
 - 生成 `.claude/skills/*/SKILL.md`
+- 生成 `.copilot/agents/*.agent.md`、`.copilot/skills/*.md`、`.copilot/plugins/oh-my-superagents-copilot/plugin.json`、`.copilot/plugins/oh-my-superagents-copilot/hooks.json`
 - 通过 `author routing` 基于仓库信号和用户提供的模型清单生成路由配置提案
 - 提供 `author routing`、`status`、`use`、`disable`、`sync`、`doctor`、`explain`、`bootstrap` CLI
 - 提供最小 OpenCode plugin 入口用于启动诊断
@@ -312,11 +315,11 @@ Lane-aware subagent execution 是 `superpowers` 下面的执行层增强，不�
 
 Stage 1 新增了宿主本地控制平面命令：
 
-- `oh-my-superagents status --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents disable --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents sync --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents doctor --host <opencode|codex|qwen|claude>`
+- `oh-my-superagents status --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents disable --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents sync --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents doctor --host <opencode|codex|qwen|claude|copilot>`
 
 行为说明：
 
@@ -327,6 +330,7 @@ Stage 1 新增了宿主本地控制平面命令：
 - `disable` 和禁用状态下的 `sync` 只清理**当前宿主**的 OMS 工件，不会去动别的宿主
 - `status` 与 `doctor` 的工件检查也只针对当前宿主
 - `--host claude` 当前管理的工件面是项目级 `.claude/skills/*/SKILL.md`
+- `--host copilot` 当前管理的工件面包括 `.copilot/agents/*.agent.md`、`.copilot/skills/*.md`，以及位于 `.copilot/plugins/oh-my-superagents-copilot/` 的插件包（包括 `plugin.json` 和 `hooks.json`）
 
 ## 就绪度诊断面
 
@@ -431,6 +435,8 @@ Stage 2 的 Qwen 支持在 `superpowers` workflow mode 下刻意保持很薄：
 
 对于 Claude Code，当前这个切片里的 `sync` 会为 `superpowers` surface 生成项目级 `.claude/skills/*/SKILL.md` wrappers。Claude 上的 direct workflow 投影当前仍然故意不支持。
 
+对于 Copilot CLI，`sync` 会为 `superpowers` 或 direct-mode 路由生成 `.copilot/agents/*.agent.md`，为 OMS 控制平面命令生成 `.copilot/skills/*.md`，并协调 `.copilot/plugins/oh-my-superagents-copilot/` 下的插件包（包括 `plugin.json` 和 `hooks.json`）。
+
 `explain --host claude --phase <phase>` 当前已支持，用于当前 Claude `superpowers` slice。
 
 ## Bootstrap
@@ -486,6 +492,10 @@ oh-my-superagents sync --host qwen
 oh-my-superagents sync --host claude
 ```
 
+```bash
+oh-my-superagents sync --host copilot
+```
+
 可用 `--config /absolute/or/relative/path.jsonc` 覆盖默认配置发现。
 
 对于 Qwen，`sync` 会根据当前工作流形态生成不同工件：
@@ -509,7 +519,11 @@ oh-my-superagents explain --host codex --all
 oh-my-superagents explain --host claude --phase writing-plans
 ```
 
-`explain` 当前在 v1 支持 `--host opencode`、`--host codex` 和 `--host claude`。
+```bash
+oh-my-superagents explain --host copilot --all
+```
+
+`explain` 当前在 v1 支持 `--host opencode`、`--host codex`、`--host claude` 和 `--host copilot`。
 
 当控制平面的 explainability 可用时，`explain` 会返回 `routeSource`、`configSource`、`reuseRelationship`、`resolvedSource`、`sourceEntry` 这类 route trace 字段，并附带 route 级 `readiness`。单条输出会带顶层 `compatibility`；`--all` 会保持数组形态，并把 `compatibility` 挂到每个条目上。
 
@@ -583,6 +597,7 @@ oh-my-superagents explain --host claude --phase writing-plans
 - **[Codex](https://github.com/openai/codex)** — OpenAI Codex CLI，支持的宿主平台，拥有独立的 agent 与 plugin 原语。
 - **[Qwen Code](https://github.com/QwenLM/qwen-code)** — 阿里 Qwen Code CLI，支持的宿主平台。
 - **[Claude Code](https://github.com/anthropics/claude-code)** — Anthropic Claude Code CLI，支持的宿主平台。
+- **[Copilot CLI](https://github.com/github/copilot-cli)** — GitHub Copilot CLI，支持的宿主平台。
 - **[gstack](https://github.com/garrytan/gstack)** — 一等公民级工作流源，提供结构化的专家 agent，在 OMS 中作为工作流源适配器使用。
 
 ## 许可证
