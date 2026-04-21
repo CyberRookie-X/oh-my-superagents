@@ -237,6 +237,42 @@ function renderUserCodexSkill(skillName: string) {
   return ["---", `name: ${skillName}`, "description: User-authored skill", "---", "", "Do something unrelated.", ""].join("\n")
 }
 
+function renderOwnedCopilotAgent(agentName: string, source = "superpowers", route = "phase.brainstorm") {
+  return [
+    "---",
+    `name: ${agentName}`,
+    `description: ${agentName} phase agent for oh-my-superagents`,
+    "tools:",
+    "  - bash",
+    "  - edit",
+    "  - read",
+    "  - glob",
+    "  - grep",
+    "---",
+    "",
+    OWNERSHIP_MARKER,
+    `<!-- oms-route: stage=1; host=copilot; source=${source}; route=${route}; projection=agent; rendered-name=${agentName} -->`,
+    `You are the ${agentName} phase agent for oh-my-superagents.`,
+    "",
+  ].join("\n")
+}
+
+function renderOwnedCopilotSkill(skillName: string, logicalCommand = "status") {
+  return [
+    `# ${OWNERSHIP_MARKER.slice(5, -4)}`,
+    `<!-- oms-control-plane: stage=1; host=copilot; artifact=skill; logical-command=${logicalCommand}; rendered-name=${skillName} -->`,
+    "",
+    `# Skill: ${skillName}`,
+    "",
+    "## Purpose",
+    "Show OMS status for Copilot CLI.",
+    "",
+    "## Instructions",
+    `Run \`oh-my-superagents ${logicalCommand} --host copilot\` from the repository root.`,
+    "",
+  ].join("\n")
+}
+
 function renderOwnedOpenCodeRuntimeMetadata() {
   return JSON.stringify({
     agents: {
@@ -1086,6 +1122,170 @@ describe("materializeArtifacts", () => {
 
     expect(result.removed).toEqual([
       "/workspace/project/plugins/oh-my-superagents-codex/skills/oms-status/SKILL.md",
+    ])
+    expect(removedPaths).toEqual(result.removed)
+  })
+
+  it("removes stale Copilot agent files with oms- and rt- prefixes", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.copilot/agents/oms-old.agent.md": renderOwnedCopilotAgent("oms-old"),
+      "/workspace/project/.copilot/agents/rt-stale.agent.md": renderOwnedCopilotAgent("rt-stale", "direct", "direct.stale"),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "agent",
+          directory: ".copilot/agents",
+          fileName: "oms-brainstorm.agent.md",
+          ownerPrefix: "oms-",
+          content: renderOwnedCopilotAgent("oms-brainstorm"),
+        },
+      ],
+      fs,
+    })
+
+    expect(result.removed).toEqual([
+      "/workspace/project/.copilot/agents/oms-old.agent.md",
+      "/workspace/project/.copilot/agents/rt-stale.agent.md",
+    ])
+    expect(removedPaths).toEqual(result.removed)
+  })
+
+  it("removes stale Copilot skill files with oms- prefix", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.copilot/skills/oms-old.md": renderOwnedCopilotSkill("oms-old", "status"),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "command",
+          directory: ".copilot/skills",
+          fileName: "oms-sync.md",
+          ownerPrefix: "oms-",
+          content: renderOwnedCopilotSkill("oms-sync", "sync"),
+        },
+      ],
+      fs,
+    })
+
+    expect(result.removed).toEqual([
+      "/workspace/project/.copilot/skills/oms-old.md",
+    ])
+    expect(removedPaths).toEqual(result.removed)
+  })
+
+  it("preserves non-owned Copilot files that do not have the ownership marker", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.copilot/agents/user-agent.agent.md": [
+        "---",
+        "name: user-agent",
+        "description: User-authored agent",
+        "---",
+        "",
+        "Do something unrelated.",
+        "",
+      ].join("\n"),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "agent",
+          directory: ".copilot/agents",
+          fileName: "oms-brainstorm.agent.md",
+          ownerPrefix: "oms-",
+          content: renderOwnedCopilotAgent("oms-brainstorm"),
+        },
+      ],
+      fs,
+    })
+
+    expect(result.removed).toEqual([])
+    expect(removedPaths).toEqual([])
+  })
+
+  it("fails on collision with non-owned Copilot agent files", async () => {
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "agent",
+          directory: ".copilot/agents",
+          fileName: "oms-brainstorm.agent.md",
+          ownerPrefix: "oms-",
+          content: renderOwnedCopilotAgent("oms-brainstorm"),
+        },
+      ],
+      fs: createMemoryFs({
+        "/workspace/project/.copilot/agents/oms-brainstorm.agent.md": [
+          "---",
+          "name: oms-brainstorm",
+          "description: User-authored agent",
+          "---",
+          "",
+          "Custom user content.",
+          "",
+        ].join("\n"),
+      }).fs,
+    })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.warnings).toEqual([
+      "Collision at /workspace/project/.copilot/agents/oms-brainstorm.agent.md",
+    ])
+  })
+
+  it("allows Copilot agent file to be rewritten when the source changes", async () => {
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "agent",
+          directory: ".copilot/agents",
+          fileName: "oms-brainstorm.agent.md",
+          ownerPrefix: "oms-",
+          content: renderOwnedCopilotAgent("oms-brainstorm", "gstack", "phase.brainstorm"),
+        },
+      ],
+      fs: createMemoryFs({
+        "/workspace/project/.copilot/agents/oms-brainstorm.agent.md": renderOwnedCopilotAgent(
+          "oms-brainstorm",
+          "superpowers",
+          "phase.brainstorm",
+        ),
+      }).fs,
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.warnings).toEqual([])
+  })
+
+  it("removes stale Copilot direct-mode agent files after prefix changes", async () => {
+    const { fs, removedPaths } = createMemoryFs({
+      "/workspace/project/.copilot/agents/rt-old.agent.md": renderOwnedCopilotAgent("rt-old", "direct", "direct.old"),
+    })
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [
+        {
+          kind: "agent",
+          directory: ".copilot/agents",
+          fileName: "rt-plan.agent.md",
+          ownerPrefix: "rt-",
+          content: renderOwnedCopilotAgent("rt-plan", "direct", "direct.plan"),
+        },
+      ],
+      fs,
+    })
+
+    expect(result.removed).toEqual([
+      "/workspace/project/.copilot/agents/rt-old.agent.md",
     ])
     expect(removedPaths).toEqual(result.removed)
   })
