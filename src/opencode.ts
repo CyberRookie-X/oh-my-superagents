@@ -77,7 +77,7 @@ const SHARED_OPENCODE_AGENT_NAMES = new Set(
 )
 
 export function renderControlPlaneOwnershipMetadata(input: {
-  host: "opencode" | "codex"
+  host: "opencode" | "codex" | "copilot"
   artifact: "command" | "skill"
   logicalCommand: ControlPlaneCommandKey
   renderedName: string
@@ -95,7 +95,7 @@ export function renderAuxiliaryOwnershipMetadata(input: {
 }
 
 export function renderRouteOwnershipMetadata(input: {
-  host: "opencode" | "codex" | "qwen"
+  host: "opencode" | "codex" | "qwen" | "copilot"
   source: WorkflowSourceKind
   route: CanonicalRouteId
   projection: "agent" | "command"
