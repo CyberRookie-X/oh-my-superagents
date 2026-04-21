@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PACKAGE_TGZ="${1:?package tgz path required}"
+WORKSPACE_ROOT="${1:?workspace root required}"
+ARTIFACT_DIR="${2:?artifact dir required}"
 CANARY_ROOT="$(mktemp -d /tmp/opencode-canary.XXXXXX)"
 GLOBAL_OPENCODE_DIR=/root/.config/opencode
 
@@ -24,6 +25,7 @@ cleanup() {
 trap cleanup EXIT
 
 export DEBIAN_FRONTEND=noninteractive
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
 log "installing system packages"
 apt-get update >/dev/null
@@ -32,6 +34,16 @@ apt-get install -y --no-install-recommends curl ca-certificates git bash xz-util
 log "installing Node.js"
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
 apt-get install -y --no-install-recommends nodejs >/dev/null
+
+log "enabling Corepack and pnpm"
+corepack enable >/dev/null
+
+log "building package inside container"
+(cd "$WORKSPACE_ROOT" && pnpm run build >/dev/null)
+
+pack_output="$(cd "$WORKSPACE_ROOT" && pnpm pack --pack-destination "$ARTIFACT_DIR")"
+package_file="${pack_output##*$'\n'}"
+PACKAGE_TGZ="$ARTIFACT_DIR/$package_file"
 
 log "installing Bun"
 curl -fsSL https://bun.sh/install | bash >/dev/null

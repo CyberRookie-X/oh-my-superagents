@@ -108,14 +108,16 @@ The first generic-routing slice is now an experimental direct workflow on OpenCo
 
 ## Repository Maintainer Workflow
 
-This repository is maintained with `pnpm`. If you are working on the repo itself, enable Corepack once and use the pnpm commands below. Consumer-facing package usage examples in the install section can still use `npx`.
+This repository is maintained with `pnpm`. If you are working on the repo itself, enable Corepack once and use `pnpm install` for dependency management. Consumer-facing package usage examples in the install section can still use `npx`.
+
+Host-local validation is disabled for this plugin repository.
+Run repository verification from a Debian Docker container only.
 
 ```bash
 corepack enable
 pnpm install
-pnpm test
-pnpm check
-pnpm build
+bash scripts/run-opencode-debian-canary.sh
+bash scripts/run-codex-debian-canary.sh
 ```
 
 ## Install
@@ -599,13 +601,14 @@ The detailed validation notes are in `docs/superpowers/specs/2026-04-09-opencode
 
 ## Host-Local Isolated Canary
 
-Run the local-machine isolated canary without touching your normal OpenCode home/config:
+Host-local validation is disabled for this plugin repository.
+Use the Debian Docker canary instead:
 
 ```bash
-bash scripts/run-opencode-local-canary.sh
+bash scripts/run-opencode-debian-canary.sh
 ```
 
-The detailed validation notes are in `docs/superpowers/specs/2026-04-09-opencode-local-canary.md`.
+The disabled host-local policy is documented in `docs/superpowers/specs/2026-04-09-opencode-local-canary.md`.
 
 ## Codex Debian Canary
 
@@ -619,10 +622,29 @@ The detailed validation notes are in `docs/superpowers/specs/2026-04-09-codex-de
 
 ## Codex Host-Local Isolated Canary
 
-Run the local-machine isolated Codex canary without touching your normal `~/.codex`:
+Host-local validation is disabled for this plugin repository.
+Use the Debian Docker canary instead:
 
 ```bash
-bash scripts/run-codex-local-canary.sh
+bash scripts/run-codex-debian-canary.sh
 ```
 
-The detailed validation notes are in `docs/superpowers/specs/2026-04-09-codex-local-canary.md`.
+The disabled host-local policy is documented in `docs/superpowers/specs/2026-04-09-codex-local-canary.md`.
+
+## Acknowledgments
+
+This project builds on and is inspired by work from several projects and communities:
+
+- **[superpowers](https://github.com/obra/superpowers)** — The upstream workflow skill system that `oh-my-superagents` routes and complements. The core design rule is to complement, never compete.
+- **[oh-my-opencode](https://github.com/anomalyco/oh-my-opencode)** — The original `oh-my-*` orchestration framework in the AI CLI space, which established the naming convention and demonstrated the value of host-native routing. OMS deliberately takes a thinner approach while sharing the same ecosystem.
+- **[oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode)** — A related ecosystem project whose Claude Code host primitives provided useful evidence of host capability. OMS references these capabilities while staying aligned with its own thin-adapter architecture.
+- **[oh-my-codex](https://github.com/scalarian/oh-my-codex)** — A related ecosystem project for Codex CLI orchestration, part of the same `oh-my-*` family of AI CLI tools.
+- **[OpenCode](https://github.com/anomalyco/opencode)** — The primary host platform, providing the plugin and agent system that OMS targets first.
+- **[Codex](https://github.com/openai/codex)** — OpenAI's Codex CLI, a supported host platform with its own agent and plugin primitives.
+- **[Qwen Code](https://github.com/QwenLM/qwen-code)** — Alibaba's Qwen Code CLI, a supported host platform.
+- **[Claude Code](https://github.com/anthropics/claude-code)** — Anthropic's Claude Code CLI, a supported host platform.
+- **[gstack](https://github.com/garrytan/gstack)** — A first-party workflow source with structured specialist agents, used as a workflow source adapter in OMS.
+
+## License
+
+[MIT](./LICENSE)

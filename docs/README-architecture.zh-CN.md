@@ -5,14 +5,16 @@
 
 ## 仓库工作流
 
-这个仓库的维护工作流使用 `pnpm`。处理仓库本身时，请先执行一次 `corepack enable`，然后使用下面这些命令。面向包使用者的示例仍然可以保留 `npx` 形式，因为发布后的 CLI 用法并不依赖 pnpm。
+这个仓库的维护工作流使用 `pnpm`。处理仓库本身时，请先执行一次 `corepack enable`，并使用 `pnpm install` 管理依赖。面向包使用者的示例仍然可以保留 `npx` 形式，因为发布后的 CLI 用法并不依赖 pnpm。
+
+这个插件仓库禁止在宿主机直接做验证。
+仓库验证只能在 Debian Docker 容器中运行。
 
 ```bash
 corepack enable
 pnpm install
-pnpm test
-pnpm check
-pnpm build
+bash scripts/run-opencode-debian-canary.sh
+bash scripts/run-codex-debian-canary.sh
 ```
 
 ## 设计目标

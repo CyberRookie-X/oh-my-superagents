@@ -121,14 +121,16 @@
 
 ## 仓库维护工作流
 
-这个仓库自身的维护流程统一使用 `pnpm`。如果你是在维护仓库，请先执行一次 `corepack enable`，然后使用下面这些 `pnpm` 命令。安装章节里给包使用者的示例仍然可以继续使用 `npx`。
+这个仓库自身的维护流程统一使用 `pnpm`。如果你是在维护仓库，请先执行一次 `corepack enable`，并使用 `pnpm install` 管理依赖。安装章节里给包使用者的示例仍然可以继续使用 `npx`。
+
+这个插件仓库禁止在宿主机直接做验证。
+仓库验证只能在 Debian Docker 容器中运行。
 
 ```bash
 corepack enable
 pnpm install
-pnpm test
-pnpm check
-pnpm build
+bash scripts/run-opencode-debian-canary.sh
+bash scripts/run-codex-debian-canary.sh
 ```
 
 ## 安装
@@ -568,6 +570,24 @@ oh-my-superagents explain --host claude --phase writing-plans
 
 在 `superpowers` workflow mode 下，这些是 OMS wrapper agents 与 wrapper commands，并依赖 upstream skills。
 在 direct mode 下，这些会变成 `rt-<intent>.md` 与 `ai-<intent>.md`，不依赖 upstream skills。
+
+## 致谢
+
+本项目建立在以下项目和社区的工作之上，并从中汲取灵感：
+
+- **[superpowers](https://github.com/obra/superpowers)** — 上游工作流技能系统，`oh-my-superagents` 为其提供路由与补充。核心设计原则是补充，而非竞争。
+- **[oh-my-opencode](https://github.com/anomalyco/oh-my-opencode)** — AI CLI 领域最早的 `oh-my-*` 编排框架，确立了命名规范并证明了宿主原生路由的价值。OMS 刻意采取更轻量的方式，同时共享同一生态。
+- **[oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode)** — 同生态项目，其 Claude Code 宿主原语为本项目提供了有价值的宿主能力参考。OMS 在保持自身轻量适配架构的同时借鉴了这些能力。
+- **[oh-my-codex](https://github.com/scalarian/oh-my-codex)** — 同生态项目，面向 Codex CLI 的编排层，同属 `oh-my-*` AI CLI 工具家族。
+- **[OpenCode](https://github.com/anomalyco/opencode)** — 主要宿主平台，提供 OMS 优先适配的插件与 agent 系统。
+- **[Codex](https://github.com/openai/codex)** — OpenAI Codex CLI，支持的宿主平台，拥有独立的 agent 与 plugin 原语。
+- **[Qwen Code](https://github.com/QwenLM/qwen-code)** — 阿里 Qwen Code CLI，支持的宿主平台。
+- **[Claude Code](https://github.com/anthropics/claude-code)** — Anthropic Claude Code CLI，支持的宿主平台。
+- **[gstack](https://github.com/garrytan/gstack)** — 一等公民级工作流源，提供结构化的专家 agent，在 OMS 中作为工作流源适配器使用。
+
+## 许可证
+
+[MIT](./LICENSE)
 
 ## 切换回英文
 

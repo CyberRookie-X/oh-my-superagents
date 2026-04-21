@@ -31,3 +31,5 @@ That keeps the canary independent of real credentials while still validating the
 ```bash
 bash scripts/run-codex-debian-canary.sh
 ```
+
+The host wrapper only starts Docker. All package build, pack, install, and validation work runs inside the Debian container.

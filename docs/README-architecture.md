@@ -5,14 +5,16 @@ It is intentionally focused on structure and tradeoffs, not installation or comm
 
 ## Repository Workflow
 
-This repository is maintained with `pnpm`. For repository work, enable Corepack once and use the commands below. Consumer-facing package usage elsewhere can remain `npx`-based because published CLI usage is not tied to pnpm.
+This repository is maintained with `pnpm`. For repository work, enable Corepack once and use `pnpm install` for dependency management. Consumer-facing package usage elsewhere can remain `npx`-based because published CLI usage is not tied to pnpm.
+
+Host-local validation is disabled for this plugin repository.
+Run repository verification from a Debian Docker container only.
 
 ```bash
 corepack enable
 pnpm install
-pnpm test
-pnpm check
-pnpm build
+bash scripts/run-opencode-debian-canary.sh
+bash scripts/run-codex-debian-canary.sh
 ```
 
 ## Design Goal

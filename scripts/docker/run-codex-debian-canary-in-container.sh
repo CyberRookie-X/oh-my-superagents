@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PACKAGE_TGZ="${1:?package tgz path required}"
+WORKSPACE_ROOT="${1:?workspace root required}"
+ARTIFACT_DIR="${2:?artifact dir required}"
 CANARY_ROOT="$(mktemp -d /tmp/codex-canary.XXXXXX)"
 
 log() {
@@ -14,6 +15,7 @@ fail() {
 }
 
 export DEBIAN_FRONTEND=noninteractive
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
 log "installing system packages"
 apt-get update >/dev/null
@@ -22,6 +24,16 @@ apt-get install -y --no-install-recommends curl ca-certificates git bash xz-util
 log "installing Node.js"
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
 apt-get install -y --no-install-recommends nodejs >/dev/null
+
+log "enabling Corepack and pnpm"
+corepack enable >/dev/null
+
+log "building package inside container"
+(cd "$WORKSPACE_ROOT" && pnpm run build >/dev/null)
+
+pack_output="$(cd "$WORKSPACE_ROOT" && pnpm pack --pack-destination "$ARTIFACT_DIR")"
+package_file="${pack_output##*$'\n'}"
+PACKAGE_TGZ="$ARTIFACT_DIR/$package_file"
 
 log "installing Codex and packaged oh-my-superagents tarball"
 npm install -g @openai/codex "$PACKAGE_TGZ" >/dev/null

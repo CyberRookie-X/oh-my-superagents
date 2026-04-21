@@ -32,6 +32,8 @@ It validates the real packaged tarball, not just source imports.
 bash scripts/run-opencode-debian-canary.sh
 ```
 
+The host wrapper only starts Docker. All package build, pack, install, and validation work runs inside the Debian container.
+
 ## Why This Is Useful
 
 The canary reduces risk in three places at once:

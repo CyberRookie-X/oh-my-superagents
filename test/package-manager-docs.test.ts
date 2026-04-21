@@ -7,6 +7,7 @@ type DocExpectation = {
   path: string
   heading: string
   boundaryPhrases: readonly string[]
+  forbiddenPhrases?: readonly string[]
 }
 
 const docs: DocExpectation[] = [
@@ -16,6 +17,13 @@ const docs: DocExpectation[] = [
     boundaryPhrases: [
       "This repository is maintained with `pnpm`.",
       "Consumer-facing package usage examples in the install section can still use `npx`.",
+      "Host-local validation is disabled for this plugin repository.",
+      "Run repository verification from a Debian Docker container only.",
+    ],
+    forbiddenPhrases: [
+      "pnpm test",
+      "pnpm check",
+      "pnpm build",
     ],
   },
   {
@@ -24,6 +32,13 @@ const docs: DocExpectation[] = [
     boundaryPhrases: [
       "这个仓库自身的维护流程统一使用 `pnpm`。",
       "安装章节里给包使用者的示例仍然可以继续使用 `npx`。",
+      "这个插件仓库禁止在宿主机直接做验证。",
+      "仓库验证只能在 Debian Docker 容器中运行。",
+    ],
+    forbiddenPhrases: [
+      "pnpm test",
+      "pnpm check",
+      "pnpm build",
     ],
   },
   {
@@ -32,6 +47,13 @@ const docs: DocExpectation[] = [
     boundaryPhrases: [
       "This repository is maintained with `pnpm`.",
       "Consumer-facing package usage elsewhere can remain `npx`-based because published CLI usage is not tied to pnpm.",
+      "Host-local validation is disabled for this plugin repository.",
+      "Run repository verification from a Debian Docker container only.",
+    ],
+    forbiddenPhrases: [
+      "pnpm test",
+      "pnpm check",
+      "pnpm build",
     ],
   },
   {
@@ -40,6 +62,13 @@ const docs: DocExpectation[] = [
     boundaryPhrases: [
       "这个仓库的维护工作流使用 `pnpm`。",
       "面向包使用者的示例仍然可以保留 `npx` 形式，因为发布后的 CLI 用法并不依赖 pnpm。",
+      "这个插件仓库禁止在宿主机直接做验证。",
+      "仓库验证只能在 Debian Docker 容器中运行。",
+    ],
+    forbiddenPhrases: [
+      "pnpm test",
+      "pnpm check",
+      "pnpm build",
     ],
   },
 ]
@@ -47,9 +76,8 @@ const docs: DocExpectation[] = [
 const requiredCommands = [
   "corepack enable",
   "pnpm install",
-  "pnpm test",
-  "pnpm check",
-  "pnpm build",
+  "bash scripts/run-opencode-debian-canary.sh",
+  "bash scripts/run-codex-debian-canary.sh",
 ] as const
 
 const forbiddenCommands = [
@@ -125,6 +153,10 @@ describe("package manager maintainer docs", () => {
 
       for (const command of forbiddenCommands) {
         expect(sectionLines).not.toContain(command)
+      }
+
+      for (const phrase of doc.forbiddenPhrases ?? []) {
+        expect(section).not.toContain(phrase)
       }
     }
   })

@@ -12,18 +12,10 @@ fi
 mkdir -p "$ARTIFACT_DIR"
 rm -f "$ARTIFACT_DIR"/oh-my-superagents-*.tgz
 
-printf '[canary-host] building package\n'
-(cd "$ROOT_DIR" && pnpm run build >/dev/null)
-
-pack_output="$(cd "$ROOT_DIR" && pnpm pack --pack-destination "$ARTIFACT_DIR")"
-package_file="${pack_output##*$'\n'}"
-package_path="/artifacts/$package_file"
-
-printf '[canary-host] package: %s\n' "$package_file"
 printf '[canary-host] starting Debian container\n'
 
 docker run --rm \
   -v "$ROOT_DIR:/workspace:ro" \
   -v "$ARTIFACT_DIR:/artifacts:rw" \
   debian:bookworm-slim \
-  bash /workspace/scripts/docker/run-opencode-debian-canary-in-container.sh "$package_path"
+  bash /workspace/scripts/docker/run-opencode-debian-canary-in-container.sh /workspace /artifacts
