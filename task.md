@@ -2,10 +2,10 @@
 深入分析本项目的代码架构与设计，输出一份中文分析报告。
 
 ## Task 2
-为本项目撰写一份完善的 Claude Code 宿主支持 spec。
+采用 superpowers 工作流，完成"完善本项目中 Claude Code 宿主支持"开发所需的全部文档。
 
 ## Task 3
-实施 Task 2 中设计的 Claude Code 宿主支持开发。
+实施 Task 2 中计划的所有开发工作，完成"完善本项目中 Claude Code 宿主支持"。采用 superpowers 工作流 subagent driven development 模式，不要在 主 agent 中直接进行开发工作。
 
 ## Task 4
 完善并更新项目文档。
