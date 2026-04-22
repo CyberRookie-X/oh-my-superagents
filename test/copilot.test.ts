@@ -161,4 +161,32 @@ describe("buildCopilotControlPlaneArtifacts", () => {
     expect(statusPrompt?.content).toContain("oms-control-plane: stage=1; host=copilot; artifact=command; logical-command=status; rendered-name=oms-status")
     expect(statusPrompt?.content).toContain("Run `oh-my-superagents status --host copilot $ARGUMENTS`")
   })
+
+  it("filters commands when supportedCommands is set to direct-mode subset", () => {
+    const artifacts = buildCopilotControlPlaneArtifacts(
+      {
+        commandPrefix: "oms",
+        commands: {
+          status: { name: "status", aliases: ["st"] },
+          use: { name: "use", aliases: ["u"] },
+          disable: { name: "off", aliases: ["o"] },
+          sync: { name: "sync", aliases: ["sy"] },
+          doctor: { name: "doctor", aliases: ["dr"] },
+        },
+      },
+      new Set(["status", "sync", "doctor"]),
+    )
+
+    expect(artifacts.map((item) => item.fileName)).toEqual([
+      "oms-status.md",
+      "oms-st.md",
+      "oms-sync.md",
+      "oms-sy.md",
+      "oms-doctor.md",
+      "oms-dr.md",
+    ])
+
+    expect(artifacts.some((item) => item.fileName === "oms-use.md")).toBe(false)
+    expect(artifacts.some((item) => item.fileName === "oms-off.md")).toBe(false)
+  })
 })

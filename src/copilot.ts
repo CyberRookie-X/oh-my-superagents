@@ -23,7 +23,7 @@ const CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, string>
   doctor: "Inspect OMS diagnostics for Copilot.",
 }
 
-const DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "sync", "doctor"])
+
 
 export type CopilotPromptArtifact = {
   kind: "prompt"
