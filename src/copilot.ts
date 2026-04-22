@@ -108,8 +108,8 @@ export function renderCopilotSettings(config: RouterConfig): string {
   const settings = {
     oms: {
       version: "0.1.0",
-      activePreset: config.settings?.activePreset ?? "default",
-      enabled: config.settings?.enabled ?? true,
+      activePreset: "default",
+      enabled: true,
       commands: {
         status: "oms-status",
         use: "oms-use",
@@ -135,10 +135,10 @@ export function renderCopilotAgentManifest(config: RouterConfig): string {
     version: "0.1.0",
     host: "copilot",
     capabilities,
-    presets: Object.keys(config.presets ?? {}),
+    presets: Object.keys(config.profiles ?? {}),
     config: {
-      activePreset: config.settings?.activePreset ?? "default",
-      enabled: config.settings?.enabled ?? true,
+      activePreset: "default",
+      enabled: true,
     },
   }
 

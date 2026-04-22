@@ -53,6 +53,7 @@ import { writeAuthorityWithRecoverySnapshotAtomically } from "./config-write.js"
 import type { ContextIndex } from "./context-index.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildClaudeArtifacts } from "./claude.js"
+import { buildCopilotArtifacts } from "./copilot.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
 import { CONTEXT_LIFECYCLE_STAGES } from "./context-lifecycle.js"
 import { detectClaudeGstackAvailability } from "./gstack-detectors.js"
@@ -83,8 +84,8 @@ export type CliResult = {
   stderr: string
 }
 
-type CliHost = SupportedSuperpowersHost | "qwen" | "claude"
-type ExplainCliHost = Exclude<CliHost, "qwen">
+type CliHost = SupportedSuperpowersHost | "qwen" | "claude" | "copilot"
+type ExplainCliHost = Exclude<CliHost, "qwen" | "copilot">
 
 const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
 const CODEX_PLUGIN_MANIFEST_PATH = "plugins/oh-my-superagents-codex/.codex-plugin/plugin.json"
@@ -1653,6 +1654,15 @@ async function getArtifactsForHost(
     return buildClaudeArtifacts(config).skills
   }
 
+  if (host === "copilot") {
+    const artifacts = buildCopilotArtifacts(config)
+    return [
+      ...artifacts.instructions.map((i) => ({ directory: path.dirname(i.filePath), fileName: path.basename(i.filePath), ownerPrefix: "copilot-", content: i.content })),
+      { directory: path.dirname(artifacts.settings.filePath), fileName: path.basename(artifacts.settings.filePath), ownerPrefix: "oms-", content: artifacts.settings.content },
+      { directory: path.dirname(artifacts.agentManifest.filePath), fileName: path.basename(artifacts.agentManifest.filePath), ownerPrefix: "oms-", content: artifacts.agentManifest.content },
+    ]
+  }
+
   assertQwenProjectionSupport(config)
 
   const built = await deps.buildQwenArtifacts(config, {
@@ -1732,6 +1742,10 @@ const OWNED_ARTIFACT_RULES: Record<CliHost, Array<{ directory: string; extension
     { directory: ".qwen/commands", extension: ".md" },
   ],
   claude: [],
+  copilot: [
+    { directory: ".github/copilot/instructions", extension: ".md" },
+    { directory: ".github/copilot", extension: ".json" },
+  ],
 }
 
 function isMissingFsError(error: unknown) {
