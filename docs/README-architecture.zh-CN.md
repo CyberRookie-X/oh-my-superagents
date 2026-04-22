@@ -67,6 +67,8 @@ bash scripts/run-codex-debian-canary.sh
 - `src/codex.ts`
 - `src/codex-bootstrap.ts`
 - `src/qwen.ts`
+- `src/copilot.ts`
+- `src/copilot-bootstrap.ts`
 
 职责：
 
@@ -181,6 +183,7 @@ bash scripts/run-codex-debian-canary.sh
 | OpenCode 适配层 | `src/opencode.ts` | 242 | 薄 |
 | Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 565 | 中等 |
 | Qwen 适配层 | `src/qwen.ts` | 220 | 薄 |
+| Copilot 适配 + bootstrap | `src/copilot.ts`、`src/copilot-bootstrap.ts` | 790 | 中等 |
 | 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1051 | 中等 |
 | 共享工件协调层 | `src/materialize.ts` | 345 | 薄到中等 |
 

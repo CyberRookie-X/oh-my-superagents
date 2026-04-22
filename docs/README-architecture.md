@@ -113,6 +113,8 @@ Main files:
 - `src/codex-bootstrap.ts`
 - `src/qwen.ts`
 - `src/claude.ts`
+- `src/copilot.ts`
+- `src/copilot-bootstrap.ts`
 
 Responsibilities:
 
@@ -249,6 +251,23 @@ Architectural consequence:
 - Claude consumes the same canonical route and source-entry model as the other hosts
 - current support centers on the `superpowers` workflow slice plus control-plane artifact management
 
+### Copilot CLI
+
+Main characteristics:
+
+- Agent + Plugin + Hooks extensibility model
+- project-scoped `.github/agents/oms-*.agent.md` agents
+- installable plugin bundle at `plugins/oh-my-superagents-copilot/`
+- `hooks.json` with `sessionStart` for OMS status injection
+- local bootstrap flow similar to Codex
+
+Architectural consequence:
+
+- Copilot CLI uses the same canonical route and source-entry model as other hosts
+- the Agent + Plugin + Hooks model gives OMS three native projection targets
+- bootstrap scaffolding is thicker than a thin adapter but thinner than the shared core
+- current support includes `superpowers` workflow, experimental direct mode, and full control-plane commands
+
 ## Thickness By Source Size
 
 These counts are approximate source lines of code from the implementation files only.
@@ -263,6 +282,7 @@ They exclude tests and documentation.
 | Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 760 | Medium |
 | Qwen adapter | `src/qwen.ts` | 424 | Thin |
 | Claude adapter | `src/claude.ts` | 138 | Thin |
+| Copilot adapter + bootstrap | `src/copilot.ts`, `src/copilot-bootstrap.ts` | 790 | Medium |
 | Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1093 | Medium |
 | Shared artifact reconciliation | `src/materialize.ts` | 712 | Thin-to-medium |
 
