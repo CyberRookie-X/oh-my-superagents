@@ -77,12 +77,12 @@ const SHARED_OPENCODE_AGENT_NAMES = new Set(
 )
 
 export function renderControlPlaneOwnershipMetadata(input: {
-  host: "opencode" | "codex"
+  host: "opencode" | "codex" | "qwen" | "copilot"
   artifact: "command" | "skill"
   logicalCommand: ControlPlaneCommandKey
   renderedName: string
 }) {
-  return `<!-- ${CONTROL_PLANE_MARKER_PREFIX} stage=1; host=${input.host}; artifact=${input.artifact}; logical-command=${input.logicalCommand}; rendered-name=${input.renderedName} -->`
+  return `<!-- ${CONTROL_PLANE_MARKER_PREFIX} stage=${input.host === "qwen" || input.host === "copilot" ? "2" : "1"}; host=${input.host}; artifact=${input.artifact}; logical-command=${input.logicalCommand}; rendered-name=${input.renderedName} -->`
 }
 
 export function renderAuxiliaryOwnershipMetadata(input: {
@@ -95,13 +95,13 @@ export function renderAuxiliaryOwnershipMetadata(input: {
 }
 
 export function renderRouteOwnershipMetadata(input: {
-  host: "opencode" | "codex" | "qwen"
+  host: "opencode" | "codex" | "qwen" | "claude" | "copilot"
   source: WorkflowSourceKind
   route: CanonicalRouteId
-  projection: "agent" | "command"
+  projection: "agent" | "command" | "skill"
   renderedName: string
 }) {
-  return `<!-- ${ROUTE_MARKER_PREFIX} stage=${input.host === "qwen" ? "2" : "1"}; host=${input.host}; source=${input.source}; route=${input.route}; projection=${input.projection}; rendered-name=${input.renderedName} -->`
+  return `<!-- ${ROUTE_MARKER_PREFIX} stage=${input.host === "qwen" || input.host === "copilot" ? "2" : "1"}; host=${input.host}; source=${input.source}; route=${input.route}; projection=${input.projection}; rendered-name=${input.renderedName} -->`
 }
 
 export function renderAgentFile(input: {

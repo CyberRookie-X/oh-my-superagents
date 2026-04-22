@@ -36,5 +36,8 @@ export {
   SUPERPOWERS_SOURCE_ENTRIES,
   toSuperpowersCanonicalRouteId,
 } from "./workflow-superpowers.js"
+export * from "./copilot.js"
+export * from "./copilot-hooks.js"
+export * from "./copilot-bootstrap.js"
 export type { ModelInventory } from "./author-routing.js"
 export { buildRoutingProposal, inspectRoutingAuthoringInputs } from "./author-routing.js"

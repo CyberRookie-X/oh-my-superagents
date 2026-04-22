@@ -21,7 +21,7 @@ export type CapabilityDecision =
       supported: false
       reasonCode: CapabilityReasonCode
     }
-export type CapabilityHost = SupportedSuperpowersHost | "qwen" | "claude"
+export type CapabilityHost = SupportedSuperpowersHost | "qwen" | "claude" | "copilot"
 export type ControlPlaneCapabilityCommand = ControlPlaneCommandKey | "explain"
 
 type WorkflowKind = WorkflowConfig["kind"]
@@ -69,6 +69,14 @@ export function getHostProjectionDecision(input: {
     return unsupportedDecision("unsupported_host_source_projection")
   }
 
+  if (input.host === "copilot" && input.workflowKind === "superpowers" && input.sourceEntry.source === "gstack") {
+    return unsupportedDecision("unsupported_host_source_projection")
+  }
+
+  if (input.host === "copilot" && input.workflowKind === "direct") {
+    return unsupportedDecision("unsupported_host_direct_projection")
+  }
+
   return supportedDecision()
 }
 
@@ -81,7 +89,15 @@ export function getControlPlaneCommandDecision(input: {
     return unsupportedDecision("unsupported_control_plane_command")
   }
 
+  if (input.command === "explain" && input.host === "copilot") {
+    return unsupportedDecision("unsupported_control_plane_command")
+  }
+
   if (input.workflowKind === "direct" && input.host === "claude") {
+    return unsupportedDecision("unsupported_workflow_mode")
+  }
+
+  if (input.workflowKind === "direct" && input.host === "copilot") {
     return unsupportedDecision("unsupported_workflow_mode")
   }
 

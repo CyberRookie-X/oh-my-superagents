@@ -50,6 +50,9 @@ const OPENCODE_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["sp-", "ai-"])
 const OPENCODE_ROUTER_OWNED_AGENT_PREFIXES = new Set(["spr-", "rt-"])
 const QWEN_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["oms-", "ai-"])
 const QWEN_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
+const COPILOT_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
+const COPILOT_ROUTER_OWNED_SKILL_PREFIXES = new Set(["oms-", "oms-no-"])
+const AGENT_FILE_SUFFIX = ".agent.md"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -133,6 +136,18 @@ function isQwenRouterOwnedFile(directory: string, fileName: string, content: str
   return false
 }
 
+function isCopilotRouterOwnedFile(directory: string, fileName: string, content: string) {
+  if (directory.includes(`${path.sep}plugins${path.sep}oh-my-superagents-copilot${path.sep}agents${path.sep}`)) {
+    return isPrefixOwned(fileName.replace(AGENT_FILE_SUFFIX, ""), content, COPILOT_ROUTER_OWNED_AGENT_PREFIXES)
+  }
+
+  if (directory.includes(`${path.sep}plugins${path.sep}oh-my-superagents-copilot${path.sep}skills${path.sep}`)) {
+    return fileName === SKILL_FILE_NAME && hasArtifactOwnershipMarker(content)
+  }
+
+  return false
+}
+
 function isOpenCodeRuntimeMetadataFile(filePath: string) {
   return filePath.endsWith(`${path.sep}${RUNTIME_AGENT_METADATA_DIRECTORY.replace(/\//g, path.sep)}${path.sep}${RUNTIME_AGENT_METADATA_FILE}`)
 }
@@ -164,7 +179,7 @@ function parseControlPlaneOwnership(content: string) {
   const escapedPrefix = CONTROL_PLANE_MARKER_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const match = content.match(
     new RegExp(
-      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen); artifact=(command|skill); logical-command=([a-z-]+); rendered-name=([a-z0-9-]+) -->`,
+      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen|copilot); artifact=(command|skill); logical-command=([a-z-]+); rendered-name=([a-z0-9-]+) -->`,
     ),
   )
 
@@ -179,7 +194,7 @@ function parseControlPlaneOwnership(content: string) {
 
   return {
     stage: match[1] as "1" | "2",
-    host: match[2] as "opencode" | "codex" | "qwen",
+    host: match[2] as "opencode" | "codex" | "qwen" | "copilot",
     artifact: match[3] as "command" | "skill",
     logicalCommand,
     renderedName: match[5],
@@ -244,7 +259,7 @@ function parseRouteOwnership(content: string) {
   const escapedPrefix = ROUTE_MARKER_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const match = content.match(
     new RegExp(
-      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen|claude); source=([a-z-]+); route=([a-z0-9.-]+); projection=(agent|command|skill); rendered-name=([a-z0-9-]+) -->`,
+      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen|claude|copilot); source=([a-z-]+); route=([a-z0-9.-]+); projection=(agent|command|skill); rendered-name=([a-z0-9-]+) -->`,
     ),
   )
 
@@ -254,7 +269,7 @@ function parseRouteOwnership(content: string) {
 
   return {
     stage: match[1] as "1" | "2",
-    host: match[2] as "opencode" | "codex" | "qwen" | "claude",
+    host: match[2] as "opencode" | "codex" | "qwen" | "claude" | "copilot",
     source: match[3],
     route: match[4],
     projection: match[5] as "agent" | "command" | "skill",
@@ -424,6 +439,7 @@ export function isOmsOwnedArtifactFile(filePath: string, content: string) {
     || isOpenCodeRouterOwnedFile(directory, fileName, content)
     || isCodexRouterOwnedFile(directory, fileName, content)
     || isQwenRouterOwnedFile(directory, fileName, content)
+    || isCopilotRouterOwnedFile(directory, fileName, content)
     || isRouteOwnedFile(filePath, content)
     || (
       hasArtifactOwnershipMarker(content)
@@ -431,6 +447,7 @@ export function isOmsOwnedArtifactFile(filePath: string, content: string) {
       && (
         directory.endsWith(`${path.sep}.opencode${path.sep}commands`)
         || directory.endsWith(`${path.sep}.qwen${path.sep}commands`)
+        || directory.includes(`${path.sep}plugins${path.sep}oh-my-superagents-copilot${path.sep}skills${path.sep}`)
       )
     )
   )
