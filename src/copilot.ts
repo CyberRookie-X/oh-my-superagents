@@ -5,7 +5,7 @@ import { resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
 import { toDirectCanonicalRouteId } from "./workflow-direct.js"
 import type { WorkflowSourceEntry } from "./workflow-sources.js"
 
-const PHASE_TO_COPILOT_PROMPT = {
+export const PHASE_TO_COPILOT_PROMPT = {
   brainstorming: "oms-brainstorm",
   "writing-plans": "oms-plan",
   "subagent-driven-development": "oms-execute",

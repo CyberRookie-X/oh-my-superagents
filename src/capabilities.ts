@@ -69,6 +69,10 @@ export function getHostProjectionDecision(input: {
     return unsupportedDecision("unsupported_host_source_projection")
   }
 
+  if (input.host === "copilot" && input.workflowKind === "superpowers" && input.sourceEntry.source === "gstack") {
+    return unsupportedDecision("unsupported_host_source_projection")
+  }
+
   return supportedDecision()
 }
 
@@ -78,6 +82,10 @@ export function getControlPlaneCommandDecision(input: {
   workflowKind: WorkflowKind
 }): CapabilityDecision {
   if (input.command === "explain" && input.host === "qwen") {
+    return unsupportedDecision("unsupported_control_plane_command")
+  }
+
+  if (input.command === "explain" && input.host === "copilot") {
     return unsupportedDecision("unsupported_control_plane_command")
   }
 

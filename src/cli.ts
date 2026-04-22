@@ -54,6 +54,7 @@ import type { ContextIndex } from "./context-index.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildClaudeArtifacts } from "./claude.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
+import { buildCopilotArtifacts, PHASE_TO_COPILOT_PROMPT } from "./copilot.js"
 import { CONTEXT_LIFECYCLE_STAGES } from "./context-lifecycle.js"
 import { detectClaudeGstackAvailability } from "./gstack-detectors.js"
 import { isOmsOwnedArtifactFile, isOmsOwnedSkillFile, isOpenCodeRuntimeMetadataContent, materializeArtifacts } from "./materialize.js"
@@ -84,7 +85,7 @@ export type CliResult = {
 }
 
 type CliHost = SupportedSuperpowersHost | "qwen" | "claude"
-type ExplainCliHost = Exclude<CliHost, "qwen">
+type ExplainCliHost = Exclude<CliHost, "qwen" | "copilot">
 
 const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
 const CODEX_PLUGIN_MANIFEST_PATH = "plugins/oh-my-superagents-codex/.codex-plugin/plugin.json"
@@ -143,6 +144,7 @@ type CliDeps = {
   buildArtifacts: typeof buildArtifacts
   buildCodexArtifacts: typeof buildCodexArtifacts
   buildQwenArtifacts: typeof buildQwenArtifacts
+  buildCopilotArtifacts: typeof buildCopilotArtifacts
   buildCodexBootstrap: typeof runCodexBootstrap
   materializeArtifacts: typeof materializeArtifacts
   artifactExists: (filePath: string) => Promise<boolean>
@@ -187,6 +189,7 @@ const defaultDeps: CliDeps = {
   buildArtifacts,
   buildCodexArtifacts,
   buildQwenArtifacts,
+  buildCopilotArtifacts,
   buildCodexBootstrap: runCodexBootstrap,
   materializeArtifacts,
   artifactExists: async (filePath) => {
@@ -1508,12 +1511,33 @@ function explainAllClaude(config: Awaited<ReturnType<typeof loadRouterConfig>>["
   })
 }
 
+function explainCopilotPhase(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"], phase: BuiltInPhase) {
+  const resolved = resolvePhase(config, phase)
+
+  return {
+    phase,
+    canonicalRoute: resolved.canonicalRoute,
+    profileId: resolved.profileId,
+    effectiveLane: resolved.effectiveLane,
+    routeSource: resolved.routeSource,
+    resolvedSource: resolved.resolvedSource,
+    model: resolved.selection.model,
+    variant: resolved.selection.variant,
+    promptName: PHASE_TO_COPILOT_PROMPT[phase],
+  }
+}
+
+function explainAllCopilot(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"]) {
+  return BUILT_IN_PHASES.map((phase) => explainCopilotPhase(config, phase))
+}
+
 function explainAllForCliHost(
   config: Awaited<ReturnType<typeof loadRouterConfig>>["config"],
   host: ExplainCliHost,
   deps: CliDeps,
 ) {
-  return host === "claude" ? explainAllClaude(config) : deps.explainAllForHost(config, host)
+  if (host === "claude") return explainAllClaude(config)
+  return deps.explainAllForHost(config, host)
 }
 
 function explainPhaseForCliHost(
@@ -1522,7 +1546,8 @@ function explainPhaseForCliHost(
   phase: BuiltInPhase,
   deps: CliDeps,
 ) {
-  return host === "claude" ? explainClaudePhase(config, phase) : deps.explainPhaseForHost(config, host, phase)
+  if (host === "claude") return explainClaudePhase(config, phase)
+  return deps.explainPhaseForHost(config, host, phase)
 }
 
 function assertQwenProjectionSupport(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"]) {
@@ -1653,6 +1678,10 @@ async function getArtifactsForHost(
     return buildClaudeArtifacts(config).skills
   }
 
+  if (host === "copilot") {
+    return buildCopilotArtifacts(config).prompts
+  }
+
   assertQwenProjectionSupport(config)
 
   const built = await deps.buildQwenArtifacts(config, {
@@ -1713,6 +1742,12 @@ async function getExpectedArtifacts(
     ].sort()
   }
 
+  if (host === "copilot") {
+    return buildCopilotArtifacts(routerConfig).prompts
+      .map((artifact) => path.join(cwd, artifact.directory, artifact.fileName))
+      .sort()
+  }
+
   return (await getArtifactsForHost(cwd, routerConfig, host, deps, config.settings))
     .map((artifact) => path.join(cwd, artifact.directory, artifact.fileName))
     .sort()
@@ -1732,6 +1767,9 @@ const OWNED_ARTIFACT_RULES: Record<CliHost, Array<{ directory: string; extension
     { directory: ".qwen/commands", extension: ".md" },
   ],
   claude: [],
+  copilot: [
+    { directory: ".github/prompts", extension: ".md" },
+  ],
 }
 
 function isMissingFsError(error: unknown) {
@@ -2537,15 +2575,15 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     }
 
     if (!host) {
-      return { exitCode: 1, stdout: "", stderr: "Missing required --host (supported: opencode, codex, qwen, claude)" }
+      return { exitCode: 1, stdout: "", stderr: "Missing required --host (supported: opencode, codex, qwen, claude, copilot)" }
     }
 
-    if (command === "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude") {
-      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, or --host claude is supported for explain in v1" }
+    if (command === "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude" && host !== "copilot") {
+      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host claude, or --host copilot is supported for explain in v1" }
     }
 
-    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude") {
-      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, or --host claude is supported in v1" }
+    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude" && host !== "copilot") {
+      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, --host claude, or --host copilot is supported in v1" }
     }
 
     const cliHost = host as CliHost
@@ -2795,11 +2833,17 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
       const result = cliHost === "codex"
         ? await materializeCodexLifecycle(cwd, prepared.path, toRouterConfig(prepared.config), prepared.config.settings, deps)
-        : await deps.materializeArtifacts({
-          cwd,
-          artifacts: await getArtifactsForHost(cwd, toRouterConfig(prepared.config), cliHost, deps, prepared.config.settings),
-          fs: nodeFs,
-        })
+        : cliHost === "copilot"
+          ? await deps.materializeArtifacts({
+            cwd,
+            artifacts: await getArtifactsForHost(cwd, toRouterConfig(prepared.config), cliHost, deps, prepared.config.settings),
+            fs: nodeFs,
+          })
+          : await deps.materializeArtifacts({
+            cwd,
+            artifacts: await getArtifactsForHost(cwd, toRouterConfig(prepared.config), cliHost, deps, prepared.config.settings),
+            fs: nodeFs,
+          })
       const routeImpact = cliHost === "opencode"
         ? buildUseRouteImpact(resolved.config, prepared.config)
         : undefined
@@ -2879,19 +2923,32 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
 
       const cleanup = cliHost === "codex"
         ? await cleanupCodexLifecycle(cwd, deps)
-        : await (async () => {
-          const discovery = await discoverOwnedArtifacts(cwd, cliHost, deps)
-          if (discovery.warnings.length > 0) {
-            return {
-              exitCode: 2 as const,
-              warnings: discovery.warnings,
-              written: [] as string[],
-              removed: [] as string[],
+        : cliHost === "copilot"
+          ? await (async () => {
+            const discovery = await discoverOwnedArtifacts(cwd, cliHost, deps)
+            if (discovery.warnings.length > 0) {
+              return {
+                exitCode: 2 as const,
+                warnings: discovery.warnings,
+                written: [] as string[],
+                removed: [] as string[],
+              }
             }
-          }
+            return removeOwnedArtifacts(discovery.paths, deps)
+          })()
+          : await (async () => {
+            const discovery = await discoverOwnedArtifacts(cwd, cliHost, deps)
+            if (discovery.warnings.length > 0) {
+              return {
+                exitCode: 2 as const,
+                warnings: discovery.warnings,
+                written: [] as string[],
+                removed: [] as string[],
+              }
+            }
 
-          return removeOwnedArtifacts(discovery.paths, deps)
-        })()
+            return removeOwnedArtifacts(discovery.paths, deps)
+          })()
       const payload: {
         exitCode: 0 | 1 | 2
         warnings: string[]
@@ -3013,19 +3070,32 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       if (!resolved.config.settings.enabled) {
         const result = cliHost === "codex"
           ? await cleanupCodexLifecycle(cwd, deps)
-          : await (async () => {
-            const discovery = await discoverOwnedArtifacts(cwd, cliHost, deps)
-            if (discovery.warnings.length > 0) {
-              return {
-                exitCode: 2 as const,
-                warnings: discovery.warnings,
-                written: [] as string[],
-                removed: [] as string[],
+          : cliHost === "copilot"
+            ? await (async () => {
+              const discovery = await discoverOwnedArtifacts(cwd, cliHost, deps)
+              if (discovery.warnings.length > 0) {
+                return {
+                  exitCode: 2 as const,
+                  warnings: discovery.warnings,
+                  written: [] as string[],
+                  removed: [] as string[],
+                }
               }
-            }
+              return removeOwnedArtifacts(discovery.paths, deps)
+            })()
+            : await (async () => {
+              const discovery = await discoverOwnedArtifacts(cwd, cliHost, deps)
+              if (discovery.warnings.length > 0) {
+                return {
+                  exitCode: 2 as const,
+                  warnings: discovery.warnings,
+                  written: [] as string[],
+                  removed: [] as string[],
+                }
+              }
 
-            return removeOwnedArtifacts(discovery.paths, deps)
-          })()
+              return removeOwnedArtifacts(discovery.paths, deps)
+            })()
 
         return {
           exitCode: result.exitCode,
@@ -3051,17 +3121,29 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           resolved.config.settings,
           deps,
         )
-        : await deps.materializeArtifacts({
-          cwd,
-          artifacts: await getArtifactsForHost(
+        : cliHost === "copilot"
+          ? await deps.materializeArtifacts({
             cwd,
-            toRouterConfig(resolved.config, resolved.laneState),
-            cliHost,
-            deps,
-            resolved.config.settings,
-          ),
-          fs: nodeFs,
-        })
+            artifacts: await getArtifactsForHost(
+              cwd,
+              toRouterConfig(resolved.config, resolved.laneState),
+              cliHost,
+              deps,
+              resolved.config.settings,
+            ),
+            fs: nodeFs,
+          })
+          : await deps.materializeArtifacts({
+            cwd,
+            artifacts: await getArtifactsForHost(
+              cwd,
+              toRouterConfig(resolved.config, resolved.laneState),
+              cliHost,
+              deps,
+              resolved.config.settings,
+            ),
+            fs: nodeFs,
+          })
 
       return {
         exitCode: result.exitCode,
