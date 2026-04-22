@@ -61,6 +61,121 @@ const NOT_DETECTED_CODEX: SuperpowersDetectionResult = {
   detectedRef: null,
 }
 
+const NOT_DETECTED_COPILOT: SuperpowersDetectionResult = {
+  host: "copilot",
+  source: "copilot-plugin-detection",
+  detectedVersion: null,
+  detectedRef: null,
+}
+
+type CopilotDetectorInput = {
+  cwd?: string
+  homeDir?: string
+  pathExists?: (filePath: string) => Promise<boolean>
+  readFile?: (filePath: string) => Promise<string>
+}
+
+export async function detectCopilotSuperpowers(
+  input: CopilotDetectorInput = {},
+): Promise<SuperpowersDetectionResult> {
+  const cwd = input.cwd ?? process.cwd()
+  const homeDir = input.homeDir ?? homedir()
+  const pathExists = input.pathExists ?? defaultPathExists
+  const readConfigFile = input.readFile ?? defaultReadFile
+  const failures: SuperpowersDetectionFailure[] = []
+
+  const projectPluginPath = path.join(cwd, ".github", "agents")
+  const userPluginPath = path.join(homeDir, ".copilot", "plugins")
+
+  const projectAgentsPath = await detectCopilotAgentsDir(projectPluginPath, "copilot-project-agents", pathExists)
+  const userPluginsPath = await detectCopilotPluginDir(userPluginPath, "copilot-user-plugins", pathExists, readConfigFile)
+
+  const resolvedDetection = resolveCopilotDetection(projectAgentsPath, userPluginsPath)
+
+  return withFailures(resolvedDetection, failures)
+}
+
+export async function detectCopilotSuperpowersAvailability(
+  input: CopilotDetectorInput = {},
+  policyMode: SuperpowersCompatibilityMode = "warn",
+): Promise<ReturnType<typeof toSuperpowersAvailabilityResult>> {
+  return toSuperpowersAvailabilityResult(
+    evaluateSuperpowersCompatibility(await detectCopilotSuperpowers(input), policyMode),
+  )
+}
+
+async function detectCopilotAgentsDir(
+  agentsPath: string,
+  source: string,
+  pathExists: (filePath: string) => Promise<boolean>,
+): Promise<SuperpowersDetectionResult | null> {
+  if (!(await pathExists(agentsPath))) {
+    return null
+  }
+
+  return {
+    host: "copilot",
+    source,
+    detectedVersion: null,
+    detectedRef: agentsPath,
+  }
+}
+
+async function detectCopilotPluginDir(
+  pluginsPath: string,
+  source: string,
+  pathExists: (filePath: string) => Promise<boolean>,
+  readConfigFile: (filePath: string) => Promise<string>,
+): Promise<SuperpowersDetectionResult | null> {
+  if (!(await pathExists(pluginsPath))) {
+    return null
+  }
+
+  const superpowersPluginManifest = path.join(pluginsPath, "superpowers", "plugin.json")
+  if (!(await pathExists(superpowersPluginManifest))) {
+    return null
+  }
+
+  try {
+    const rawManifest = await readConfigFile(superpowersPluginManifest)
+    const manifest = JSON.parse(rawManifest) as { version?: string }
+    const detectedVersion = manifest.version ? normalizeSuperpowersVersion(manifest.version) : null
+
+    return {
+      host: "copilot",
+      source,
+      detectedVersion,
+      detectedRef: detectedVersion ? null : superpowersPluginManifest,
+      details: {
+        configPath: superpowersPluginManifest,
+      },
+    }
+  } catch (error) {
+    return {
+      host: "copilot",
+      source,
+      detectedVersion: null,
+      detectedRef: superpowersPluginManifest,
+    }
+  }
+}
+
+function resolveCopilotDetection(
+  projectDetection: SuperpowersDetectionResult | null,
+  userDetection: SuperpowersDetectionResult | null,
+): SuperpowersDetectionResult {
+  if (projectDetection && userDetection) {
+    return {
+      host: "copilot",
+      source: "copilot-multiple-installs",
+      detectedVersion: null,
+      detectedRef: null,
+    }
+  }
+
+  return projectDetection ?? userDetection ?? { ...NOT_DETECTED_COPILOT }
+}
+
 export async function detectOpenCodeSuperpowers(
   input: OpenCodeDetectorInput = {},
 ): Promise<SuperpowersDetectionResult> {

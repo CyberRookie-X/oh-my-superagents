@@ -12,7 +12,7 @@ export const SUPERPOWERS_COMPATIBILITY_STATUSES = [
 export type SuperpowersCompatibilityStatus =
   (typeof SUPERPOWERS_COMPATIBILITY_STATUSES)[number]
 
-export type SupportedSuperpowersHost = "opencode" | "codex"
+export type SupportedSuperpowersHost = "opencode" | "codex" | "copilot"
 
 export type SuperpowersCompatibilityMatrixEntry = {
   minimumSupportedVersion: string
@@ -27,6 +27,11 @@ export const SUPERPOWERS_COMPATIBILITY = {
     knownBadRanges: [],
   },
   codex: {
+    minimumSupportedVersion: "5.0.0",
+    testedRanges: [">=5.0.0 <6.0.0"],
+    knownBadRanges: [],
+  },
+  copilot: {
     minimumSupportedVersion: "5.0.0",
     testedRanges: [">=5.0.0 <6.0.0"],
     knownBadRanges: [],
