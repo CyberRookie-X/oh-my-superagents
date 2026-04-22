@@ -4,20 +4,20 @@
 
 Architecture: [English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, Qwen, and Claude Code, with first-class `superpowers` support and an experimental host-native direct mode on OpenCode, Codex, and Qwen.
+Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, Qwen, Claude Code, and Copilot CLI, with first-class `superpowers` support and an experimental host-native direct mode on OpenCode, Codex, Qwen, and Copilot CLI.
 
 ## Support Matrix
 
-| Capability | OpenCode | Codex | Qwen | Claude Code |
-| --- | --- | --- | --- | --- |
-| `superpowers` workflow routing | Full | Full | Partial | Experimental |
-| Direct mode | Experimental | Experimental | Experimental | None yet |
-| OMS control plane | Full | Full | Full | Experimental |
-| Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | None |
-| Compatibility monitor | Full | Full | None yet | None yet |
-| Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | Skills |
-| Temporary disable helper | Full | Full | None yet | None yet |
-| `codexFast` | Full | Full | None yet | None yet |
+| Capability | OpenCode | Codex | Qwen | Claude Code | Copilot CLI |
+| --- | --- | --- | --- | --- | --- |
+| `superpowers` workflow routing | Full | Full | Partial | Experimental | Full |
+| Direct mode | Experimental | Experimental | Experimental | None yet | Experimental |
+| OMS control plane | Full | Full | Full | Experimental | Full |
+| Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | None | None |
+| Compatibility monitor | Full | Full | None yet | None yet | None yet |
+| Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | Skills | Prompts |
+| Temporary disable helper | Full | Full | None yet | None yet | None yet |
+| `codexFast` | Full | Full | None yet | None yet | None yet |
 
 Support level notes:
 
@@ -31,8 +31,8 @@ Feature notes:
 
 - The temporary disable helper is host-local, conversation-scoped, and does not change persistent OMS state.
 - `codexFast` is full on OpenCode and Codex. Qwen does not support it yet.
-- Direct mode stays host-native: OpenCode renders commands plus agents, Codex renders agent TOMLs plus local bootstrap skills, and Qwen renders project-local commands plus agents.
-- `gstack` is a first-party workflow source. In the current slice, gstack-backed route projection is supported on OpenCode, Codex, and Claude Code, but not on Qwen.
+- Direct mode stays host-native: OpenCode renders commands plus agents, Codex renders agent TOMLs plus local bootstrap skills, Qwen renders project-local commands plus agents, and Copilot CLI renders `.github/prompts/*.md` prompt files.
+- `gstack` is a first-party workflow source. In the current slice, gstack-backed route projection is supported on OpenCode, Codex, and Claude Code, but not on Qwen or Copilot CLI.
 
 ## Implementation Footprint
 
@@ -48,6 +48,7 @@ The table below uses current source line counts from the implementation files on
 | Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 760 | Medium |
 | Qwen adapter | `src/qwen.ts` | 424 | Thin |
 | Claude adapter | `src/claude.ts` | 138 | Thin |
+| Copilot CLI adapter | `src/copilot.ts` | 265 | Thin |
 | Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1093 | Medium |
 | Shared artifact reconciliation | `src/materialize.ts` | 712 | Thin-to-medium |
 
@@ -61,7 +62,7 @@ How to read this:
 ## Scope
 
 `oh-my-superagents` is evolving into a broader routing and control-plane product.
-Today it still ships first-class `superpowers` support across the supported hosts, and the first generic slice now includes an experimental host-native direct mode on OpenCode, Codex, and Qwen, while Claude Code currently supports the `superpowers` slice only.
+Today it still ships first-class `superpowers` support across the supported hosts, and the first generic slice now includes an experimental host-native direct mode on OpenCode, Codex, Qwen, and Copilot CLI, while Claude Code currently supports the `superpowers` slice only.
 
 It is not a cross-host configuration sync tool.
 The supported surface for this release is the CLI, generated host artifacts, packaged plugin entrypoints, the Stage 1 OMS control plane, the Stage 2 Qwen adapter, the experimental direct-mode slices on OpenCode, Codex, and Qwen, and the current `oh-my-superagents/library` export surface.
@@ -72,6 +73,7 @@ Today that means:
 - Codex: supported for `superpowers` workflow routing and the experimental direct-mode slice
 - Qwen: supported with a limited Stage 2 surface for `superpowers` workflow routing plus an experimental direct-mode slice
 - Claude Code: supported as a thin host adapter for the current `superpowers` slice, including source-aware route projection; direct workflow projection is not supported yet
+- Copilot CLI: supported for `superpowers` workflow routing and the experimental direct-mode slice, generating `.github/prompts/*.md` prompt files
 
 ## What It Does
 
@@ -81,6 +83,7 @@ Today that means:
 - Generates `.codex/agents/*.toml`
 - Generates `.qwen/agents/*.md` and `.qwen/commands/*.md`
 - Generates `.claude/skills/*/SKILL.md`
+- Generates `.github/prompts/*.md` (Copilot CLI)
 - Proposes routing config changes with `author routing` from repo signals plus a user-supplied model inventory
 - Exposes `author routing`, `status`, `use`, `disable`, `sync`, `doctor`, `explain`, and `bootstrap` CLIs
 - Ships a minimal OpenCode plugin entrypoint for startup diagnostics
@@ -100,9 +103,10 @@ The first generic-routing slice is now an experimental direct workflow on OpenCo
 - OpenCode renders `ai-<intent>` commands plus `rt-<intent>` agents.
 - Codex renders `rt-<intent>.toml` agents plus repo-local `ai-<intent>` bootstrap skills in `plugins/oh-my-superagents-codex/skills/`.
 - Qwen renders project-local `.qwen/commands/ai-<intent>.md` commands plus `.qwen/agents/rt-<intent>.md` agents.
+- Copilot CLI renders `.github/prompts/rt-<intent>.md` prompt files.
 - Direct intent ids must use lowercase letters, digits, and `-` only so the generated host filenames stay valid.
-- The supported direct-mode control-plane surface is `status`, `doctor`, and `sync` on OpenCode, Codex, and Qwen.
-- `explain --intent` is currently supported on OpenCode and Codex, but not yet on Qwen or Claude Code.
+- The supported direct-mode control-plane surface is `status`, `doctor`, and `sync` on OpenCode, Codex, Qwen, and Copilot CLI.
+- `explain --intent` is currently supported on OpenCode and Codex, but not yet on Qwen, Claude Code, or Copilot CLI.
 - `explain --host claude --phase <phase>` is supported for the current Claude `superpowers` slice.
 - Direct mode does not require upstream `superpowers`, while first-party `superpowers` workflow routing remains supported and unchanged.
 
@@ -130,11 +134,13 @@ Host-specific flow:
 - OpenCode: add `oh-my-superagents` to your OpenCode plugin list
 - Codex: use the packaged CLI to run `bootstrap --host codex`
 - Qwen: use `sync --host qwen`; there is no heavy bootstrap flow in Stage 2
+- Copilot CLI: use `sync --host copilot`; generates `.github/prompts/*.md` prompt files
 
 For ad-hoc local use of the CLI, run it with `npx` or from your local `node_modules/.bin`:
 
 ```bash
 npx oh-my-superagents sync --host opencode
+npx oh-my-superagents sync --host copilot
 ```
 
 Create `oh-my-superagents.config.jsonc` in your project root:
@@ -221,6 +227,7 @@ Notes:
 - Legacy single-preset router configs are still read and migrated into `presets.default`, but do not mix legacy top-level keys with `settings` or `presets`.
 - For `--host codex`, use Codex-compatible model ids in profiles, such as `gpt-5.4` or `gpt-5.3-codex-spark`. The Codex adapter does not translate arbitrary OpenCode provider/model ids.
 - For `--host qwen`, use Qwen-compatible model ids in profiles such as `qwen/qwen3-coder-30b` or `qwen/qwen3-coder-480b`.
+- For `--host copilot`, use Copilot-compatible model ids in profiles such as `gpt-4o` or `gpt-4o-mini`.
 
 ## Lane Routing
 
@@ -308,11 +315,11 @@ These lane-scoped helpers stay inside the existing `superpowers` execution flow.
 
 Stage 1 adds host-local control-plane commands:
 
-- `oh-my-superagents status --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents disable --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents sync --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents doctor --host <opencode|codex|qwen|claude>`
+- `oh-my-superagents status --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents disable --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents sync --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents doctor --host <opencode|codex|qwen|claude|copilot>`
 
 Behavior notes:
 
@@ -323,6 +330,7 @@ Behavior notes:
 - For `--host codex`, the OMS-managed surface includes `.codex/agents/*.toml`, the OMS marketplace entry inside `.agents/plugins/marketplace.json`, `plugins/oh-my-superagents-codex/.codex-plugin/plugin.json`, and OMS control-plane skills under `plugins/oh-my-superagents-codex/skills/*/SKILL.md`.
 - For `--host qwen`, the OMS-managed surface includes both `.qwen/commands/*.md` and `.qwen/agents/*.md`.
 - For `--host claude`, the OMS-managed surface includes project-scoped `.claude/skills/*/SKILL.md` wrappers.
+- For `--host copilot`, the OMS-managed surface includes project-scoped `.github/prompts/*.md` prompt files.
 - Artifact inspection in `status` and `doctor` is also invoking-host-only.
 
 ## Readiness Surfaces
@@ -460,6 +468,10 @@ oh-my-superagents sync --host qwen
 oh-my-superagents sync --host claude
 ```
 
+```bash
+oh-my-superagents sync --host copilot
+```
+
 Use `--config /absolute/or/relative/path.jsonc` to override config discovery.
 
 For Codex, `sync` and `use` reconcile the full OMS-owned Stage 1 surface: `.codex/agents/*.toml`, the OMS marketplace entry, `plugins/oh-my-superagents-codex/.codex-plugin/plugin.json`, and OMS control-plane skills under `plugins/oh-my-superagents-codex/skills/*/SKILL.md`.
@@ -467,6 +479,8 @@ For Codex, `sync` and `use` reconcile the full OMS-owned Stage 1 surface: `.code
 For Qwen in Stage 2, `sync` materializes either OMS command wrappers plus OMS wrapper agents for `superpowers` workflow mode, or direct-mode `ai-<intent>` commands plus `rt-<intent>` agents for direct workflows. Only the `superpowers` workflow path requires upstream skills. It does not run a Codex-style bootstrap or install upstream skills for you. gstack-backed route projection is intentionally unsupported on Qwen in this slice.
 
 For Claude Code in the current slice, `sync` materializes project-scoped `.claude/skills/*/SKILL.md` wrappers for the `superpowers` workflow surface. Direct workflow projection is intentionally unsupported on Claude in this slice.
+
+For Copilot CLI, `sync` materializes `.github/prompts/*.md` prompt files for both `superpowers` workflow phases and control plane commands. Direct mode generates `rt-<intent>.md` prompt files. gstack-backed route projection is intentionally unsupported on Copilot CLI in this slice.
 
 ## Explain
 
@@ -482,7 +496,7 @@ oh-my-superagents explain --host codex --all
 oh-my-superagents explain --host claude --phase writing-plans
 ```
 
-`explain` is currently supported for `--host opencode`, `--host codex`, and `--host claude` in v1.
+`explain` is currently supported for `--host opencode`, `--host codex`, `--host claude`, and `--host copilot` in v1.
 
 When control-plane explainability is available, `explain` adds route-trace fields such as `routeSource`, `configSource`, `reuseRelationship`, `resolvedSource`, and `sourceEntry`, plus route-level `readiness`. Single-item output carries top-level `compatibility`; `--all` preserves array shape and attaches `compatibility` to each item.
 
@@ -494,7 +508,7 @@ In the first release it checks:
 - OpenCode upstream install metadata from project or user `opencode.json` plugin entries plus the standard local install paths `.opencode/plugins/superpowers.js` and `${XDG_CONFIG_HOME:-~/.config}/opencode/plugins/superpowers.js`
 - Codex upstream install metadata from the standard clone and skills symlink locations
 
-First-release scope does not include Gemini CLI.
+First-release scope does not include Gemini CLI or Copilot CLI compatibility monitoring.
 
 The monitor is observational only:
 
@@ -503,7 +517,7 @@ The monitor is observational only:
 
 For OpenCode, if project-scope and user-scope detection resolve to different upstream refs or versions, the monitor degrades to a conservative non-versioned result that evaluates as `not_detected` instead of pretending one install won.
 
-Host-wide compatibility results surface in JSON output from `status`, `doctor`, `sync`, `explain`, and `bootstrap` on the hosts that currently have a monitor.
+Host-wide compatibility results surface in JSON output from `status`, `doctor`, `sync`, `explain`, and `bootstrap` on the hosts that currently have a monitor. Copilot CLI does not yet have compatibility monitoring.
 OpenCode startup diagnostics currently log only `incompatible` and `not_detected` outcomes.
 The reported status is one of:
 
@@ -577,6 +591,26 @@ Stage 2 boundaries:
 - no host bootstrap installer
 - wrapper commands plus wrapper agents only
 
+## Generated Copilot CLI Prompts
+
+Run `oh-my-superagents sync --host copilot` to materialize Copilot CLI prompt files into `.github/prompts/`.
+
+In `superpowers` workflow mode this renders OMS phase prompts:
+
+- `oms-brainstorm.md`
+- `oms-plan.md`
+- `oms-execute.md`
+- `oms-review.md`
+- `oms-verify.md`
+- `oms-visual.md`
+- `oms-web-test.md`
+
+Plus OMS control-plane command prompts from the configured prefix and aliases.
+
+In direct mode this renders `rt-<intent>.md` prompt files instead.
+
+Copilot CLI prompt files use YAML frontmatter with `name`, `description`, and `model` fields, followed by markdown prompt content. They can be used with `gh copilot suggest --prompt <name>`.
+
 ## Generated Codex Plugin Bundle
 
 `bootstrap --host codex`, `sync --host codex`, and `use <preset> --host codex` reconcile this OMS-owned Codex plugin surface:
@@ -643,6 +677,7 @@ This project builds on and is inspired by work from several projects and communi
 - **[Codex](https://github.com/openai/codex)** — OpenAI's Codex CLI, a supported host platform with its own agent and plugin primitives.
 - **[Qwen Code](https://github.com/QwenLM/qwen-code)** — Alibaba's Qwen Code CLI, a supported host platform.
 - **[Claude Code](https://github.com/anthropics/claude-code)** — Anthropic's Claude Code CLI, a supported host platform.
+- **[GitHub Copilot CLI](https://github.com/cli/cli)** — GitHub Copilot CLI (`gh copilot`), a supported host platform that uses prompt files for reusable prompt templates.
 - **[gstack](https://github.com/garrytan/gstack)** — A first-party workflow source with structured specialist agents, used as a workflow source adapter in OMS.
 
 ## License
