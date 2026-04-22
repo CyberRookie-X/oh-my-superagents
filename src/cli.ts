@@ -53,6 +53,7 @@ import { writeAuthorityWithRecoverySnapshotAtomically } from "./config-write.js"
 import type { ContextIndex } from "./context-index.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildClaudeArtifacts } from "./claude.js"
+import { buildCopilotArtifacts, explainAllCopilot, explainCopilotPhase } from "./copilot.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
 import { CONTEXT_LIFECYCLE_STAGES } from "./context-lifecycle.js"
 import { detectClaudeGstackAvailability } from "./gstack-detectors.js"
@@ -83,13 +84,23 @@ export type CliResult = {
   stderr: string
 }
 
-type CliHost = SupportedSuperpowersHost | "qwen" | "claude"
+type CliHost = SupportedSuperpowersHost | "qwen" | "claude" | "copilot"
 type ExplainCliHost = Exclude<CliHost, "qwen">
 
 const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
 const CODEX_PLUGIN_MANIFEST_PATH = "plugins/oh-my-superagents-codex/.codex-plugin/plugin.json"
 const CODEX_SKILLS_ROOT = "plugins/oh-my-superagents-codex/skills"
 const CLAUDE_SKILLS_ROOT = ".claude/skills"
+const COPILOT_SKILLS_ROOT = "plugins/oh-my-superagents-copilot/skills"
+const COPILOT_AGENT_FILE_NAMES = [
+  "oms-brainstorm.agent.md",
+  "oms-plan.agent.md",
+  "oms-execute.agent.md",
+  "oms-review.agent.md",
+  "oms-verify.agent.md",
+  "oms-visual.agent.md",
+  "oms-web-test.agent.md",
+]
 const QWEN_MANAGED_AGENT_FILE_NAMES = [
   "oms-brainstorm.md",
   "oms-plan.md",
@@ -1405,7 +1416,7 @@ function isDirectWorkflowHostSupported(
     return false
   }
 
-  return host === "opencode" || host === "codex" || host === "qwen"
+  return host === "opencode" || host === "codex" || host === "qwen" || host === "copilot"
 }
 
 function assertWorkflowSupport(
@@ -1513,6 +1524,9 @@ function explainAllForCliHost(
   host: ExplainCliHost,
   deps: CliDeps,
 ) {
+  if (host === "copilot") {
+    return explainAllCopilot(config)
+  }
   return host === "claude" ? explainAllClaude(config) : deps.explainAllForHost(config, host)
 }
 
@@ -1522,6 +1536,9 @@ function explainPhaseForCliHost(
   phase: BuiltInPhase,
   deps: CliDeps,
 ) {
+  if (host === "copilot") {
+    return explainCopilotPhase(config, phase)
+  }
   return host === "claude" ? explainClaudePhase(config, phase) : deps.explainPhaseForHost(config, host, phase)
 }
 
@@ -1653,6 +1670,11 @@ async function getArtifactsForHost(
     return buildClaudeArtifacts(config).skills
   }
 
+  if (host === "copilot") {
+    const built = buildCopilotArtifacts(config)
+    return [...built.agents, ...built.skills]
+  }
+
   assertQwenProjectionSupport(config)
 
   const built = await deps.buildQwenArtifacts(config, {
@@ -1713,6 +1735,15 @@ async function getExpectedArtifacts(
     ].sort()
   }
 
+  if (host === "copilot") {
+    const built = buildCopilotArtifacts(routerConfig)
+
+    return [
+      ...built.agents.map((artifact) => path.join(cwd, artifact.directory, artifact.fileName)),
+      ...built.skills.map((artifact) => path.join(cwd, artifact.directory, artifact.fileName)),
+    ].sort()
+  }
+
   return (await getArtifactsForHost(cwd, routerConfig, host, deps, config.settings))
     .map((artifact) => path.join(cwd, artifact.directory, artifact.fileName))
     .sort()
@@ -1732,6 +1763,9 @@ const OWNED_ARTIFACT_RULES: Record<CliHost, Array<{ directory: string; extension
     { directory: ".qwen/commands", extension: ".md" },
   ],
   claude: [],
+  copilot: [
+    { directory: ".copilot/agents", extension: ".md" },
+  ],
 }
 
 function isMissingFsError(error: unknown) {
@@ -1985,6 +2019,14 @@ async function discoverOwnedArtifacts(
       discovered.add(filePath)
     }
     warnings.push(...claudeSkills.warnings)
+  }
+
+  if (host === "copilot") {
+    const copilotSkills = await discoverOwnedSkillFiles(cwd, COPILOT_SKILLS_ROOT, deps)
+    for (const filePath of copilotSkills.paths) {
+      discovered.add(filePath)
+    }
+    warnings.push(...copilotSkills.warnings)
   }
 
   return {
@@ -2537,15 +2579,15 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     }
 
     if (!host) {
-      return { exitCode: 1, stdout: "", stderr: "Missing required --host (supported: opencode, codex, qwen, claude)" }
+      return { exitCode: 1, stdout: "", stderr: "Missing required --host (supported: opencode, codex, qwen, claude, copilot)" }
     }
 
-    if (command === "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude") {
-      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, or --host claude is supported for explain in v1" }
+    if (command === "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude" && host !== "copilot") {
+      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, --host claude, or --host copilot is supported for explain in v1" }
     }
 
-    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude") {
-      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, or --host claude is supported in v1" }
+    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude" && host !== "copilot") {
+      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, --host claude, or --host copilot is supported in v1" }
     }
 
     const cliHost = host as CliHost

@@ -21,7 +21,7 @@ export type CapabilityDecision =
       supported: false
       reasonCode: CapabilityReasonCode
     }
-export type CapabilityHost = SupportedSuperpowersHost | "qwen" | "claude"
+export type CapabilityHost = SupportedSuperpowersHost | "qwen" | "claude" | "copilot"
 export type ControlPlaneCapabilityCommand = ControlPlaneCommandKey | "explain"
 
 type WorkflowKind = WorkflowConfig["kind"]

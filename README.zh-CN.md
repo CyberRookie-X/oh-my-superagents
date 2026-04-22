@@ -4,20 +4,20 @@
 
 架构说明：[English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Claude Code 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen 的实验性、宿主原生 direct mode。
+`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Copilot CLI、Claude Code 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen 的实验性、宿主原生 direct mode。
 
 ## 支持矩阵
 
-| 能力 | OpenCode | Codex | Qwen | Claude Code |
-| --- | --- | --- | --- | --- |
-| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 |
-| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 |
-| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 |
-| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 |
-| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills |
-| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
+| 能力 | OpenCode | Codex | Qwen | Copilot CLI | Claude Code |
+| --- | --- | --- | --- | --- | --- |
+| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 完整支持 | 实验性支持 |
+| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 完整支持 | 暂未实现 |
+| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 完整支持（通过 skills） | 实验性支持 |
+| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 原生插件入口（通过 plugin install） | 暂无 |
+| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
+| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Agents + Skills | Skills |
+| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
+| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
 
 支持等级说明：
 
@@ -48,6 +48,7 @@
 | Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 760 | 中等 |
 | Qwen 适配层 | `src/qwen.ts` | 424 | 薄 |
 | Claude 适配层 | `src/claude.ts` | 138 | 薄 |
+| Copilot 适配层 | `src/copilot.ts` | 263 | 薄 |
 | 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1093 | 中等 |
 | 共享工件协调层 | `src/materialize.ts` | 712 | 薄到中等 |
 
@@ -84,6 +85,7 @@
 - OpenCode：支持 `superpowers` 工作流路由，也支持实验性的 direct mode 切片
 - Codex：支持 `superpowers` 工作流路由，也支持实验性的 direct mode 切片
 - Qwen：支持，但目前仍是有边界的 Stage 2 `superpowers` 工作流形态，同时也支持实验性的 direct mode 切片
+- Copilot CLI：支持 `superpowers` 工作流路由和 direct mode，OMS 控制平面通过插件 skills 提供
 - Claude Code：当前已经以薄宿主适配层的方式支持 `superpowers` slice，并支持 source-aware route projection，但 direct workflow 投影暂未支持
 
 ## 它能做什么
@@ -94,6 +96,8 @@
 - 生成 `.codex/agents/*.toml`
 - 生成 `.qwen/agents/*.md` 与 `.qwen/commands/*.md`
 - 生成 `.claude/skills/*/SKILL.md`
+- 生成 `.copilot/agents/*.agent.md`
+- 生成 `plugins/oh-my-superagents-copilot/skills/*/SKILL.md`
 - 通过 `author routing` 基于仓库信号和用户提供的模型清单生成路由配置提案
 - 提供 `author routing`、`status`、`use`、`disable`、`sync`、`doctor`、`explain`、`bootstrap` CLI
 - 提供最小 OpenCode plugin 入口用于启动诊断
@@ -143,6 +147,7 @@ bash scripts/run-codex-debian-canary.sh
 - OpenCode：把 `oh-my-superagents` 加到 OpenCode plugin 列表
 - Codex：使用打包后的 CLI 执行 `bootstrap --host codex`
 - Qwen：使用 `sync --host qwen`；当前 Stage 2 没有重型 bootstrap 流程
+- Copilot CLI：使用打包后的 CLI 执行 `bootstrap --host copilot` 或 `sync --host copilot`
 
 如果只是本地临时使用 CLI，可以用 `npx` 或 `node_modules/.bin`：
 
@@ -312,11 +317,11 @@ Lane-aware subagent execution 是 `superpowers` 下面的执行层增强，不�
 
 Stage 1 新增了宿主本地控制平面命令：
 
-- `oh-my-superagents status --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents disable --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents sync --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents doctor --host <opencode|codex|qwen|claude>`
+- `oh-my-superagents status --host <opencode|codex|qwen|copilot|claude>`
+- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen|copilot|claude>`
+- `oh-my-superagents disable --host <opencode|codex|qwen|copilot|claude>`
+- `oh-my-superagents sync --host <opencode|codex|qwen|copilot|claude>`
+- `oh-my-superagents doctor --host <opencode|codex|qwen|copilot|claude>`
 
 行为说明：
 
@@ -486,7 +491,13 @@ oh-my-superagents sync --host qwen
 oh-my-superagents sync --host claude
 ```
 
+```bash
+oh-my-superagents sync --host copilot
+```
+
 可用 `--config /absolute/or/relative/path.jsonc` 覆盖默认配置发现。
+
+对于 Copilot，`sync` 和 `use` 会协调完整的 OMS 所有 Stage 1 表面：`.copilot/agents/*.agent.md` 以及 `plugins/oh-my-superagents-copilot/skills/*/SKILL.md` 下的 OMS 控制平面 skills。
 
 对于 Qwen，`sync` 会根据当前工作流形态生成不同工件：
 
@@ -570,6 +581,29 @@ oh-my-superagents explain --host claude --phase writing-plans
 
 在 `superpowers` workflow mode 下，这些是 OMS wrapper agents 与 wrapper commands，并依赖 upstream skills。
 在 direct mode 下，这些会变成 `rt-<intent>.md` 与 `ai-<intent>.md`，不依赖 upstream skills。
+
+## 生成的 Copilot 工件
+
+### Copilot Agents
+
+在 `superpowers` workflow mode 下，Copilot CLI 生成以下 OMS phase agents：
+
+- oms-brainstorm
+- oms-plan
+- oms-execute
+- oms-review
+- oms-verify
+- oms-visual
+- oms-web-test
+
+运行 `oh-my-superagents sync --host copilot` 将它们生成到 `.copilot/agents/`，并协调 OMS 所有的插件 skills。
+
+### Copilot Plugin Bundle
+
+`bootstrap --host copilot`、`sync --host copilot` 和 `use <preset> --host copilot` 会协调以下 OMS 所有的 Copilot 插件表面：
+
+- `.copilot/agents/*.agent.md`
+- `plugins/oh-my-superagents-copilot/skills/<phase>/SKILL.md`
 
 ## 致谢
 

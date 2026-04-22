@@ -95,10 +95,10 @@ export function renderAuxiliaryOwnershipMetadata(input: {
 }
 
 export function renderRouteOwnershipMetadata(input: {
-  host: "opencode" | "codex" | "qwen"
+  host: "opencode" | "codex" | "qwen" | "copilot"
   source: WorkflowSourceKind
   route: CanonicalRouteId
-  projection: "agent" | "command"
+  projection: "agent" | "command" | "skill"
   renderedName: string
 }) {
   return `<!-- ${ROUTE_MARKER_PREFIX} stage=${input.host === "qwen" ? "2" : "1"}; host=${input.host}; source=${input.source}; route=${input.route}; projection=${input.projection}; rendered-name=${input.renderedName} -->`
