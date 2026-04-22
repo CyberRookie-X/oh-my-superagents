@@ -171,7 +171,10 @@ describe("buildCodexBootstrapFiles", () => {
       "plugins/oh-my-superagents-codex/skills/oms-sy/SKILL.md",
       "plugins/oh-my-superagents-codex/skills/oms-doctor/SKILL.md",
       "plugins/oh-my-superagents-codex/skills/oms-dr/SKILL.md",
+      "plugins/oh-my-superagents-codex/skills/oms-explain/SKILL.md",
+      "plugins/oh-my-superagents-codex/skills/oms-bootstrap/SKILL.md",
       "plugins/oh-my-superagents-codex/skills/oms-no-superpowers/SKILL.md",
+      "plugins/oh-my-superagents-codex/.codex-plugin/app-manifest.json",
     ])
 
     const marketplace = result.files.find((file) => file.path === ".agents/plugins/marketplace.json")
@@ -184,6 +187,10 @@ describe("buildCodexBootstrapFiles", () => {
     expect(pluginManifest?.content).toContain('"version": "0.1.0"')
     expect(pluginManifest?.content).toContain("$oms-sync")
     expect(pluginManifest?.content).toContain("$oms-doctor")
+    expect(pluginManifest?.content).toContain('"mcpServers"')
+    expect(pluginManifest?.content).toContain('"appMetadata"')
+    expect(pluginManifest?.content).toContain('"versionCompatibility"')
+    expect(pluginManifest?.content).toContain('"minimumCodexVersion": "0.63.0"')
   })
 
   it("generates direct-mode Codex skills for intents", () => {
@@ -345,6 +352,59 @@ describe("buildCodexBootstrapFiles", () => {
     expect(helper?.content).toContain("only use superpowers again if I explicitly ask")
     expect(helper?.content).toContain("Extra instruction: $ARGUMENTS")
     expect(helper?.content).not.toContain("oh-my-superagents disable --host codex")
+  })
+
+  it("generates Codex skills for explain and bootstrap commands", () => {
+    const result = buildCodexBootstrapFiles({
+      packageVersion: "0.1.0",
+      includeConfig: false,
+      controlPlaneSettings: createDefaultControlPlaneConfig().settings,
+    })
+
+    const explainSkill = result.files.find(
+      (file) => file.path === "plugins/oh-my-superagents-codex/skills/oms-explain/SKILL.md",
+    )
+    expect(explainSkill?.content).toContain("name: oms-explain")
+    expect(explainSkill?.content).toContain("description: Explain OMS routing for Codex in this project.")
+    expect(explainSkill?.content).toContain(
+      "oh-my-superagents explain --host codex",
+    )
+    expect(explainSkill?.content).toContain("logical-command=explain")
+
+    const bootstrapSkill = result.files.find(
+      (file) => file.path === "plugins/oh-my-superagents-codex/skills/oms-bootstrap/SKILL.md",
+    )
+    expect(bootstrapSkill?.content).toContain("name: oms-bootstrap")
+    expect(bootstrapSkill?.content).toContain("description: Bootstrap OMS configuration for Codex in this project.")
+    expect(bootstrapSkill?.content).toContain(
+      "oh-my-superagents bootstrap --host codex",
+    )
+    expect(bootstrapSkill?.content).toContain("logical-command=bootstrap")
+  })
+
+  it("generates Codex app manifest listing all skills", () => {
+    const result = buildCodexBootstrapFiles({
+      packageVersion: "0.1.0",
+      includeConfig: false,
+      controlPlaneSettings: createDefaultControlPlaneConfig().settings,
+    })
+
+    const appManifest = result.files.find(
+      (file) => file.path === "plugins/oh-my-superagents-codex/.codex-plugin/app-manifest.json",
+    )
+    expect(appManifest).toBeDefined()
+
+    const parsed = JSON.parse(appManifest!.content)
+    expect(parsed.name).toBe("oh-my-superagents")
+    expect(parsed.version).toBe("0.1.0")
+    expect(Array.isArray(parsed.skills)).toBe(true)
+    expect(parsed.skills.length).toBeGreaterThan(0)
+
+    const skillNames = parsed.skills.map((s: { name: string }) => s.name)
+    expect(skillNames).toContain("oms-status")
+    expect(skillNames).toContain("oms-explain")
+    expect(skillNames).toContain("oms-bootstrap")
+    expect(skillNames).toContain("oms-no-superpowers")
   })
 
   it("rejects rendered Codex skill names that collide with the fixed helper skill", () => {

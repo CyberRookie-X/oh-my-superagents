@@ -9,6 +9,7 @@ import {
   type SuperpowersCompatibilityResult,
 } from "./superpowers-compatibility.js"
 import { detectOpenCodeSuperpowers } from "./superpowers-detectors.js"
+import { buildCodexCommandHook, buildCodexToolHook, type CodexHookContext } from "./codex-hooks.js"
 
 const SERVICE_NAME = "oh-my-superagents"
 const CONFIG_FILE_NAME = "oh-my-superagents.config.jsonc"
@@ -73,6 +74,12 @@ export const OhMySuperpowersPlugin: Plugin = async ({ client, directory, worktre
     })
   }
 
+  const codexContext: CodexHookContext = {
+    host: "codex",
+    agentName: "",
+    profileId: "",
+  }
+
   return {
     "chat.params": async (input, output) => {
       const metadata = await readRuntimeAgentMetadata(rootDirectory)
@@ -81,6 +88,8 @@ export const OhMySuperpowersPlugin: Plugin = async ({ client, directory, worktre
         output.options.serviceTier = "fast"
       }
     },
+    "command.execute.before": buildCodexCommandHook(codexContext),
+    "tool.execute.before": buildCodexToolHook(codexContext),
   }
 }
 

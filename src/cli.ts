@@ -53,7 +53,7 @@ import { writeAuthorityWithRecoverySnapshotAtomically } from "./config-write.js"
 import type { ContextIndex } from "./context-index.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildClaudeArtifacts } from "./claude.js"
-import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
+import { buildCodexArtifacts, CODEX_RUNTIME_AGENT_METADATA_DIRECTORY, CODEX_RUNTIME_AGENT_METADATA_FILE, CODEX_HOOKS_METADATA_DIRECTORY, CODEX_HOOKS_METADATA_FILE, explainAllCodex, explainCodexPhase } from "./codex.js"
 import { CONTEXT_LIFECYCLE_STAGES } from "./context-lifecycle.js"
 import { detectClaudeGstackAvailability } from "./gstack-detectors.js"
 import { isOmsOwnedArtifactFile, isOmsOwnedSkillFile, isOpenCodeRuntimeMetadataContent, materializeArtifacts } from "./materialize.js"
@@ -1616,6 +1616,35 @@ function buildOpenCodeCodexFastRuntimeDiagnostics(
   }
 }
 
+async function buildCodexRuntimeStatusDiagnostics(cwd: string, deps: CliDeps) {
+  const runtimeMetadataPath = path.join(cwd, CODEX_RUNTIME_AGENT_METADATA_DIRECTORY, CODEX_RUNTIME_AGENT_METADATA_FILE)
+  const hooksMetadataPath = path.join(cwd, CODEX_HOOKS_METADATA_DIRECTORY, CODEX_HOOKS_METADATA_FILE)
+
+  const runtimeMetadataExists = await deps.artifactExists(runtimeMetadataPath)
+  const hooksMetadataExists = await deps.artifactExists(hooksMetadataPath)
+
+  let hooks: Array<{ name: string; description: string }> = []
+  if (hooksMetadataExists) {
+    try {
+      const content = await deps.readArtifactFile(hooksMetadataPath)
+      hooks = JSON.parse(content)
+    } catch {
+    }
+  }
+
+  return {
+    runtimeMetadata: {
+      path: runtimeMetadataPath,
+      exists: runtimeMetadataExists,
+    },
+    hooksMetadata: {
+      path: hooksMetadataPath,
+      exists: hooksMetadataExists,
+      hooks,
+    },
+  }
+}
+
 function formatControlPlaneSource(resolved: ResolvedControlPlane) {
   if (resolved.source.kind === "default") {
     return {
@@ -1646,7 +1675,8 @@ async function getArtifactsForHost(
   }
 
   if (host === "codex") {
-    return deps.buildCodexArtifacts(config).agents
+    const built = deps.buildCodexArtifacts(config, controlPlaneSettings)
+    return [...built.agents, ...(built.commands ?? [])]
   }
 
   if (host === "claude") {
@@ -1672,7 +1702,9 @@ async function getExpectedArtifacts(
   const routerConfig = toRouterConfig(config, laneState)
 
   if (host === "codex") {
-    const built = deps.buildCodexArtifacts(routerConfig).agents
+    const built = deps.buildCodexArtifacts(routerConfig, config.settings)
+    const builtPaths = built.agents.map((artifact) => path.join(cwd, artifact.directory, artifact.fileName))
+    const builtCommandPaths = (built.commands ?? []).map((artifact) => path.join(cwd, artifact.directory, artifact.fileName))
     const bootstrapFiles = buildCodexBootstrapFiles({
       packageVersion: "0.0.0",
       includeConfig: false,
@@ -1682,7 +1714,8 @@ async function getExpectedArtifacts(
     }).files
 
     return [
-      ...built.map((artifact) => path.join(cwd, artifact.directory, artifact.fileName)),
+      ...builtPaths,
+      ...builtCommandPaths,
       ...bootstrapFiles.map((file) => path.join(cwd, file.path)),
     ].sort()
   }
@@ -1726,6 +1759,7 @@ const OWNED_ARTIFACT_RULES: Record<CliHost, Array<{ directory: string; extension
   ],
   codex: [
     { directory: ".codex/agents", extension: ".toml" },
+    { directory: CODEX_RUNTIME_AGENT_METADATA_DIRECTORY, extension: ".json" },
   ],
   qwen: [
     { directory: ".qwen/agents", extension: ".md" },
@@ -2153,7 +2187,7 @@ async function materializeCodexLifecycle(
   const result = await deps.materializeArtifacts({
     cwd,
     artifacts: [
-      ...deps.buildCodexArtifacts(routerConfig).agents,
+      ...deps.buildCodexArtifacts(routerConfig, controlPlaneSettings).agents,
       ...controlPlaneSkillFiles.map((file) => ({
         kind: "command" as const,
         directory: path.dirname(file.path),
@@ -2406,6 +2440,9 @@ async function buildControlPlaneDoctor(
           codexFastRuntime: buildOpenCodeCodexFastRuntimeDiagnostics(cwd, resolved.config, resolved.laneState, deps),
         }
       : {}),
+    ...(host === "codex"
+      ? { codexRuntime: await buildCodexRuntimeStatusDiagnostics(cwd, deps) }
+      : {}),
   }
 }
 
@@ -2592,35 +2629,40 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         const directConfig = resolved ? toRouterConfig(resolved.config, resolved.laneState) : loaded.config
 
         if (flags.get("--all") === true) {
+          const explainPayload = formatExplainOutput(
+            resolved
+              ? attachLaneExplainability(
+                await attachExplainReadiness(
+                  attachExplainTrace(explainAllDirect(directConfig), { cwd, resolved }),
+                  {
+                    cwd,
+                    resolved,
+                    resolveReadiness: createProjectionReadinessResolver({
+                      cwd,
+                      host: cliHost,
+                      config: resolved.config,
+                      deps,
+                    }),
+                  },
+                ),
+                resolved,
+              )
+              : explainAllDirect(directConfig),
+             null,
+             contextIndex,
+             contextCompression,
+             contextProviders,
+             warnings,
+             policyResolution,
+             policyDiagnostics,
+           )
+          const codexRuntime = cliHost === "codex"
+            ? await buildCodexRuntimeStatusDiagnostics(cwd, deps)
+            : undefined
+
           return {
             exitCode: 0,
-            stdout: JSON.stringify(formatExplainOutput(
-              resolved
-                ? attachLaneExplainability(
-                  await attachExplainReadiness(
-                    attachExplainTrace(explainAllDirect(directConfig), { cwd, resolved }),
-                    {
-                      cwd,
-                      resolved,
-                      resolveReadiness: createProjectionReadinessResolver({
-                        cwd,
-                        host: cliHost,
-                        config: resolved.config,
-                        deps,
-                      }),
-                    },
-                  ),
-                  resolved,
-                )
-                : explainAllDirect(directConfig),
-               null,
-               contextIndex,
-               contextCompression,
-               contextProviders,
-               warnings,
-               policyResolution,
-               policyDiagnostics,
-             ), null, 2),
+            stdout: JSON.stringify(codexRuntime ? { phases: explainPayload, codexRuntime } : explainPayload, null, 2),
             stderr: "",
           }
         }
@@ -2630,36 +2672,41 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
           return { exitCode: 1, stdout: "", stderr: "Missing --intent or --all" }
         }
 
+        const explainIntentPayload = formatExplainOutput(
+          resolved
+            ? attachLaneExplainability(
+              await attachExplainReadiness(
+                attachExplainTrace(explainDirectIntent(directConfig, intent), { cwd, resolved }),
+                {
+                  cwd,
+                  resolved,
+                  resolveReadiness: createProjectionReadinessResolver({
+                    cwd,
+                    host: cliHost,
+                    config: resolved.config,
+                    deps,
+                  }),
+                },
+              ),
+              resolved,
+            )
+            : explainDirectIntent(directConfig, intent),
+           null,
+           contextIndex,
+           contextCompression,
+           contextProviders,
+           warnings,
+           policyResolution,
+           policyDiagnostics,
+         )
+        const intentCodexRuntime = cliHost === "codex"
+          ? await buildCodexRuntimeStatusDiagnostics(cwd, deps)
+          : undefined
+
         return {
           exitCode: 0,
           stdout: JSON.stringify(
-            formatExplainOutput(
-              resolved
-                ? attachLaneExplainability(
-                  await attachExplainReadiness(
-                    attachExplainTrace(explainDirectIntent(directConfig, intent), { cwd, resolved }),
-                    {
-                      cwd,
-                      resolved,
-                      resolveReadiness: createProjectionReadinessResolver({
-                        cwd,
-                        host: cliHost,
-                        config: resolved.config,
-                        deps,
-                      }),
-                    },
-                  ),
-                  resolved,
-                )
-                : explainDirectIntent(directConfig, intent),
-               null,
-               contextIndex,
-               contextCompression,
-               contextProviders,
-               warnings,
-               policyResolution,
-               policyDiagnostics,
-             ),
+            intentCodexRuntime ? { ...explainIntentPayload, codexRuntime: intentCodexRuntime } : explainIntentPayload,
             null,
             2,
           ),
@@ -2674,40 +2721,45 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
             deps,
           )
 
+        const explainPayload = formatExplainOutput(
+            resolved
+              ? attachLaneExplainability(
+                await attachExplainReadiness(
+                  attachExplainTrace(explainAllForCliHost(toRouterConfig(resolved.config, resolved.laneState), cliHost as ExplainCliHost, deps), {
+                    cwd,
+                    resolved,
+                  }),
+                  {
+                    cwd,
+                    resolved,
+                    resolveReadiness: createProjectionReadinessResolver({
+                      cwd,
+                      host: cliHost,
+                      config: resolved.config,
+                      deps,
+                      compatibility,
+                    }),
+                  },
+                ),
+                resolved,
+              )
+              : explainAllForCliHost(loaded.config, cliHost as ExplainCliHost, deps),
+             compatibility,
+             contextIndex,
+             contextCompression,
+             contextProviders,
+             warnings,
+             policyResolution,
+             policyDiagnostics,
+           )
+        const codexRuntime = cliHost === "codex"
+          ? await buildCodexRuntimeStatusDiagnostics(cwd, deps)
+          : undefined
+
         return {
           exitCode: 0,
-          stdout: JSON.stringify(formatExplainOutput(
-              resolved
-                ? attachLaneExplainability(
-                  await attachExplainReadiness(
-                    attachExplainTrace(explainAllForCliHost(toRouterConfig(resolved.config, resolved.laneState), cliHost as ExplainCliHost, deps), {
-                      cwd,
-                      resolved,
-                    }),
-                    {
-                      cwd,
-                      resolved,
-                      resolveReadiness: createProjectionReadinessResolver({
-                        cwd,
-                        host: cliHost,
-                        config: resolved.config,
-                        deps,
-                        compatibility,
-                      }),
-                    },
-                  ),
-                  resolved,
-                )
-                : explainAllForCliHost(loaded.config, cliHost as ExplainCliHost, deps),
-               compatibility,
-               contextIndex,
-               contextCompression,
-               contextProviders,
-               warnings,
-               policyResolution,
-               policyDiagnostics,
-             ), null, 2),
-            stderr: "",
+          stdout: JSON.stringify(codexRuntime ? { phases: explainPayload, codexRuntime } : explainPayload, null, 2),
+          stderr: "",
         }
       }
 
@@ -2726,47 +2778,52 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         deps,
       )
 
+      const explainPhasePayload = formatExplainOutput(
+          resolved
+            ? attachLaneExplainability(
+              await attachExplainReadiness(
+                attachExplainTrace(
+                  explainPhaseForCliHost(
+                    toRouterConfig(resolved.config, resolved.laneState),
+                    cliHost as ExplainCliHost,
+                    phase as BuiltInPhase,
+                    deps,
+                  ),
+                  { cwd, resolved },
+                ),
+                {
+                  cwd,
+                  resolved,
+                  resolveReadiness: createProjectionReadinessResolver({
+                    cwd,
+                    host: cliHost,
+                    config: resolved.config,
+                    deps,
+                    compatibility,
+                  }),
+                },
+              ),
+              resolved,
+            )
+            : explainPhaseForCliHost(loaded.config, cliHost as ExplainCliHost, phase as BuiltInPhase, deps),
+           compatibility,
+           contextIndex,
+           contextCompression,
+           contextProviders,
+           warnings,
+           policyResolution,
+           policyDiagnostics,
+         )
+      const phaseCodexRuntime = cliHost === "codex"
+        ? await buildCodexRuntimeStatusDiagnostics(cwd, deps)
+        : undefined
+
       return {
         exitCode: 0,
         stdout: JSON.stringify(
-          formatExplainOutput(
-              resolved
-                ? attachLaneExplainability(
-                  await attachExplainReadiness(
-                    attachExplainTrace(
-                      explainPhaseForCliHost(
-                        toRouterConfig(resolved.config, resolved.laneState),
-                        cliHost as ExplainCliHost,
-                        phase as BuiltInPhase,
-                        deps,
-                      ),
-                      { cwd, resolved },
-                    ),
-                    {
-                      cwd,
-                      resolved,
-                      resolveReadiness: createProjectionReadinessResolver({
-                        cwd,
-                        host: cliHost,
-                        config: resolved.config,
-                        deps,
-                        compatibility,
-                      }),
-                    },
-                  ),
-                  resolved,
-                )
-                : explainPhaseForCliHost(loaded.config, cliHost as ExplainCliHost, phase as BuiltInPhase, deps),
-               compatibility,
-               contextIndex,
-               contextCompression,
-               contextProviders,
-               warnings,
-               policyResolution,
-               policyDiagnostics,
-             ),
-            null,
-          2,
+          phaseCodexRuntime ? { ...explainPhasePayload, codexRuntime: phaseCodexRuntime } : explainPhasePayload,
+          null,
+        2,
         ),
         stderr: "",
       }

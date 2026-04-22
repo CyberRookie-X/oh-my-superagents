@@ -13,7 +13,7 @@ import {
 import { buildCodexArtifacts } from "./codex.js"
 import type { GeneratedArtifact } from "./opencode.js"
 import type { MaterializeArtifactsResult, materializeArtifacts } from "./materialize.js"
-import { renderAuxiliaryOwnershipMetadata, renderControlPlaneOwnershipMetadata } from "./opencode.js"
+import { CONTROL_PLANE_MARKER_PREFIX, renderAuxiliaryOwnershipMetadata, renderControlPlaneOwnershipMetadata } from "./opencode.js"
 import type {
   SuperpowersCompatibilityMode,
   SuperpowersCompatibilityResult,
@@ -54,6 +54,13 @@ const CODEX_CONTROL_PLANE_COMMAND_DESCRIPTIONS: Record<ControlPlaneCommandKey, s
   disable: "Disable OMS for Codex in this project.",
   sync: "Sync OMS artifacts for Codex in this project.",
   doctor: "Inspect OMS diagnostics for Codex in this project.",
+}
+
+const CODEX_ADDITIONAL_COMMAND_KEYS = ["explain", "bootstrap"] as const
+
+const CODEX_ADDITIONAL_COMMAND_DESCRIPTIONS: Record<string, string> = {
+  explain: "Explain OMS routing for Codex in this project.",
+  bootstrap: "Bootstrap OMS configuration for Codex in this project.",
 }
 
 export function buildStarterCodexConfig() {
@@ -198,6 +205,12 @@ function buildPluginManifest(
       version: packageVersion,
       description: "Local Codex convenience layer for oh-my-superagents sync and diagnostics.",
       skills: "./skills/",
+      mcpServers: {
+        "oh-my-superagents": {
+          command: "npx",
+          args: ["oh-my-superagents", "mcp"],
+        },
+      },
       interface: {
         displayName: "Oh My Superpowers Codex",
         shortDescription: "Sync and inspect Codex routing for superpowers phases.",
@@ -207,6 +220,15 @@ function buildPluginManifest(
           `Use $${syncSkillName} to refresh Codex routing for this project.`,
           `Use $${doctorSkillName} to inspect the current Codex routing map.`,
         ],
+      },
+      appMetadata: {
+        id: "oh-my-superagents",
+        name: "Oh My Superagents",
+        description: "Route requests through optimized AI agent profiles for different workflows.",
+        version: packageVersion,
+      },
+      versionCompatibility: {
+        minimumCodexVersion: "0.63.0",
       },
     },
     null,
@@ -283,6 +305,108 @@ function buildControlPlaneSkillFiles(
       }
     })
   })
+}
+
+function buildAdditionalCodexSkill(input: {
+  skillName: string
+  description: string
+  logicalCommand: string
+  configArtifactPath: string
+}) {
+  const quotedConfigPath = shellQuote(input.configArtifactPath)
+
+  return `---
+name: ${input.skillName}
+description: ${input.description}
+---
+
+<!-- generated-by: oh-my-superagents; do-not-edit: true -->
+<!-- ${CONTROL_PLANE_MARKER_PREFIX} stage=1; host=codex; artifact=skill; logical-command=${input.logicalCommand}; rendered-name=${input.skillName} -->
+Run \`oh-my-superagents ${input.logicalCommand} --host codex --config ${quotedConfigPath} $ARGUMENTS\` from the repository root.
+If the binary is not on PATH, run \`npx oh-my-superagents ${input.logicalCommand} --host codex --config ${quotedConfigPath} $ARGUMENTS\` instead.
+Forward any command arguments as-is.
+Treat this skill as the Codex host entry for the logical \`${input.logicalCommand}\` command key.
+`
+}
+
+function buildAdditionalCommandSkillFiles(
+  controlPlaneSettings: CodexBootstrapControlPlaneSettings,
+  configArtifactPath: string,
+  seenSkillNames: Map<string, string>,
+) {
+  assertSafeCodexSkillSegment(controlPlaneSettings.commandPrefix, "commandPrefix")
+
+  return CODEX_ADDITIONAL_COMMAND_KEYS.map((commandKey) => {
+    assertSafeCodexSkillSegment(commandKey, commandKey)
+
+    const skillName = renderCodexControlPlaneSkillName(controlPlaneSettings, commandKey)
+    if (skillName === "oms-no-superpowers") {
+      throw new Error(`Codex skill collides with fixed helper skill: ${skillName}`)
+    }
+
+    const existingSource = seenSkillNames.get(skillName)
+    if (existingSource) {
+      throw new Error(`Duplicate Codex skill rendering: ${skillName} (${existingSource}, ${commandKey})`)
+    }
+
+    seenSkillNames.set(skillName, commandKey)
+
+    return {
+      path: `plugins/oh-my-superagents-codex/skills/${skillName}/SKILL.md`,
+      content: buildAdditionalCodexSkill({
+        skillName,
+        description: CODEX_ADDITIONAL_COMMAND_DESCRIPTIONS[commandKey],
+        logicalCommand: commandKey,
+        configArtifactPath,
+      }),
+    }
+  })
+}
+
+function parseSkillFrontmatterName(content: string): string | undefined {
+  const match = content.match(/^---\nname: (.+)\n/)
+  return match?.[1]
+}
+
+function parseSkillFrontmatterDescription(content: string): string | undefined {
+  const match = content.match(/^---\nname: .+\ndescription: (.+)\n/)
+  return match?.[1]
+}
+
+function extractSkillCommandKey(content: string): string | undefined {
+  const match = content.match(/logical-command=([a-z-]+)/)
+  return match?.[1]
+}
+
+export function buildCodexAppManifest(input: {
+  packageVersion: string
+  skills: CodexBootstrapFile[]
+}): CodexBootstrapFile {
+  const skillEntries = input.skills
+    .map((skill) => ({
+      name: parseSkillFrontmatterName(skill.content),
+      path: skill.path,
+      description: parseSkillFrontmatterDescription(skill.content),
+      logicalCommand: extractSkillCommandKey(skill.content),
+    }))
+    .filter((entry): entry is { name: string; path: string; description: string | undefined; logicalCommand: string | undefined } => Boolean(entry.name))
+
+  const manifest = {
+    name: "oh-my-superagents",
+    version: input.packageVersion,
+    description: "Oh My Superagents Codex integration",
+    skills: skillEntries.map((entry) => ({
+      name: entry.name,
+      path: entry.path,
+      ...(entry.description ? { description: entry.description } : {}),
+      ...(entry.logicalCommand ? { logicalCommand: entry.logicalCommand } : {}),
+    })),
+  }
+
+  return {
+    path: "plugins/oh-my-superagents-codex/.codex-plugin/app-manifest.json",
+    content: `${JSON.stringify(manifest, null, 2)}\n`,
+  }
 }
 
 function buildDirectModeSkill(input: {
@@ -382,7 +506,18 @@ export function buildCodexBootstrapFiles(input: {
     seenSkillNames,
     supportedCommands,
   )
+  const additionalCommandSkillFiles = buildAdditionalCommandSkillFiles(
+    controlPlaneSettings,
+    configArtifactPath,
+    seenSkillNames,
+  )
   const directModeSkillFiles = buildDirectModeSkillFiles(input.routerConfig, seenSkillNames)
+  const allSkillFiles: CodexBootstrapFile[] = [
+    ...controlPlaneSkillFiles,
+    ...additionalCommandSkillFiles,
+    ...directModeSkillFiles,
+    buildTemporaryDisableSkill(),
+  ]
   const files: CodexBootstrapFile[] = [
     {
       path: ".agents/plugins/marketplace.json",
@@ -392,9 +527,11 @@ export function buildCodexBootstrapFiles(input: {
       path: "plugins/oh-my-superagents-codex/.codex-plugin/plugin.json",
       content: buildPluginManifest(input.packageVersion, controlPlaneSettings),
     },
-    ...controlPlaneSkillFiles,
-    ...directModeSkillFiles,
-    buildTemporaryDisableSkill(),
+    ...allSkillFiles,
+    buildCodexAppManifest({
+      packageVersion: input.packageVersion,
+      skills: allSkillFiles,
+    }),
   ]
 
   if (input.includeConfig) {
@@ -531,7 +668,7 @@ export async function runCodexBootstrap(input: {
   const scaffoldFiles = bootstrapFiles.files.filter((file) => !file.path.endsWith("/SKILL.md"))
 
   const syncArtifacts = [
-    ...input.buildCodexArtifacts(loaded.config).agents,
+    ...input.buildCodexArtifacts(loaded.config, controlPlaneSettings).agents,
     ...controlPlaneSkillFiles.map(toGeneratedArtifact),
   ]
   const syncResult = await input.materializeArtifacts({

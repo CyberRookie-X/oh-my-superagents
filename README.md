@@ -18,6 +18,8 @@ Host-native routing and OMS control-plane support for AI work on OpenCode, Codex
 | Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | Skills |
 | Temporary disable helper | Full | Full | None yet | None yet |
 | `codexFast` | Full | Full | None yet | None yet |
+| Runtime hooks | Full | Full | None yet | None yet |
+| Lane-scoped agents | Full | Full | None yet | None yet |
 
 Support level notes:
 
@@ -45,7 +47,7 @@ The table below uses current source line counts from the implementation files on
 | Workflow adapters | `src/router.ts`, `src/workflow-superpowers.ts`, `src/workflow-gstack.ts`, `src/workflow-sources.ts`, `src/workflow-direct.ts` | 371 | Thin |
 | Shared capability policy | `src/capabilities.ts` | 97 | Thin |
 | OpenCode adapter | `src/opencode.ts` | 633 | Thin |
-| Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 760 | Medium |
+| Codex adapter + bootstrap + hooks | `src/codex.ts`, `src/codex-bootstrap.ts`, `src/codex-hooks.ts` | ~960 | Medium |
 | Qwen adapter | `src/qwen.ts` | 424 | Thin |
 | Claude adapter | `src/claude.ts` | 138 | Thin |
 | Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1093 | Medium |

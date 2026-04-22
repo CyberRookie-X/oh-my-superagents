@@ -219,8 +219,9 @@ Main characteristics:
 
 Architectural consequence:
 
-- Codex needs both routing artifacts and a convenience bootstrap layer
+- Codex needs routing artifacts, a convenience bootstrap layer, and runtime hooks
 - that makes Codex thicker than OpenCode on the host side
+- hooks layer (`codex-hooks.ts`) provides `chat.params`, `command.execute.before`, and `tool.execute.before` for runtime behavior
 
 ### Qwen
 
@@ -260,7 +261,7 @@ They exclude tests and documentation.
 | Workflow adapters | `src/router.ts`, `src/workflow-direct.ts`, `src/workflow-superpowers.ts`, `src/workflow-gstack.ts`, `src/workflow-sources.ts` | 371 | Thin |
 | Shared capability policy | `src/capabilities.ts` | 97 | Thin |
 | OpenCode adapter | `src/opencode.ts` | 633 | Thin |
-| Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 760 | Medium |
+| Codex adapter + bootstrap + hooks | `src/codex.ts`, `src/codex-bootstrap.ts`, `src/codex-hooks.ts` | ~960 | Medium |
 | Qwen adapter | `src/qwen.ts` | 424 | Thin |
 | Claude adapter | `src/claude.ts` | 138 | Thin |
 | Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1093 | Medium |

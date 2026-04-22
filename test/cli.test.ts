@@ -3062,15 +3062,19 @@ describe("runCli", () => {
     const parsed = JSON.parse(result.stdout)
 
     expect(result.exitCode).toBe(0)
-    expect(parsed).toEqual(
-      expect.arrayContaining([
+    expect(parsed).toMatchObject({
+      codexRuntime: {
+        runtimeMetadata: { exists: false },
+        hooksMetadata: { exists: false, hooks: [] },
+      },
+      phases: expect.arrayContaining([
         expect.objectContaining({
           phase: "brainstorming",
           agentName: "oms-brainstorm",
           compatibility: compatibleCodex,
         }),
       ]),
-    )
+    })
   })
 
   it("includes context index in codex explain output", async () => {
@@ -3095,8 +3099,12 @@ describe("runCli", () => {
     const parsed = JSON.parse(result.stdout)
 
     expect(result.exitCode).toBe(0)
-    expect(parsed).toEqual(
-      expect.arrayContaining([
+    expect(parsed).toMatchObject({
+      codexRuntime: {
+        runtimeMetadata: { exists: false },
+        hooksMetadata: { exists: false, hooks: [] },
+      },
+      phases: expect.arrayContaining([
         expect.objectContaining({
           phase: "brainstorming",
           contextIndex: {
@@ -3106,7 +3114,7 @@ describe("runCli", () => {
           },
         }),
       ]),
-    )
+    })
   })
 
   it("supports claude explain output", async () => {

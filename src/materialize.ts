@@ -8,6 +8,11 @@ import {
   RUNTIME_AGENT_METADATA_DIRECTORY,
   RUNTIME_AGENT_METADATA_FILE,
 } from "./opencode.js"
+import {
+  CODEX_RUNTIME_AGENT_METADATA_DIRECTORY,
+  CODEX_RUNTIME_AGENT_METADATA_FILE,
+  CODEX_RUNTIME_AGENT_METADATA_OWNER_PREFIX,
+} from "./codex.js"
 
 type StatsLike = {
   isFile: () => boolean
@@ -42,7 +47,7 @@ export type MaterializeArtifactsResult = {
 }
 
 const SKILL_FILE_NAME = "SKILL.md"
-const CONTROL_PLANE_LOGICAL_COMMANDS = new Set<ControlPlaneCommandKey>(CONTROL_PLANE_COMMAND_KEYS)
+const CONTROL_PLANE_LOGICAL_COMMANDS = new Set<string>([...CONTROL_PLANE_COMMAND_KEYS, "explain", "bootstrap"])
 const AUXILIARY_HELPER_NAME = "temporary-disable"
 const CODEX_DIRECT_SKILL_MARKER_PREFIX = "oms-direct:"
 const CODEX_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
@@ -151,6 +156,76 @@ export function isOpenCodeRuntimeMetadataContent(content: string) {
 
       return entry.profiles === undefined || (Array.isArray(entry.profiles) && entry.profiles.every((value) => typeof value === "string"))
     })
+  } catch {
+    return false
+  }
+}
+
+const CODEX_HOOKS_METADATA_DIRECTORY = ".codex/oh-my-superagents"
+const CODEX_HOOKS_METADATA_FILE = "hooks-metadata.json"
+
+function isCodexRuntimeMetadataFile(filePath: string) {
+  return filePath.endsWith(`${path.sep}${CODEX_RUNTIME_AGENT_METADATA_DIRECTORY.replace(/\//g, path.sep)}${path.sep}${CODEX_RUNTIME_AGENT_METADATA_FILE}`)
+}
+
+export function isCodexRuntimeMetadataContent(content: string) {
+  try {
+    const parsed = JSON.parse(content) as unknown
+    if (!isRecord(parsed) || !isRecord(parsed.agents)) {
+      return false
+    }
+
+    return Object.values(parsed.agents).every((entry) => {
+      if (!isRecord(entry) || typeof entry.profile !== "string" || typeof entry.codexFast !== "boolean") {
+        return false
+      }
+
+      return entry.profiles === undefined || (Array.isArray(entry.profiles) && entry.profiles.every((value) => typeof value === "string"))
+    })
+  } catch {
+    return false
+  }
+}
+
+function isCodexHooksMetadataFile(filePath: string) {
+  return filePath.endsWith(`${path.sep}${CODEX_HOOKS_METADATA_DIRECTORY.replace(/\//g, path.sep)}${path.sep}${CODEX_HOOKS_METADATA_FILE}`)
+}
+
+export function isCodexHooksMetadataContent(content: string) {
+  try {
+    const parsed = JSON.parse(content) as unknown
+    if (!isRecord(parsed) || !isRecord(parsed.hooks)) {
+      return false
+    }
+
+    return Object.values(parsed.hooks).every((entry) => {
+      if (!isRecord(entry)) {
+        return false
+      }
+
+      return typeof entry.handler === "string" || entry.handler === undefined
+    })
+  } catch {
+    return false
+  }
+}
+
+function isCodexBootstrapPluginFile(filePath: string) {
+  const normalized = filePath.replace(/\\/g, "/")
+  return (
+    normalized.includes("/plugins/oh-my-superagents-codex/")
+    && !normalized.endsWith("/SKILL.md")
+  )
+}
+
+function isCodexBootstrapPluginManifestContent(content: string) {
+  try {
+    const parsed = JSON.parse(content) as unknown
+    if (!isRecord(parsed)) {
+      return false
+    }
+
+    return parsed.name === "oh-my-superagents-codex" && typeof parsed.version === "string" && parsed.skills === "./skills/"
   } catch {
     return false
   }
@@ -433,6 +508,9 @@ export function isOmsOwnedArtifactFile(filePath: string, content: string) {
         || directory.endsWith(`${path.sep}.qwen${path.sep}commands`)
       )
     )
+    || isCodexRuntimeMetadataFile(filePath)
+    || isCodexHooksMetadataFile(filePath)
+    || isCodexBootstrapPluginFile(filePath)
   )
 }
 
@@ -525,6 +603,10 @@ function isArtifactOwnedByCurrentContract(
     return isOpenCodeRuntimeMetadataFile(existingPath) && isOpenCodeRuntimeMetadataContent(existingContent)
   }
 
+  if (artifact.directory === CODEX_RUNTIME_AGENT_METADATA_DIRECTORY && artifact.fileName === CODEX_RUNTIME_AGENT_METADATA_FILE) {
+    return isCodexRuntimeMetadataFile(existingPath) && isCodexRuntimeMetadataContent(existingContent)
+  }
+
   if (isRouteOwnedArtifact(artifact)) {
     return isRouteOwnedFile(existingPath, existingContent)
   }
@@ -544,11 +626,23 @@ export async function materializeArtifacts(
   const opencodeOmsCommandDirectories = new Set<string>()
   const opencodeRuntimeMetadataDirectories = new Set<string>()
   const qwenOmsCommandDirectories = new Set<string>()
+  const codexRuntimeMetadataDirectories = new Set<string>()
   const ownedSkillCleanupRoots = new Map<string, Set<string>>()
+  let hasPluginDirectoryArtifact = false
   const openCodeRuntimeMetadataPath = path.join(
     input.cwd,
     RUNTIME_AGENT_METADATA_DIRECTORY,
     RUNTIME_AGENT_METADATA_FILE,
+  )
+  const codexRuntimeMetadataPath = path.join(
+    input.cwd,
+    CODEX_RUNTIME_AGENT_METADATA_DIRECTORY,
+    CODEX_RUNTIME_AGENT_METADATA_FILE,
+  )
+  const codexHooksMetadataPath = path.join(
+    input.cwd,
+    CODEX_HOOKS_METADATA_DIRECTORY,
+    CODEX_HOOKS_METADATA_FILE,
   )
 
   try {
@@ -571,6 +665,10 @@ export async function materializeArtifacts(
         opencodeRuntimeMetadataDirectories.add(targetDirectory)
       }
 
+      if (artifact.directory === CODEX_RUNTIME_AGENT_METADATA_DIRECTORY && artifact.fileName === CODEX_RUNTIME_AGENT_METADATA_FILE) {
+        codexRuntimeMetadataDirectories.add(targetDirectory)
+      }
+
       if (artifact.directory === ".qwen/commands" && isQwenOmsControlPlaneCommand(artifact.content)) {
         qwenOmsCommandDirectories.add(targetDirectory)
       }
@@ -580,6 +678,10 @@ export async function materializeArtifacts(
         const desiredSkillDirectories = ownedSkillCleanupRoots.get(cleanupRoot) ?? new Set<string>()
         desiredSkillDirectories.add(path.basename(targetDirectory))
         ownedSkillCleanupRoots.set(cleanupRoot, desiredSkillDirectories)
+      }
+
+      if (artifact.directory.startsWith("plugins/oh-my-superagents-codex/")) {
+        hasPluginDirectoryArtifact = true
       }
 
       const finalPath = path.join(targetDirectory, artifact.fileName)
@@ -626,6 +728,7 @@ export async function materializeArtifacts(
           && isOpenCodeOmsControlPlaneFile(fullPath, content)
         )
         || (opencodeRuntimeMetadataDirectories.has(directory) && isOpenCodeRuntimeMetadataFile(fullPath))
+        || (codexRuntimeMetadataDirectories.has(directory) && isCodexRuntimeMetadataFile(fullPath))
         || (
           qwenOmsCommandDirectories.has(directory)
           && isQwenOmsControlPlaneFile(fullPath, content)
@@ -670,6 +773,38 @@ export async function materializeArtifacts(
     }
   }
 
+  if (!desiredFinalPaths.has(codexRuntimeMetadataPath)) {
+    const content = await input.fs.readFile(codexRuntimeMetadataPath).catch(() => "")
+
+    if (isCodexRuntimeMetadataFile(codexRuntimeMetadataPath) && isCodexRuntimeMetadataContent(content)) {
+      try {
+        const stats = await input.fs.stat(codexRuntimeMetadataPath)
+        if (stats.isFile()) {
+          await input.fs.unlink(codexRuntimeMetadataPath)
+          removed.push(codexRuntimeMetadataPath)
+        }
+      } catch (error) {
+        warnings.push(String(error))
+      }
+    }
+  }
+
+  if (!desiredFinalPaths.has(codexHooksMetadataPath)) {
+    const content = await input.fs.readFile(codexHooksMetadataPath).catch(() => "")
+
+    if (isCodexHooksMetadataFile(codexHooksMetadataPath) && isCodexHooksMetadataContent(content)) {
+      try {
+        const stats = await input.fs.stat(codexHooksMetadataPath)
+        if (stats.isFile()) {
+          await input.fs.unlink(codexHooksMetadataPath)
+          removed.push(codexHooksMetadataPath)
+        }
+      } catch (error) {
+        warnings.push(String(error))
+      }
+    }
+  }
+
   for (const [cleanupRoot, desiredSkillDirectories] of ownedSkillCleanupRoots.entries()) {
     let entries: string[] = []
     try {
@@ -697,6 +832,23 @@ export async function materializeArtifacts(
 
         await input.fs.unlink(skillPath)
         removed.push(skillPath)
+      } catch (error) {
+        warnings.push(String(error))
+      }
+    }
+  }
+
+  if (!hasPluginDirectoryArtifact) {
+    const bootstrapPluginManifestPath = path.join(input.cwd, "plugins/oh-my-superagents-codex/.codex-plugin/plugin.json")
+    const manifestContent = await input.fs.readFile(bootstrapPluginManifestPath).catch(() => "")
+
+    if (isCodexBootstrapPluginManifestContent(manifestContent)) {
+      try {
+        const stats = await input.fs.stat(bootstrapPluginManifestPath)
+        if (stats.isFile()) {
+          await input.fs.unlink(bootstrapPluginManifestPath)
+          removed.push(bootstrapPluginManifestPath)
+        }
       } catch (error) {
         warnings.push(String(error))
       }
