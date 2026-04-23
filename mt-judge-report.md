@@ -11,10 +11,10 @@
 
 | 项目 | 版本/值 |
 |------|---------|
-| 评测执行环境 | OpenCode 1.14.19 + Superpowers v5.0.7 |
+| Agent | OpenCode 1.14.19 |
+| 工作流插件 | Superpowers v5.0.7 |
 | 操作系统 | Linux (Debian, kernel 6.12.63-1-lts) |
 | 推理强度 | 深度推理（Deep Reasoning），含完整对比分析 |
-| 项目版本 | oh-my-superagents 0.1.0 |
 | 运行时 | Node.js 22.x, pnpm 10.32 |
 
 ---
