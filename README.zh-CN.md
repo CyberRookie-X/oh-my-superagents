@@ -4,20 +4,20 @@
 
 架构说明：[English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Claude Code 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen 的实验性、宿主原生 direct mode。
+`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Claude Code 和 GitHub Copilot CLI 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen 的实验性、宿主原生 direct mode。
 
 ## 支持矩阵
 
-| 能力 | OpenCode | Codex | Qwen | Claude Code |
-| --- | --- | --- | --- | --- |
-| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 |
-| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 |
-| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 |
-| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 |
-| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills |
-| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
+| 能力 | OpenCode | Codex | Qwen | Claude Code | Copilot CLI |
+| --- | --- | --- | --- | --- | --- |
+| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 | 完整支持 |
+| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 | 暂未实现 |
+| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 | 完整支持 |
+| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 | 暂无 |
+| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
+| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills | Agents + Skills + Hooks |
+| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
+| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
 
 支持等级说明：
 
@@ -48,6 +48,7 @@
 | Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 760 | 中等 |
 | Qwen 适配层 | `src/qwen.ts` | 424 | 薄 |
 | Claude 适配层 | `src/claude.ts` | 138 | 薄 |
+| Copilot 适配层 | `src/copilot.ts` | 269 | 薄 |
 | 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1093 | 中等 |
 | 共享工件协调层 | `src/materialize.ts` | 712 | 薄到中等 |
 
@@ -61,7 +62,7 @@
 ## 项目边界
 
 `oh-my-superagents` 正在演进成一个更广义的路由与控制平面产品。
-当前它仍然在已支持宿主上提供一等公民级别的 `superpowers` 支持，而首个通用切片现在已经扩展为覆盖 OpenCode、Codex、Qwen 的实验性宿主原生 direct mode；Claude Code 当前只支持 `superpowers` 这条 slice。
+当前它仍然在已支持宿主上提供一等公民级别的 `superpowers` 支持，而首个通用切片现在已经扩展为覆盖 OpenCode、Codex、Qwen 的实验性宿主原生 direct mode；Claude Code 和 Copilot CLI 当前只支持 `superpowers` 这条 slice。
 
 它不是：
 
@@ -85,6 +86,7 @@
 - Codex：支持 `superpowers` 工作流路由，也支持实验性的 direct mode 切片
 - Qwen：支持，但目前仍是有边界的 Stage 2 `superpowers` 工作流形态，同时也支持实验性的 direct mode 切片
 - Claude Code：当前已经以薄宿主适配层的方式支持 `superpowers` slice，并支持 source-aware route projection，但 direct workflow 投影暂未支持
+- Copilot CLI：当前已经以薄宿主适配层的方式支持 `superpowers` slice，并支持 source-aware route projection 和基于 hooks 的生命周期集成，但 direct workflow 投影暂未支持
 
 ## 它能做什么
 
@@ -94,6 +96,7 @@
 - 生成 `.codex/agents/*.toml`
 - 生成 `.qwen/agents/*.md` 与 `.qwen/commands/*.md`
 - 生成 `.claude/skills/*/SKILL.md`
+- 生成 `.github/copilot/agents/*.md`、`.github/copilot/skills/*/SKILL.md` 与 `.github/copilot/hooks/*.sh`
 - 通过 `author routing` 基于仓库信号和用户提供的模型清单生成路由配置提案
 - 提供 `author routing`、`status`、`use`、`disable`、`sync`、`doctor`、`explain`、`bootstrap` CLI
 - 提供最小 OpenCode plugin 入口用于启动诊断
@@ -312,11 +315,11 @@ Lane-aware subagent execution 是 `superpowers` 下面的执行层增强，不�
 
 Stage 1 新增了宿主本地控制平面命令：
 
-- `oh-my-superagents status --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents disable --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents sync --host <opencode|codex|qwen|claude>`
-- `oh-my-superagents doctor --host <opencode|codex|qwen|claude>`
+- `oh-my-superagents status --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents use <preset-or-short> --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents disable --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents sync --host <opencode|codex|qwen|claude|copilot>`
+- `oh-my-superagents doctor --host <opencode|codex|qwen|claude|copilot>`
 
 行为说明：
 
@@ -327,6 +330,7 @@ Stage 1 新增了宿主本地控制平面命令：
 - `disable` 和禁用状态下的 `sync` 只清理**当前宿主**的 OMS 工件，不会去动别的宿主
 - `status` 与 `doctor` 的工件检查也只针对当前宿主
 - `--host claude` 当前管理的工件面是项目级 `.claude/skills/*/SKILL.md`
+- `--host copilot` 当前管理的工件面是 `.github/copilot/agents/*.md`、`.github/copilot/skills/*/SKILL.md` 和 `.github/copilot/hooks/*.sh`
 
 ## 就绪度诊断面
 
@@ -486,6 +490,10 @@ oh-my-superagents sync --host qwen
 oh-my-superagents sync --host claude
 ```
 
+```bash
+oh-my-superagents sync --host copilot
+```
+
 可用 `--config /absolute/or/relative/path.jsonc` 覆盖默认配置发现。
 
 对于 Qwen，`sync` 会根据当前工作流形态生成不同工件：
@@ -494,6 +502,8 @@ oh-my-superagents sync --host claude
 - direct mode：生成 `ai-<intent>` commands 与 `rt-<intent>` agents，不依赖 upstream skills。
 
 当前这个切片里，Qwen 故意不支持 gstack-backed 路由投影。
+
+对于 Copilot CLI，`sync` 会生成项目级 `.github/copilot/agents/*.md` agents、`.github/copilot/skills/*/SKILL.md` skills 和 `.github/copilot/hooks/*.sh` hooks，用于 `superpowers` 工作流表面。当前这个切片里，Copilot 故意不支持 direct workflow 投影。
 
 ## Explain
 
@@ -509,7 +519,11 @@ oh-my-superagents explain --host codex --all
 oh-my-superagents explain --host claude --phase writing-plans
 ```
 
-`explain` 当前在 v1 支持 `--host opencode`、`--host codex` 和 `--host claude`。
+```bash
+oh-my-superagents explain --host copilot --phase writing-plans
+```
+
+`explain` 当前在 v1 支持 `--host opencode`、`--host codex`、`--host claude` 和 `--host copilot`。
 
 当控制平面的 explainability 可用时，`explain` 会返回 `routeSource`、`configSource`、`reuseRelationship`、`resolvedSource`、`sourceEntry` 这类 route trace 字段，并附带 route 级 `readiness`。单条输出会带顶层 `compatibility`；`--all` 会保持数组形态，并把 `compatibility` 挂到每个条目上。
 

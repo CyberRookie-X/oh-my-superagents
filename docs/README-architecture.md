@@ -113,6 +113,7 @@ Main files:
 - `src/codex-bootstrap.ts`
 - `src/qwen.ts`
 - `src/claude.ts`
+- `src/copilot.ts`
 
 Responsibilities:
 
@@ -249,6 +250,20 @@ Architectural consequence:
 - Claude consumes the same canonical route and source-entry model as the other hosts
 - current support centers on the `superpowers` workflow slice plus control-plane artifact management
 
+### Copilot CLI
+
+Main characteristics:
+
+- project-scoped `.github/copilot/agents/*.md` agents, `.github/copilot/skills/*/SKILL.md` skills, and `.github/copilot/hooks/*.sh` hooks
+- no direct-workflow projection in the current slice
+- Agent + Plugin + Hooks approach for deep host integration
+
+Architectural consequence:
+
+- Copilot CLI stays a thin host adapter
+- Copilot CLI consumes the same canonical route and source-entry model as the other hosts
+- current support centers on the `superpowers` workflow slice plus control-plane artifact management
+
 ## Thickness By Source Size
 
 These counts are approximate source lines of code from the implementation files only.
@@ -263,6 +278,7 @@ They exclude tests and documentation.
 | Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 760 | Medium |
 | Qwen adapter | `src/qwen.ts` | 424 | Thin |
 | Claude adapter | `src/claude.ts` | 138 | Thin |
+| Copilot adapter | `src/copilot.ts` | 269 | Thin |
 | Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1093 | Medium |
 | Shared artifact reconciliation | `src/materialize.ts` | 712 | Thin-to-medium |
 

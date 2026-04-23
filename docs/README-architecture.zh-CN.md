@@ -170,6 +170,20 @@ bash scripts/run-codex-debian-canary.sh
 - Qwen 目前实现为薄适配层
 - 当前支持范围刻意比 OpenCode/Codex 更窄
 
+### Copilot CLI
+
+主要特征：
+
+- 项目内 `.github/copilot/agents/*.md` agents、`.github/copilot/skills/*/SKILL.md` skills 和 `.github/copilot/hooks/*.sh` hooks
+- 当前切片内不做 direct workflow 投影
+- 采用 Agent + Plugin + Hooks 方案实现深度宿主集成
+
+架构后果：
+
+- Copilot CLI 保持为薄适配层
+- Copilot CLI 使用与其他宿主相同的规范路由和源条目模型
+- 当前支持集中在 `superpowers` 工作流切片加控制平面工件管理
+
 ## 用源码规模表示厚度
 
 下面的统计是实现文件的大致源码行数。
