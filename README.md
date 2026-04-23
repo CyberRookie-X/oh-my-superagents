@@ -4,20 +4,20 @@
 
 Architecture: [English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, Qwen, and Claude Code, with first-class `superpowers` support and an experimental host-native direct mode on OpenCode, Codex, and Qwen.
+Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, Qwen, Claude Code, and Copilot CLI, with first-class `superpowers` support and an experimental host-native direct mode on OpenCode, Codex, and Qwen.
 
 ## Support Matrix
 
-| Capability | OpenCode | Codex | Qwen | Claude Code |
-| --- | --- | --- | --- | --- |
-| `superpowers` workflow routing | Full | Full | Partial | Experimental |
-| Direct mode | Experimental | Experimental | Experimental | None yet |
-| OMS control plane | Full | Full | Full | Experimental |
-| Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | None |
-| Compatibility monitor | Full | Full | None yet | None yet |
-| Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | Skills |
-| Temporary disable helper | Full | Full | None yet | None yet |
-| `codexFast` | Full | Full | None yet | None yet |
+| Capability | OpenCode | Codex | Qwen | Claude Code | Copilot CLI |
+| --- | --- | --- | --- | --- | --- |
+| `superpowers` workflow routing | Full | Full | Partial | Experimental | Full |
+| Direct mode | Experimental | Experimental | Experimental | None yet | Not Supported |
+| OMS control plane | Full | Full | Full | Experimental | Full |
+| Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | None | None |
+| Compatibility monitor | Full | Full | None yet | None yet | None yet |
+| Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | Skills | Agents + skills + commands |
+| Temporary disable helper | Full | Full | None yet | None yet | None yet |
+| `codexFast` | Full | Full | None yet | None yet | None yet |
 
 Support level notes:
 
@@ -32,7 +32,7 @@ Feature notes:
 - The temporary disable helper is host-local, conversation-scoped, and does not change persistent OMS state.
 - `codexFast` is full on OpenCode and Codex. Qwen does not support it yet.
 - Direct mode stays host-native: OpenCode renders commands plus agents, Codex renders agent TOMLs plus local bootstrap skills, and Qwen renders project-local commands plus agents.
-- `gstack` is a first-party workflow source. In the current slice, gstack-backed route projection is supported on OpenCode, Codex, and Claude Code, but not on Qwen.
+- `gstack` is a first-party workflow source. In the current slice, gstack-backed route projection is supported on OpenCode, Codex, Claude Code, and Copilot CLI, but not on Qwen.
 
 ## Implementation Footprint
 
@@ -48,6 +48,7 @@ The table below uses current source line counts from the implementation files on
 | Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 760 | Medium |
 | Qwen adapter | `src/qwen.ts` | 424 | Thin |
 | Claude adapter | `src/claude.ts` | 138 | Thin |
+| Copilot CLI adapter | `src/copilot.ts` | ~300 | Thin |
 | Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1093 | Medium |
 | Shared artifact reconciliation | `src/materialize.ts` | 712 | Thin-to-medium |
 
@@ -61,7 +62,7 @@ How to read this:
 ## Scope
 
 `oh-my-superagents` is evolving into a broader routing and control-plane product.
-Today it still ships first-class `superpowers` support across the supported hosts, and the first generic slice now includes an experimental host-native direct mode on OpenCode, Codex, and Qwen, while Claude Code currently supports the `superpowers` slice only.
+Today it still ships first-class `superpowers` support across the supported hosts, and the first generic slice now includes an experimental host-native direct mode on OpenCode, Codex, and Qwen, while Claude Code and Copilot CLI currently support the `superpowers` slice only.
 
 It is not a cross-host configuration sync tool.
 The supported surface for this release is the CLI, generated host artifacts, packaged plugin entrypoints, the Stage 1 OMS control plane, the Stage 2 Qwen adapter, the experimental direct-mode slices on OpenCode, Codex, and Qwen, and the current `oh-my-superagents/library` export surface.
@@ -72,6 +73,7 @@ Today that means:
 - Codex: supported for `superpowers` workflow routing and the experimental direct-mode slice
 - Qwen: supported with a limited Stage 2 surface for `superpowers` workflow routing plus an experimental direct-mode slice
 - Claude Code: supported as a thin host adapter for the current `superpowers` slice, including source-aware route projection; direct workflow projection is not supported yet
+- Copilot CLI: supported as a Stage 3 thin host adapter with full `superpowers` workflow routing, agent + skill + plugin + hooks projection, and all control-plane commands
 
 ## What It Does
 
@@ -130,6 +132,7 @@ Host-specific flow:
 - OpenCode: add `oh-my-superagents` to your OpenCode plugin list
 - Codex: use the packaged CLI to run `bootstrap --host codex`
 - Qwen: use `sync --host qwen`; there is no heavy bootstrap flow in Stage 2
+- Copilot CLI: use `sync --host copilot`
 
 For ad-hoc local use of the CLI, run it with `npx` or from your local `node_modules/.bin`:
 
@@ -643,6 +646,7 @@ This project builds on and is inspired by work from several projects and communi
 - **[Codex](https://github.com/openai/codex)** — OpenAI's Codex CLI, a supported host platform with its own agent and plugin primitives.
 - **[Qwen Code](https://github.com/QwenLM/qwen-code)** — Alibaba's Qwen Code CLI, a supported host platform.
 - **[Claude Code](https://github.com/anthropics/claude-code)** — Anthropic's Claude Code CLI, a supported host platform.
+- **[GitHub Copilot CLI](https://docs.github.com/en/copilot)** — GitHub Copilot CLI, a supported host platform.
 - **[gstack](https://github.com/garrytan/gstack)** — A first-party workflow source with structured specialist agents, used as a workflow source adapter in OMS.
 
 ## License
