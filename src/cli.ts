@@ -1655,7 +1655,7 @@ async function getArtifactsForHost(
   }
 
   if (host === "copilot") {
-    const built = buildCopilotArtifacts(config)
+    const built = buildCopilotArtifacts(config, controlPlaneSettings?.commandPrefix)
     return [...built.agents, ...built.skills, ...built.hooks]
   }
 
@@ -1720,7 +1720,7 @@ async function getExpectedArtifacts(
   }
 
   if (host === "copilot") {
-    const built = buildCopilotArtifacts(routerConfig)
+    const built = buildCopilotArtifacts(routerConfig, config.settings.commandPrefix)
     return [
       ...built.agents.map((artifact) => path.join(cwd, artifact.directory, artifact.fileName)),
       ...built.skills.map((artifact) => path.join(cwd, artifact.directory, artifact.fileName)),

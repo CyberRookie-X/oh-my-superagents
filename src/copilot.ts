@@ -201,8 +201,8 @@ export function renderCopilotPostCommandHook() {
   ].join("\n")
 }
 
-export function buildCopilotControlPlaneSkills(config: RouterConfig) {
-  const commandPrefix = config.commandPrefix ?? "oms"
+export function buildCopilotControlPlaneSkills(config: RouterConfig, commandPrefix?: string) {
+  const prefix = commandPrefix ?? "oms"
 
   return CONTROL_PLANE_COMMAND_KEYS.map<CopilotSkillArtifact>((command) => {
     const skillName = `${commandPrefix}-${command}`
@@ -241,7 +241,7 @@ export function buildCopilotHooks() {
   ]
 }
 
-export function buildCopilotArtifacts(config: RouterConfig) {
+export function buildCopilotArtifacts(config: RouterConfig, commandPrefix?: string) {
   const agents = BUILT_IN_PHASES.map<CopilotAgentArtifact>((phase) => {
     const resolved = resolvePhase(config, phase)
     const agentName = PHASE_TO_COPILOT_AGENT[phase]
@@ -262,7 +262,7 @@ export function buildCopilotArtifacts(config: RouterConfig) {
     }
   })
 
-  const skills = buildCopilotControlPlaneSkills(config)
+  const skills = buildCopilotControlPlaneSkills(config, commandPrefix)
   const hooks = buildCopilotHooks()
 
   return { agents, skills, hooks }

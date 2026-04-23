@@ -797,7 +797,7 @@ Expected: No type errors
 
 - [ ] **Step 3: Run build**
 
-Run: `npm run build`
+Run: `pnpm build`
 Expected: Build succeeds
 
 - [ ] **Step 4: Final commit if needed**

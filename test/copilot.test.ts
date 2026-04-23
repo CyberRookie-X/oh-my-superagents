@@ -72,7 +72,7 @@ describe("buildCopilotArtifacts", () => {
       profiles: { planner: { model: "anthropic/claude-sonnet-4-5" } },
       routes: {},
       defaultRoute: "planner",
-    } as never)
+    } as never, "oms")
 
     expect(artifacts.agents.map((item) => `${item.directory}/${item.fileName}`)).toEqual([
       ".github/copilot/agents/oms-brainstorm.md",
@@ -95,7 +95,7 @@ describe("buildCopilotArtifacts", () => {
       profiles: { planner: { model: "anthropic/claude-sonnet-4-5" } },
       routes: {},
       defaultRoute: "planner",
-    } as never)
+    } as never, "oms")
 
     expect(artifacts.skills.map((item) => `${item.directory}/${item.fileName}`)).toEqual([
       ".github/copilot/skills/oms-status/SKILL.md",
@@ -112,7 +112,7 @@ describe("buildCopilotArtifacts", () => {
       profiles: { planner: { model: "anthropic/claude-sonnet-4-5" } },
       routes: {},
       defaultRoute: "planner",
-    } as never)
+    } as never, "oms")
 
     expect(artifacts.hooks.map((item) => `${item.directory}/${item.fileName}`)).toEqual([
       ".github/copilot/hooks/pre-command.sh",
@@ -134,7 +134,7 @@ describe("buildCopilotArtifacts", () => {
       effectiveSources: {
         "phase.plan": "gstack",
       },
-    } as never)
+    } as never, "oms")
 
     const planAgent = artifacts.agents.find((item) => item.fileName === "oms-plan.md")
     expect(planAgent?.content).toContain("source=gstack")
