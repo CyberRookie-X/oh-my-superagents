@@ -21,7 +21,7 @@ export type CapabilityDecision =
       supported: false
       reasonCode: CapabilityReasonCode
     }
-export type CapabilityHost = SupportedSuperpowersHost | "qwen" | "claude"
+export type CapabilityHost = SupportedSuperpowersHost | "qwen" | "claude" | "copilot"
 export type ControlPlaneCapabilityCommand = ControlPlaneCommandKey | "explain"
 
 type WorkflowKind = WorkflowConfig["kind"]
@@ -89,7 +89,7 @@ export function getControlPlaneCommandDecision(input: {
     return unsupportedDecision("unsupported_workflow_mode")
   }
 
-  if (input.workflowKind === "direct" && input.command === "explain" && input.host !== "opencode" && input.host !== "codex") {
+  if (input.workflowKind === "direct" && input.command === "explain" && input.host !== "opencode" && input.host !== "codex" && input.host !== "copilot") {
     return unsupportedDecision("unsupported_workflow_mode")
   }
 
