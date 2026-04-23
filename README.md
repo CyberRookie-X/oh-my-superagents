@@ -4,6 +4,10 @@
 
 Architecture: [English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
+Detailed documentation:
+
+- [Copilot CLI Agent + Plugin + Hooks Architecture](./docs/copilot-cli-agent-plugin-hooks-architecture.md)
+
 Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, Qwen, and Claude Code, with first-class `superpowers` support and an experimental host-native direct mode on OpenCode, Codex, and Qwen.
 
 ## Support Matrix

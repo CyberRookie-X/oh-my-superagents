@@ -4,6 +4,10 @@
 
 架构说明：[English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
+详细文档：
+
+- [Copilot CLI Agent + Plugin + Hooks 架构](./docs/copilot-cli-agent-plugin-hooks-architecture.md)
+
 `oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Claude Code 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen 的实验性、宿主原生 direct mode。
 
 ## 支持矩阵
