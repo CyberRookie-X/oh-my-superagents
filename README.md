@@ -8,16 +8,16 @@ Host-native routing and OMS control-plane support for AI work on OpenCode, Codex
 
 ## Support Matrix
 
-| Capability | OpenCode | Codex | Qwen | Claude Code |
-| --- | --- | --- | --- | --- |
-| `superpowers` workflow routing | Full | Full | Partial | Experimental |
-| Direct mode | Experimental | Experimental | Experimental | None yet |
-| OMS control plane | Full | Full | Full | Experimental |
-| Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | None |
-| Compatibility monitor | Full | Full | None yet | None yet |
-| Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | Skills |
-| Temporary disable helper | Full | Full | None yet | None yet |
-| `codexFast` | Full | Full | None yet | None yet |
+| Capability | OpenCode | Codex | Qwen | Claude Code | Copilot CLI |
+| --- | --- | --- | --- | --- | --- |
+| `superpowers` workflow routing | Full | Full | Partial | Experimental | **Stage 1** |
+| Direct mode | Experimental | Experimental | Experimental | None yet | **Stage 2** |
+| OMS control plane | Full | Full | Full | Experimental | **Stage 1** |
+| Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | None | **None yet** |
+| Compatibility monitor | Full | Full | None yet | None yet | **Stage 2** |
+| Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | Skills | **Skills + commands** |
+| Temporary disable helper | Full | Full | None yet | None yet | **Stage 2** |
+| `codexFast` | Full | Full | None yet | None yet | **Stage 2** |
 
 Support level notes:
 
@@ -48,6 +48,7 @@ The table below uses current source line counts from the implementation files on
 | Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 760 | Medium |
 | Qwen adapter | `src/qwen.ts` | 424 | Thin |
 | Claude adapter | `src/claude.ts` | 138 | Thin |
+| Copilot CLI adapter | `src/copilot-cli.ts` | ~200 | Thin |
 | Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1093 | Medium |
 | Shared artifact reconciliation | `src/materialize.ts` | 712 | Thin-to-medium |
 

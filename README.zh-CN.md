@@ -8,16 +8,16 @@
 
 ## 支持矩阵
 
-| 能力 | OpenCode | Codex | Qwen | Claude Code |
-| --- | --- | --- | --- | --- |
-| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 |
-| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 |
-| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 |
-| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 |
-| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills |
-| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
+| 能力 | OpenCode | Codex | Qwen | Claude Code | Copilot CLI |
+| --- | --- | --- | --- | --- | --- |
+| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 | **Stage 1** |
+| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 | **Stage 2** |
+| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 | **Stage 1** |
+| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 | **暂未实现** |
+| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | **Stage 2** |
+| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills | **Skills + Commands** |
+| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | **Stage 2** |
+| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | **Stage 2** |
 
 支持等级说明：
 
@@ -48,6 +48,7 @@
 | Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 760 | 中等 |
 | Qwen 适配层 | `src/qwen.ts` | 424 | 薄 |
 | Claude 适配层 | `src/claude.ts` | 138 | 薄 |
+| Copilot CLI 适配层 | `src/copilot-cli.ts` | ~200 | 薄 |
 | 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1093 | 中等 |
 | 共享工件协调层 | `src/materialize.ts` | 712 | 薄到中等 |
 
