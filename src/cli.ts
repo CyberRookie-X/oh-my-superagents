@@ -64,6 +64,7 @@ import {
   RUNTIME_AGENT_METADATA_FILE,
 } from "./opencode.js"
 import { buildQwenArtifacts, discoverQwenUpstreamSkills } from "./qwen.js"
+import { buildCopilotArtifacts, explainAllCopilot, explainCopilotPhase, COPILOT_SKILLS_ROOT, COPILOT_COMMANDS_ROOT } from "./copilot-cli.js"
 import { explainAll, explainPhase, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
 import { normalizeWorkflowSourceRoutes, WORKFLOW_SOURCE_KINDS, type WorkflowSourceEntry } from "./workflow-sources.js"
 import {
@@ -83,7 +84,7 @@ export type CliResult = {
   stderr: string
 }
 
-type CliHost = SupportedSuperpowersHost | "qwen" | "claude"
+type CliHost = SupportedSuperpowersHost | "qwen" | "claude" | "copilot-cli"
 type ExplainCliHost = Exclude<CliHost, "qwen">
 
 const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
@@ -91,6 +92,15 @@ const CODEX_PLUGIN_MANIFEST_PATH = "plugins/oh-my-superagents-codex/.codex-plugi
 const CODEX_SKILLS_ROOT = "plugins/oh-my-superagents-codex/skills"
 const CLAUDE_SKILLS_ROOT = ".claude/skills"
 const QWEN_MANAGED_AGENT_FILE_NAMES = [
+  "oms-brainstorm.md",
+  "oms-plan.md",
+  "oms-execute.md",
+  "oms-review.md",
+  "oms-verify.md",
+  "oms-visual.md",
+  "oms-web-test.md",
+]
+const COPILOT_SKILL_FILE_NAMES = [
   "oms-brainstorm.md",
   "oms-plan.md",
   "oms-execute.md",
@@ -143,6 +153,7 @@ type CliDeps = {
   buildArtifacts: typeof buildArtifacts
   buildCodexArtifacts: typeof buildCodexArtifacts
   buildQwenArtifacts: typeof buildQwenArtifacts
+  buildCopilotArtifacts: typeof buildCopilotArtifacts
   buildCodexBootstrap: typeof runCodexBootstrap
   materializeArtifacts: typeof materializeArtifacts
   artifactExists: (filePath: string) => Promise<boolean>
@@ -187,6 +198,7 @@ const defaultDeps: CliDeps = {
   buildArtifacts,
   buildCodexArtifacts,
   buildQwenArtifacts,
+  buildCopilotArtifacts,
   buildCodexBootstrap: runCodexBootstrap,
   materializeArtifacts,
   artifactExists: async (filePath) => {
@@ -1513,7 +1525,13 @@ function explainAllForCliHost(
   host: ExplainCliHost,
   deps: CliDeps,
 ) {
-  return host === "claude" ? explainAllClaude(config) : deps.explainAllForHost(config, host)
+  if (host === "claude") {
+    return explainAllClaude(config)
+  }
+  if (host === "copilot-cli") {
+    return explainAllCopilot(config)
+  }
+  return deps.explainAllForHost(config, host)
 }
 
 function explainPhaseForCliHost(
@@ -1522,7 +1540,13 @@ function explainPhaseForCliHost(
   phase: BuiltInPhase,
   deps: CliDeps,
 ) {
-  return host === "claude" ? explainClaudePhase(config, phase) : deps.explainPhaseForHost(config, host, phase)
+  if (host === "claude") {
+    return explainClaudePhase(config, phase)
+  }
+  if (host === "copilot-cli") {
+    return explainCopilotPhase(config, phase)
+  }
+  return deps.explainPhaseForHost(config, host, phase)
 }
 
 function assertQwenProjectionSupport(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"]) {
@@ -1653,6 +1677,10 @@ async function getArtifactsForHost(
     return buildClaudeArtifacts(config).skills
   }
 
+  if (host === "copilot-cli") {
+    return deps.buildCopilotArtifacts(config)
+  }
+
   assertQwenProjectionSupport(config)
 
   const built = await deps.buildQwenArtifacts(config, {
@@ -1732,6 +1760,10 @@ const OWNED_ARTIFACT_RULES: Record<CliHost, Array<{ directory: string; extension
     { directory: ".qwen/commands", extension: ".md" },
   ],
   claude: [],
+  "copilot-cli": [
+    { directory: COPILOT_SKILLS_ROOT, extension: ".md" },
+    { directory: COPILOT_COMMANDS_ROOT, extension: ".md" },
+  ],
 }
 
 function isMissingFsError(error: unknown) {
@@ -1985,6 +2017,20 @@ async function discoverOwnedArtifacts(
       discovered.add(filePath)
     }
     warnings.push(...claudeSkills.warnings)
+  }
+
+  if (host === "copilot-cli") {
+    const copilotSkills = await discoverOwnedSkillFiles(cwd, COPILOT_SKILLS_ROOT, deps)
+    for (const filePath of copilotSkills.paths) {
+      discovered.add(filePath)
+    }
+    warnings.push(...copilotSkills.warnings)
+
+    const copilotCommands = await discoverOwnedSkillFiles(cwd, COPILOT_COMMANDS_ROOT, deps)
+    for (const filePath of copilotCommands.paths) {
+      discovered.add(filePath)
+    }
+    warnings.push(...copilotCommands.warnings)
   }
 
   return {
