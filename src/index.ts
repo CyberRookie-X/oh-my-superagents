@@ -7,6 +7,18 @@ export * from "./claude.js"
 export * from "./codex.js"
 export * from "./control-plane.js"
 export * from "./qwen.js"
+export {
+  buildCopilotArtifacts,
+  buildCopilotPluginManifest,
+  buildCopilotHooksConfig,
+  renderCopilotAgentFile,
+  renderCopilotSkillFile,
+  type CopilotAgentArtifact,
+  type CopilotSkillArtifact,
+  type CopilotCommandArtifact,
+  type CopilotHooksOptions,
+  type BuildCopilotArtifactsResult,
+} from "./copilot.js"
 export * from "./codex-bootstrap.js"
 export * from "./materialize.js"
 export * from "./cli.js"

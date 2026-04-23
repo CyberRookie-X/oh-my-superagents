@@ -312,7 +312,7 @@ export function summarizeSubagentExecutionDiagnostics(resolved: ResolvedControlP
 }
 
 export function buildOpenCodeStatusState(input: {
-  host: SupportedSuperpowersHost | "qwen"
+  host: SupportedSuperpowersHost | "qwen" | "copilot"
   source: ResolvedControlPlane["source"]
   enabled: boolean
   compatibility: SuperpowersCompatibilityResult | null
@@ -662,7 +662,7 @@ function resolvePresetDefinitionFromLayers(
 }
 
 export function buildOpenCodeNextAction(input: {
-  host: SupportedSuperpowersHost | "qwen"
+  host: SupportedSuperpowersHost | "qwen" | "copilot"
   workflow: ControlPlaneConfig["workflow"]
   state: OpenCodeStatusState
   activePresetShort: string
