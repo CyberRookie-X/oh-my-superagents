@@ -244,7 +244,7 @@ function parseRouteOwnership(content: string) {
   const escapedPrefix = ROUTE_MARKER_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const match = content.match(
     new RegExp(
-      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen|claude); source=([a-z-]+); route=([a-z0-9.-]+); projection=(agent|command|skill); rendered-name=([a-z0-9-]+) -->`,
+      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen|claude|copilot); source=([a-z-]+); route=([a-z0-9.-]+); projection=(agent|command|skill); rendered-name=([a-z0-9-]+) -->`,
     ),
   )
 
@@ -254,7 +254,7 @@ function parseRouteOwnership(content: string) {
 
   return {
     stage: match[1] as "1" | "2",
-    host: match[2] as "opencode" | "codex" | "qwen" | "claude",
+    host: match[2] as "opencode" | "codex" | "qwen" | "claude" | "copilot",
     source: match[3],
     route: match[4],
     projection: match[5] as "agent" | "command" | "skill",
@@ -303,6 +303,16 @@ function isRouteOwnedFile(filePath: string, content: string) {
 
   if (ownership.host === "codex") {
     return ownership.projection === "agent" && filePath.includes(`${path.sep}.codex${path.sep}agents${path.sep}`)
+  }
+
+  if (ownership.host === "copilot") {
+    if (ownership.projection === "agent") {
+      return filePath.includes(`${path.sep}.github${path.sep}copilot${path.sep}agents${path.sep}`)
+    }
+    if (ownership.projection === "skill") {
+      return filePath.includes(`${path.sep}.github${path.sep}copilot${path.sep}skills${path.sep}`)
+    }
+    return false
   }
 
   return ownership.projection === "agent" && filePath.includes(`${path.sep}.qwen${path.sep}agents${path.sep}`)

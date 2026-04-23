@@ -4,20 +4,20 @@
 
 Architecture: [English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, Qwen, and Claude Code, with first-class `superpowers` support and an experimental host-native direct mode on OpenCode, Codex, and Qwen.
+Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, Qwen, Claude Code, and Copilot CLI, with first-class `superpowers` support and an experimental host-native direct mode on OpenCode, Codex, and Qwen.
 
 ## Support Matrix
 
-| Capability | OpenCode | Codex | Qwen | Claude Code |
-| --- | --- | --- | --- | --- |
-| `superpowers` workflow routing | Full | Full | Partial | Experimental |
-| Direct mode | Experimental | Experimental | Experimental | None yet |
-| OMS control plane | Full | Full | Full | Experimental |
-| Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | None |
-| Compatibility monitor | Full | Full | None yet | None yet |
-| Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | Skills |
-| Temporary disable helper | Full | Full | None yet | None yet |
-| `codexFast` | Full | Full | None yet | None yet |
+| Capability | OpenCode | Codex | Qwen | Claude Code | Copilot CLI |
+| --- | --- | --- | --- | --- | --- |
+| `superpowers` workflow routing | Full | Full | Partial | Experimental | Full |
+| Direct mode | Experimental | Experimental | Experimental | None yet | None yet |
+| OMS control plane | Full | Full | Full | Experimental | Full |
+| Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | None | Plugin + hooks |
+| Compatibility monitor | Full | Full | None yet | None yet | Full |
+| Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | Skills | Agents + skills + plugin + hooks |
+| Temporary disable helper | Full | Full | None yet | None yet | Full |
+| `codexFast` | Full | Full | None yet | None yet | N/A |
 
 Support level notes:
 
@@ -33,6 +33,7 @@ Feature notes:
 - `codexFast` is full on OpenCode and Codex. Qwen does not support it yet.
 - Direct mode stays host-native: OpenCode renders commands plus agents, Codex renders agent TOMLs plus local bootstrap skills, and Qwen renders project-local commands plus agents.
 - `gstack` is a first-party workflow source. In the current slice, gstack-backed route projection is supported on OpenCode, Codex, and Claude Code, but not on Qwen.
+- Copilot CLI support uses Agent + Plugin + Hooks方案实现完整的宿主深度支持，生成 `.github/copilot/` 目录下的代理、技能、插件和钩子文件。
 
 ## Implementation Footprint
 
@@ -48,6 +49,7 @@ The table below uses current source line counts from the implementation files on
 | Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 760 | Medium |
 | Qwen adapter | `src/qwen.ts` | 424 | Thin |
 | Claude adapter | `src/claude.ts` | 138 | Thin |
+| Copilot adapter | `src/copilot.ts` | 283 | Thin |
 | Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1093 | Medium |
 | Shared artifact reconciliation | `src/materialize.ts` | 712 | Thin-to-medium |
 
@@ -61,10 +63,10 @@ How to read this:
 ## Scope
 
 `oh-my-superagents` is evolving into a broader routing and control-plane product.
-Today it still ships first-class `superpowers` support across the supported hosts, and the first generic slice now includes an experimental host-native direct mode on OpenCode, Codex, and Qwen, while Claude Code currently supports the `superpowers` slice only.
+Today it still ships first-class `superpowers` support across the supported hosts, and the first generic slice now includes an experimental host-native direct mode on OpenCode, Codex, and Qwen, while Claude Code currently supports the `superpowers` slice only. Copilot CLI support is now available with full Agent + Plugin + Hooks integration.
 
 It is not a cross-host configuration sync tool.
-The supported surface for this release is the CLI, generated host artifacts, packaged plugin entrypoints, the Stage 1 OMS control plane, the Stage 2 Qwen adapter, the experimental direct-mode slices on OpenCode, Codex, and Qwen, and the current `oh-my-superagents/library` export surface.
+The supported surface for this release is the CLI, generated host artifacts, packaged plugin entrypoints, the Stage 1 OMS control plane, the Stage 2 Qwen adapter, the experimental direct-mode slices on OpenCode, Codex, and Qwen, the Copilot CLI adapter, and the current `oh-my-superagents/library` export surface.
 
 Today that means:
 
@@ -72,6 +74,7 @@ Today that means:
 - Codex: supported for `superpowers` workflow routing and the experimental direct-mode slice
 - Qwen: supported with a limited Stage 2 surface for `superpowers` workflow routing plus an experimental direct-mode slice
 - Claude Code: supported as a thin host adapter for the current `superpowers` slice, including source-aware route projection; direct workflow projection is not supported yet
+- Copilot CLI: supported with full Agent + Plugin + Hooks integration for宿主深度支持
 
 ## What It Does
 

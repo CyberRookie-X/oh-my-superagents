@@ -4,20 +4,20 @@
 
 架构说明：[English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Claude Code 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen 的实验性、宿主原生 direct mode。
+`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Claude Code 和 Copilot CLI 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen 的实验性、宿主原生 direct mode。
 
 ## 支持矩阵
 
-| 能力 | OpenCode | Codex | Qwen | Claude Code |
-| --- | --- | --- | --- | --- |
-| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 |
-| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 |
-| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 |
-| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 |
-| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills |
-| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
+| 能力 | OpenCode | Codex | Qwen | Claude Code | Copilot CLI |
+| --- | --- | --- | --- | --- | --- |
+| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 | 完整支持 |
+| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 | 暂未实现 |
+| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 | 完整支持 |
+| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 | 插件 + 钩子 |
+| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 完整支持 |
+| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills | Agents + Skills + Plugin + Hooks |
+| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 完整支持 |
+| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | N/A |
 
 支持等级说明：
 
@@ -33,6 +33,7 @@
 - `codexFast` 在 OpenCode 和 Codex 上都属于完整支持；Qwen 目前还不支持。
 - Direct mode 会保持宿主原生形态：OpenCode 生成 commands + agents，Codex 生成 agent TOML + 本地 bootstrap skills，Qwen 生成项目内 commands + agents。
 - `gstack` 是一等公民级别的 first-party workflow source。当前这个切片里，gstack 路由投影支持 OpenCode、Codex、Claude Code，Qwen 暂不支持。
+- Copilot CLI 支持使用 Agent + Plugin + Hooks 方案实现完整的宿主深度支持，生成 `.github/copilot/` 目录下的代理、技能、插件和钩子文件。
 
 ## 实现厚度
 
@@ -48,6 +49,7 @@
 | Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 760 | 中等 |
 | Qwen 适配层 | `src/qwen.ts` | 424 | 薄 |
 | Claude 适配层 | `src/claude.ts` | 138 | 薄 |
+| Copilot 适配层 | `src/copilot.ts` | 283 | 薄 |
 | 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1093 | 中等 |
 | 共享工件协调层 | `src/materialize.ts` | 712 | 薄到中等 |
 
@@ -61,7 +63,7 @@
 ## 项目边界
 
 `oh-my-superagents` 正在演进成一个更广义的路由与控制平面产品。
-当前它仍然在已支持宿主上提供一等公民级别的 `superpowers` 支持，而首个通用切片现在已经扩展为覆盖 OpenCode、Codex、Qwen 的实验性宿主原生 direct mode；Claude Code 当前只支持 `superpowers` 这条 slice。
+当前它仍然在已支持宿主上提供一等公民级别的 `superpowers` 支持，而首个通用切片现在已经扩展为覆盖 OpenCode、Codex、Qwen 的实验性宿主原生 direct mode；Claude Code 当前只支持 `superpowers` 这条 slice。Copilot CLI 支持现已可用，提供完整的 Agent + Plugin + Hooks 集成。
 
 它不是：
 
@@ -77,6 +79,7 @@
 - Stage 1 OMS control plane
 - Stage 2 Qwen adapter
 - OpenCode、Codex、Qwen 上的实验性 direct mode 切片
+- Copilot CLI 适配器
 - 当前 `oh-my-superagents/library` 导出面
 
 当前结论：
