@@ -54,6 +54,7 @@ import type { ContextIndex } from "./context-index.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildClaudeArtifacts } from "./claude.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
+import { buildCopilotArtifacts } from "./copilot.js"
 import { CONTEXT_LIFECYCLE_STAGES } from "./context-lifecycle.js"
 import { detectClaudeGstackAvailability } from "./gstack-detectors.js"
 import { isOmsOwnedArtifactFile, isOmsOwnedSkillFile, isOpenCodeRuntimeMetadataContent, materializeArtifacts } from "./materialize.js"
@@ -83,7 +84,7 @@ export type CliResult = {
   stderr: string
 }
 
-type CliHost = SupportedSuperpowersHost | "qwen" | "claude"
+type CliHost = SupportedSuperpowersHost | "qwen" | "claude" | "copilot"
 type ExplainCliHost = Exclude<CliHost, "qwen">
 
 const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
@@ -1508,12 +1509,57 @@ function explainAllClaude(config: Awaited<ReturnType<typeof loadRouterConfig>>["
   })
 }
 
+function explainCopilotPhase(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"], phase: BuiltInPhase) {
+  const resolved = resolvePhase(config, phase)
+  const built = buildCopilotArtifacts(config)
+  const agent = built.agents[BUILT_IN_PHASES.indexOf(phase)]
+  const skill = built.skills[BUILT_IN_PHASES.indexOf(phase)]
+
+  return {
+    phase,
+    canonicalRoute: resolved.canonicalRoute,
+    profileId: resolved.profileId,
+    effectiveLane: resolved.effectiveLane,
+    routeSource: resolved.routeSource,
+    resolvedSource: resolved.resolvedSource,
+    model: resolved.selection.model,
+    variant: resolved.selection.variant,
+    agentName: agent ? path.basename(agent.fileName, ".agent.md") : undefined,
+    skillName: skill ? path.basename(skill.directory) : undefined,
+  }
+}
+
+function explainAllCopilot(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"]) {
+  const built = buildCopilotArtifacts(config)
+
+  return BUILT_IN_PHASES.map((phase, index) => {
+    const resolved = resolvePhase(config, phase)
+    const agent = built.agents[index]
+    const skill = built.skills[index]
+
+    return {
+      phase,
+      canonicalRoute: resolved.canonicalRoute,
+      profileId: resolved.profileId,
+      effectiveLane: resolved.effectiveLane,
+      routeSource: resolved.routeSource,
+      resolvedSource: resolved.resolvedSource,
+      model: resolved.selection.model,
+      variant: resolved.selection.variant,
+      agentName: agent ? path.basename(agent.fileName, ".agent.md") : undefined,
+      skillName: skill ? path.basename(skill.directory) : undefined,
+    }
+  })
+}
+
 function explainAllForCliHost(
   config: Awaited<ReturnType<typeof loadRouterConfig>>["config"],
   host: ExplainCliHost,
   deps: CliDeps,
 ) {
-  return host === "claude" ? explainAllClaude(config) : deps.explainAllForHost(config, host)
+  if (host === "claude") return explainAllClaude(config)
+  if (host === "copilot") return explainAllCopilot(config)
+  return deps.explainAllForHost(config, host)
 }
 
 function explainPhaseForCliHost(
@@ -1522,7 +1568,9 @@ function explainPhaseForCliHost(
   phase: BuiltInPhase,
   deps: CliDeps,
 ) {
-  return host === "claude" ? explainClaudePhase(config, phase) : deps.explainPhaseForHost(config, host, phase)
+  if (host === "claude") return explainClaudePhase(config, phase)
+  if (host === "copilot") return explainCopilotPhase(config, phase)
+  return deps.explainPhaseForHost(config, host, phase)
 }
 
 function assertQwenProjectionSupport(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"]) {
@@ -1653,6 +1701,11 @@ async function getArtifactsForHost(
     return buildClaudeArtifacts(config).skills
   }
 
+  if (host === "copilot") {
+    const built = buildCopilotArtifacts(config)
+    return [...built.agents, ...built.skills, ...built.commands]
+  }
+
   assertQwenProjectionSupport(config)
 
   const built = await deps.buildQwenArtifacts(config, {
@@ -1732,6 +1785,9 @@ const OWNED_ARTIFACT_RULES: Record<CliHost, Array<{ directory: string; extension
     { directory: ".qwen/commands", extension: ".md" },
   ],
   claude: [],
+  copilot: [
+    { directory: ".copilot-plugin/agents", extension: ".md" },
+  ],
 }
 
 function isMissingFsError(error: unknown) {
@@ -1985,6 +2041,15 @@ async function discoverOwnedArtifacts(
       discovered.add(filePath)
     }
     warnings.push(...claudeSkills.warnings)
+  }
+
+  if (host === "copilot") {
+    const COPILOT_SKILLS_ROOT = ".copilot-plugin/skills"
+    const copilotSkills = await discoverOwnedSkillFiles(cwd, COPILOT_SKILLS_ROOT, deps)
+    for (const filePath of copilotSkills.paths) {
+      discovered.add(filePath)
+    }
+    warnings.push(...copilotSkills.warnings)
   }
 
   return {
@@ -2537,15 +2602,15 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     }
 
     if (!host) {
-      return { exitCode: 1, stdout: "", stderr: "Missing required --host (supported: opencode, codex, qwen, claude)" }
+      return { exitCode: 1, stdout: "", stderr: "Missing required --host (supported: opencode, codex, qwen, claude, copilot)" }
     }
 
-    if (command === "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude") {
-      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, or --host claude is supported for explain in v1" }
+    if (command === "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude" && host !== "copilot") {
+      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host claude, or --host copilot is supported for explain in v1" }
     }
 
-    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude") {
-      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, or --host claude is supported in v1" }
+    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude" && host !== "copilot") {
+      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, --host claude, or --host copilot is supported in v1" }
     }
 
     const cliHost = host as CliHost

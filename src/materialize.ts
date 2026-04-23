@@ -494,6 +494,11 @@ function isOmsOwnedSkillArtifact(artifact: MaterializeArtifactsInput["artifacts"
       && artifact.directory.startsWith(".claude/skills/")
       && isRouteOwnedArtifact(artifact)
     )
+    || (
+      artifact.fileName === SKILL_FILE_NAME
+      && artifact.directory.startsWith(".copilot-plugin/skills/")
+      && isRouteOwnedArtifact(artifact)
+    )
   )
 }
 
