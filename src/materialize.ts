@@ -50,6 +50,7 @@ const OPENCODE_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["sp-", "ai-"])
 const OPENCODE_ROUTER_OWNED_AGENT_PREFIXES = new Set(["spr-", "rt-"])
 const QWEN_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["oms-", "ai-"])
 const QWEN_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
+const COPILOT_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -116,6 +117,14 @@ function isOpenCodeRouterOwnedFile(directory: string, fileName: string, content:
 function isCodexRouterOwnedFile(directory: string, fileName: string, content: string) {
   if (directory.endsWith(`${path.sep}.codex${path.sep}agents`)) {
     return isPrefixOwned(fileName, content, CODEX_ROUTER_OWNED_AGENT_PREFIXES)
+  }
+
+  return false
+}
+
+function isCopilotRouterOwnedFile(directory: string, fileName: string, content: string) {
+  if (directory.endsWith(`${path.sep}.copilot-plugin${path.sep}agents`)) {
+    return isPrefixOwned(fileName, content, COPILOT_ROUTER_OWNED_AGENT_PREFIXES)
   }
 
   return false
@@ -244,7 +253,7 @@ function parseRouteOwnership(content: string) {
   const escapedPrefix = ROUTE_MARKER_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const match = content.match(
     new RegExp(
-      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen|claude); source=([a-z-]+); route=([a-z0-9.-]+); projection=(agent|command|skill); rendered-name=([a-z0-9-]+) -->`,
+      `<!-- ${escapedPrefix} stage=(1|2|3); host=(opencode|codex|qwen|claude|copilot); source=([a-z-]+); route=([a-z0-9.-]+); projection=(agent|command|skill); rendered-name=([a-z0-9-]+) -->`,
     ),
   )
 
@@ -253,8 +262,8 @@ function parseRouteOwnership(content: string) {
   }
 
   return {
-    stage: match[1] as "1" | "2",
-    host: match[2] as "opencode" | "codex" | "qwen" | "claude",
+    stage: match[1] as "1" | "2" | "3",
+    host: match[2] as "opencode" | "codex" | "qwen" | "claude" | "copilot",
     source: match[3],
     route: match[4],
     projection: match[5] as "agent" | "command" | "skill",
@@ -303,6 +312,21 @@ function isRouteOwnedFile(filePath: string, content: string) {
 
   if (ownership.host === "codex") {
     return ownership.projection === "agent" && filePath.includes(`${path.sep}.codex${path.sep}agents${path.sep}`)
+  }
+
+  if (ownership.host === "copilot") {
+    if (ownership.projection === "agent") {
+      return filePath.includes(`${path.sep}.copilot-plugin${path.sep}agents${path.sep}`)
+        && path.basename(filePath, ".agent.md") === ownership.renderedName
+    }
+    if (ownership.projection === "skill") {
+      return (
+        path.basename(filePath) === "SKILL.md"
+        && filePath.includes(`${path.sep}.copilot-plugin${path.sep}skills${path.sep}`)
+        && path.basename(path.dirname(filePath)) === ownership.renderedName
+      )
+    }
+    return false
   }
 
   return ownership.projection === "agent" && filePath.includes(`${path.sep}.qwen${path.sep}agents${path.sep}`)
@@ -633,6 +657,7 @@ export async function materializeArtifacts(
         || isOpenCodeRouterOwnedFile(directory, entry, content)
         || isCodexRouterOwnedFile(directory, entry, content)
         || isQwenRouterOwnedFile(directory, entry, content)
+        || isCopilotRouterOwnedFile(directory, entry, content)
         || isRouteOwnedFile(fullPath, content)
         || isPrefixOwned(entry, content, prefixes)
 
