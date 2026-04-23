@@ -14,8 +14,9 @@
 | Agent | OpenCode 1.14.19 |
 | 工作流插件 | Superpowers v5.0.7 |
 | 操作系统 | Linux (Debian, kernel 6.12.63-1-lts) |
-| 推理强度 | 深度推理（Deep Reasoning），含完整对比分析 |
 | 运行时 | Node.js 22.x, pnpm 10.32 |
+
+> **推理强度说明**：由于 **OpenCode Subagent** 无法继承**主 Agent** 的推理强度设置，通过在 `opencode.json` 配置文件中将模型**默认推理强度**设为**最高推理强度（Deep Reasoning）**，确保全部 14 款被测模型在评测全程均采用**最高推理强度**运行。
 
 ---
 
