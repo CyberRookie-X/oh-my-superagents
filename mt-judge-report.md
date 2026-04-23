@@ -27,9 +27,9 @@
 | 任务 | 内容 | 权重 |
 |------|------|------|
 | Task 1 | 深入分析项目代码架构与设计，输出中文分析报告 `analysis-report.md` | 20% |
-| Task 2 | 采用 superpowers 工作流，完成 Copilot CLI 宿主深度支持的设计文档（spec + plan） | 20% |
-| Task 3 | 实施 Task 2 计划的所有开发工作，完成 `src/copilot.ts` 及集成代码 | 40% |
-| Task 4 | 完善并更新项目文档（README、架构文档等） | 20% |
+| Task 2 | 采用 superpowers 工作流，完成 Copilot CLI 宿主深度支持的设计文档（spec + plan） | 25% |
+| Task 3 | 实施 Task 2 计划的所有开发工作，完成 `src/copilot.ts` 及集成代码 | 50% |
+| Task 4 | 完善并更新项目文档（README、架构文档等） | 5% |
 
 ---
 
