@@ -68,7 +68,7 @@ describe("renderCopilotAgentFile", () => {
       workflowEntryName: "superpowers/writing-plans",
     })
 
-    expect(result).toContain("variant: fast")
+    expect(result).toContain("variant: 'fast'")
     expect(result).toContain("temperature: 0.5")
   })
 

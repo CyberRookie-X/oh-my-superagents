@@ -10,7 +10,7 @@ describe("buildCopilotArtifacts", () => {
     profiles: {
       default: { model: "gpt-4.1" },
     },
-    defaultRoute: { profile: "default" },
+    defaultRoute: "default",
     routes: {},
     lanes: {},
     settings: {

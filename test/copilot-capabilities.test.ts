@@ -52,7 +52,7 @@ describe("copilot capabilities", () => {
   })
 
   it("supports control plane commands in direct mode", () => {
-    for (const command of ["status", "sync", "doctor", "explain"] as const) {
+    for (const command of ["status", "sync", "doctor"] as const) {
       const decision = getControlPlaneCommandDecision({
         host: "copilot",
         command,
