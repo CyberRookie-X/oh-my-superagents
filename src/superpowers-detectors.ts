@@ -562,6 +562,28 @@ function withFailures(result: SuperpowersDetectionResult, failures: SuperpowersD
   }
 }
 
+export async function detectCopilotSuperpowers(
+  input: { homeDir?: string } = {},
+): Promise<SuperpowersDetectionResult> {
+  const homeDir = input.homeDir ?? homedir()
+
+  if (process.env.COPILOT_VERSION) {
+    return {
+      host: "copilot",
+      source: "copilot-env",
+      detectedVersion: process.env.COPILOT_VERSION,
+      detectedRef: null,
+    }
+  }
+
+  return {
+    host: "copilot",
+    source: "copilot-not-detected",
+    detectedVersion: null,
+    detectedRef: null,
+  }
+}
+
 function isNotFoundError(error: unknown): error is Error & { code?: string } {
   return error instanceof Error && "code" in error && (error as { code?: string }).code === "ENOENT"
 }

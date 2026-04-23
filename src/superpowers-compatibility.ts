@@ -12,7 +12,7 @@ export const SUPERPOWERS_COMPATIBILITY_STATUSES = [
 export type SuperpowersCompatibilityStatus =
   (typeof SUPERPOWERS_COMPATIBILITY_STATUSES)[number]
 
-export type SupportedSuperpowersHost = "opencode" | "codex"
+export type SupportedSuperpowersHost = "opencode" | "codex" | "copilot"
 
 export type SuperpowersCompatibilityMatrixEntry = {
   minimumSupportedVersion: string
