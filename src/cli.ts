@@ -54,6 +54,7 @@ import type { ContextIndex } from "./context-index.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildClaudeArtifacts } from "./claude.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
+import { buildCopilotArtifacts, explainAllCopilot, explainCopilotPhase } from "./copilot.js"
 import { CONTEXT_LIFECYCLE_STAGES } from "./context-lifecycle.js"
 import { detectClaudeGstackAvailability } from "./gstack-detectors.js"
 import { isOmsOwnedArtifactFile, isOmsOwnedSkillFile, isOpenCodeRuntimeMetadataContent, materializeArtifacts } from "./materialize.js"
@@ -138,8 +139,8 @@ type CliDeps = {
   prepareControlPlaneStateWrite: typeof prepareControlPlaneStateWrite
   explainAll: typeof explainAll
   explainPhase: typeof explainPhase
-  explainAllForHost: (config: Awaited<ReturnType<typeof loadRouterConfig>>["config"], host: "opencode" | "codex") => unknown[]
-  explainPhaseForHost: (config: Awaited<ReturnType<typeof loadRouterConfig>>["config"], host: "opencode" | "codex", phase: BuiltInPhase) => unknown
+  explainAllForHost: (config: Awaited<ReturnType<typeof loadRouterConfig>>["config"], host: SupportedSuperpowersHost | "qwen") => unknown[]
+  explainPhaseForHost: (config: Awaited<ReturnType<typeof loadRouterConfig>>["config"], host: SupportedSuperpowersHost | "qwen", phase: BuiltInPhase) => unknown
   buildArtifacts: typeof buildArtifacts
   buildCodexArtifacts: typeof buildCodexArtifacts
   buildQwenArtifacts: typeof buildQwenArtifacts
@@ -182,8 +183,16 @@ const defaultDeps: CliDeps = {
   prepareControlPlaneStateWrite,
   explainAll,
   explainPhase,
-  explainAllForHost: (config, host) => (host === "opencode" ? explainAll(config) : explainAllCodex(config)),
-  explainPhaseForHost: (config, host, phase) => (host === "opencode" ? explainPhase(config, phase) : explainCodexPhase(config, phase)),
+  explainAllForHost: (config, host) => {
+    if (host === "opencode") return explainAll(config)
+    if (host === "copilot") return explainAllCopilot(config)
+    return explainAllCodex(config)
+  },
+  explainPhaseForHost: (config, host, phase) => {
+    if (host === "opencode") return explainPhase(config, phase)
+    if (host === "copilot") return explainCopilotPhase(config, phase)
+    return explainCodexPhase(config, phase)
+  },
   buildArtifacts,
   buildCodexArtifacts,
   buildQwenArtifacts,
@@ -1248,7 +1257,7 @@ async function resolveCompatibilityForHost(
 }
 
 function isCompatibilityHost(host: CliHost): host is SupportedSuperpowersHost {
-  return host === "opencode" || host === "codex"
+  return host === "opencode" || host === "codex" || host === "copilot"
 }
 
 async function resolveCompatibilityForCliHost(
@@ -1405,7 +1414,7 @@ function isDirectWorkflowHostSupported(
     return false
   }
 
-  return host === "opencode" || host === "codex" || host === "qwen"
+  return host === "opencode" || host === "codex" || host === "qwen" || host === "copilot"
 }
 
 function assertWorkflowSupport(
@@ -1653,6 +1662,11 @@ async function getArtifactsForHost(
     return buildClaudeArtifacts(config).skills
   }
 
+  if (host === "copilot") {
+    const built = buildCopilotArtifacts(config, controlPlaneSettings)
+    return [...built.agents, ...built.commands, ...built.skills, built.pluginManifest, built.hooksConfig]
+  }
+
   assertQwenProjectionSupport(config)
 
   const built = await deps.buildQwenArtifacts(config, {
@@ -1730,6 +1744,10 @@ const OWNED_ARTIFACT_RULES: Record<CliHost, Array<{ directory: string; extension
   qwen: [
     { directory: ".qwen/agents", extension: ".md" },
     { directory: ".qwen/commands", extension: ".md" },
+  ],
+  copilot: [
+    { directory: ".github/copilot/agents", extension: ".md" },
+    { directory: ".github/copilot/commands", extension: ".md" },
   ],
   claude: [],
 }
@@ -1985,6 +2003,14 @@ async function discoverOwnedArtifacts(
       discovered.add(filePath)
     }
     warnings.push(...claudeSkills.warnings)
+  }
+
+  if (host === "copilot") {
+    const copilotSkills = await discoverOwnedSkillFiles(cwd, ".github/copilot/skills", deps)
+    for (const filePath of copilotSkills.paths) {
+      discovered.add(filePath)
+    }
+    warnings.push(...copilotSkills.warnings)
   }
 
   return {
@@ -2537,15 +2563,15 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
     }
 
     if (!host) {
-      return { exitCode: 1, stdout: "", stderr: "Missing required --host (supported: opencode, codex, qwen, claude)" }
+      return { exitCode: 1, stdout: "", stderr: "Missing required --host (supported: opencode, codex, qwen, claude, copilot)" }
     }
 
-    if (command === "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude") {
-      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, or --host claude is supported for explain in v1" }
+    if (command === "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude" && host !== "copilot") {
+      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host claude, or --host copilot is supported for explain in v1" }
     }
 
-    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude") {
-      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, or --host claude is supported in v1" }
+    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude" && host !== "copilot") {
+      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, --host claude, or --host copilot is supported in v1" }
     }
 
     const cliHost = host as CliHost

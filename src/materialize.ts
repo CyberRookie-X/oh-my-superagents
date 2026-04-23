@@ -50,6 +50,8 @@ const OPENCODE_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["sp-", "ai-"])
 const OPENCODE_ROUTER_OWNED_AGENT_PREFIXES = new Set(["spr-", "rt-"])
 const QWEN_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["oms-", "ai-"])
 const QWEN_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
+const COPILOT_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
+const COPILOT_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["oms-", "ai-"])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -133,6 +135,18 @@ function isQwenRouterOwnedFile(directory: string, fileName: string, content: str
   return false
 }
 
+function isCopilotRouterOwnedFile(directory: string, fileName: string, content: string) {
+  if (directory.endsWith(`${path.sep}.github${path.sep}copilot${path.sep}commands`)) {
+    return isPrefixOwned(fileName, content, COPILOT_ROUTER_OWNED_COMMAND_PREFIXES)
+  }
+
+  if (directory.endsWith(`${path.sep}.github${path.sep}copilot${path.sep}agents`)) {
+    return isPrefixOwned(fileName, content, COPILOT_ROUTER_OWNED_AGENT_PREFIXES)
+  }
+
+  return false
+}
+
 function isOpenCodeRuntimeMetadataFile(filePath: string) {
   return filePath.endsWith(`${path.sep}${RUNTIME_AGENT_METADATA_DIRECTORY.replace(/\//g, path.sep)}${path.sep}${RUNTIME_AGENT_METADATA_FILE}`)
 }
@@ -164,7 +178,7 @@ function parseControlPlaneOwnership(content: string) {
   const escapedPrefix = CONTROL_PLANE_MARKER_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const match = content.match(
     new RegExp(
-      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen); artifact=(command|skill); logical-command=([a-z-]+); rendered-name=([a-z0-9-]+) -->`,
+      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen|copilot); artifact=(command|skill); logical-command=([a-z-]+); rendered-name=([a-z0-9-]+) -->`,
     ),
   )
 
@@ -179,7 +193,7 @@ function parseControlPlaneOwnership(content: string) {
 
   return {
     stage: match[1] as "1" | "2",
-    host: match[2] as "opencode" | "codex" | "qwen",
+    host: match[2] as "opencode" | "codex" | "qwen" | "copilot",
     artifact: match[3] as "command" | "skill",
     logicalCommand,
     renderedName: match[5],
@@ -244,7 +258,7 @@ function parseRouteOwnership(content: string) {
   const escapedPrefix = ROUTE_MARKER_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const match = content.match(
     new RegExp(
-      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen|claude); source=([a-z-]+); route=([a-z0-9.-]+); projection=(agent|command|skill); rendered-name=([a-z0-9-]+) -->`,
+      `<!-- ${escapedPrefix} stage=(1|2); host=(opencode|codex|qwen|claude|copilot); source=([a-z-]+); route=([a-z0-9.-]+); projection=(agent|command|skill); rendered-name=([a-z0-9-]+) -->`,
     ),
   )
 
@@ -254,7 +268,7 @@ function parseRouteOwnership(content: string) {
 
   return {
     stage: match[1] as "1" | "2",
-    host: match[2] as "opencode" | "codex" | "qwen" | "claude",
+    host: match[2] as "opencode" | "codex" | "qwen" | "claude" | "copilot",
     source: match[3],
     route: match[4],
     projection: match[5] as "agent" | "command" | "skill",
@@ -303,6 +317,24 @@ function isRouteOwnedFile(filePath: string, content: string) {
 
   if (ownership.host === "codex") {
     return ownership.projection === "agent" && filePath.includes(`${path.sep}.codex${path.sep}agents${path.sep}`)
+  }
+
+  if (ownership.host === "copilot") {
+    if (ownership.projection === "skill") {
+      return (
+        path.basename(filePath) === SKILL_FILE_NAME
+        && filePath.includes(`${path.sep}.github${path.sep}copilot${path.sep}skills${path.sep}`)
+        && path.basename(path.dirname(filePath)) === ownership.renderedName
+      )
+    }
+
+    if (path.basename(filePath, ".md") !== ownership.renderedName) {
+      return false
+    }
+
+    return ownership.projection === "agent"
+      ? filePath.includes(`${path.sep}.github${path.sep}copilot${path.sep}agents${path.sep}`)
+      : filePath.includes(`${path.sep}.github${path.sep}copilot${path.sep}commands${path.sep}`)
   }
 
   return ownership.projection === "agent" && filePath.includes(`${path.sep}.qwen${path.sep}agents${path.sep}`)
@@ -410,6 +442,12 @@ export function isOmsOwnedSkillFile(filePath: string, content: string) {
       path.basename(filePath) === SKILL_FILE_NAME
       && isRouteOwnedFile(filePath, content)
     )
+    || (
+      path.basename(filePath) === SKILL_FILE_NAME
+      && filePath.includes(`${path.sep}.github${path.sep}copilot${path.sep}skills${path.sep}`)
+      && hasArtifactOwnershipMarker(content)
+      && parseRouteOwnership(content)?.host === "copilot"
+    )
   )
 }
 
@@ -424,6 +462,7 @@ export function isOmsOwnedArtifactFile(filePath: string, content: string) {
     || isOpenCodeRouterOwnedFile(directory, fileName, content)
     || isCodexRouterOwnedFile(directory, fileName, content)
     || isQwenRouterOwnedFile(directory, fileName, content)
+    || isCopilotRouterOwnedFile(directory, fileName, content)
     || isRouteOwnedFile(filePath, content)
     || (
       hasArtifactOwnershipMarker(content)
@@ -468,6 +507,11 @@ function isOmsOwnedSkillArtifact(artifact: MaterializeArtifactsInput["artifacts"
     || (
       artifact.fileName === SKILL_FILE_NAME
       && artifact.directory.startsWith(".claude/skills/")
+      && isRouteOwnedArtifact(artifact)
+    )
+    || (
+      artifact.fileName === SKILL_FILE_NAME
+      && artifact.directory.startsWith(".github/copilot/skills/")
       && isRouteOwnedArtifact(artifact)
     )
   )
@@ -633,6 +677,7 @@ export async function materializeArtifacts(
         || isOpenCodeRouterOwnedFile(directory, entry, content)
         || isCodexRouterOwnedFile(directory, entry, content)
         || isQwenRouterOwnedFile(directory, entry, content)
+        || isCopilotRouterOwnedFile(directory, entry, content)
         || isRouteOwnedFile(fullPath, content)
         || isPrefixOwned(entry, content, prefixes)
 
