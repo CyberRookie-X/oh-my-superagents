@@ -50,6 +50,8 @@ const OPENCODE_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["sp-", "ai-"])
 const OPENCODE_ROUTER_OWNED_AGENT_PREFIXES = new Set(["spr-", "rt-"])
 const QWEN_ROUTER_OWNED_COMMAND_PREFIXES = new Set(["oms-", "ai-"])
 const QWEN_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-", "rt-"])
+const COPILOT_ROUTER_OWNED_AGENT_PREFIXES = new Set(["oms-"])
+const COPILOT_ROUTER_OWNED_SKILL_PREFIXES = new Set(["oms-"])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -128,6 +130,22 @@ function isQwenRouterOwnedFile(directory: string, fileName: string, content: str
 
   if (directory.endsWith(`${path.sep}.qwen${path.sep}agents`)) {
     return isPrefixOwned(fileName, content, QWEN_ROUTER_OWNED_AGENT_PREFIXES)
+  }
+
+  return false
+}
+
+function isCopilotRouterOwnedFile(directory: string, fileName: string, content: string) {
+  if (directory.endsWith(`${path.sep}.github${path.sep}copilot${path.sep}agents`)) {
+    return isPrefixOwned(fileName, content, COPILOT_ROUTER_OWNED_AGENT_PREFIXES)
+  }
+
+  if (directory.endsWith(`${path.sep}.github${path.sep}copilot${path.sep}skills`)) {
+    return isPrefixOwned(fileName, content, COPILOT_ROUTER_OWNED_SKILL_PREFIXES)
+  }
+
+  if (directory.endsWith(`${path.sep}.github${path.sep}copilot${path.sep}hooks`)) {
+    return isPrefixOwned(fileName, content, COPILOT_ROUTER_OWNED_SKILL_PREFIXES)
   }
 
   return false
@@ -424,6 +442,7 @@ export function isOmsOwnedArtifactFile(filePath: string, content: string) {
     || isOpenCodeRouterOwnedFile(directory, fileName, content)
     || isCodexRouterOwnedFile(directory, fileName, content)
     || isQwenRouterOwnedFile(directory, fileName, content)
+    || isCopilotRouterOwnedFile(directory, fileName, content)
     || isRouteOwnedFile(filePath, content)
     || (
       hasArtifactOwnershipMarker(content)
