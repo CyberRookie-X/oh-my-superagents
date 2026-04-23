@@ -5,7 +5,7 @@ const capabilityLibrary = library as typeof library & {
   CAPABILITY_REASON_CODES?: readonly string[]
   isSourceRouteSupported?: (source: "superpowers" | "gstack" | "direct", canonicalRoute: string) => boolean
   getHostProjectionDecision?: (input: {
-    host: "opencode" | "codex" | "qwen" | "claude"
+    host: "opencode" | "codex" | "qwen" | "claude" | "copilot"
     workflowKind: "superpowers" | "direct"
     sourceEntry: {
       canonicalRoute: string
@@ -17,7 +17,7 @@ const capabilityLibrary = library as typeof library & {
     reasonCode?: string
   }
   getControlPlaneCommandDecision?: (input: {
-    host: "opencode" | "codex" | "qwen" | "claude"
+    host: "opencode" | "codex" | "qwen" | "claude" | "copilot"
     command: "status" | "use" | "disable" | "sync" | "doctor" | "explain"
     workflowKind: "superpowers" | "direct"
   }) => {
@@ -175,6 +175,82 @@ describe("capability registry", () => {
       }),
     ).toEqual({
       supported: true,
+    })
+  })
+
+  it("supports superpowers workflow projection on copilot", () => {
+    expect(
+      capabilityLibrary.getHostProjectionDecision!({
+        host: "copilot",
+        workflowKind: "superpowers",
+        sourceEntry: {
+          canonicalRoute: "phase.plan",
+          source: "superpowers",
+        },
+      }),
+    ).toEqual({
+      supported: true,
+    })
+  })
+
+  it("blocks direct workflow projection on copilot", () => {
+    expect(
+      capabilityLibrary.getHostProjectionDecision!({
+        host: "copilot",
+        workflowKind: "direct",
+        sourceEntry: {
+          canonicalRoute: "intent.plan",
+          source: "direct",
+        },
+      }),
+    ).toEqual({
+      supported: false,
+      reasonCode: "unsupported_host_direct_projection",
+    })
+  })
+
+  it("supports control-plane commands on copilot in superpowers mode", () => {
+    expect(
+      capabilityLibrary.getControlPlaneCommandDecision!({
+        host: "copilot",
+        command: "status",
+        workflowKind: "superpowers",
+      }),
+    ).toEqual({
+      supported: true,
+    })
+
+    expect(
+      capabilityLibrary.getControlPlaneCommandDecision!({
+        host: "copilot",
+        command: "sync",
+        workflowKind: "superpowers",
+      }),
+    ).toEqual({
+      supported: true,
+    })
+
+    expect(
+      capabilityLibrary.getControlPlaneCommandDecision!({
+        host: "copilot",
+        command: "explain",
+        workflowKind: "superpowers",
+      }),
+    ).toEqual({
+      supported: true,
+    })
+  })
+
+  it("blocks control-plane commands on copilot in direct mode", () => {
+    expect(
+      capabilityLibrary.getControlPlaneCommandDecision!({
+        host: "copilot",
+        command: "status",
+        workflowKind: "direct",
+      }),
+    ).toEqual({
+      supported: false,
+      reasonCode: "unsupported_workflow_mode",
     })
   })
 })
