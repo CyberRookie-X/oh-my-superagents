@@ -21,7 +21,7 @@ export type CapabilityDecision =
       supported: false
       reasonCode: CapabilityReasonCode
     }
-export type CapabilityHost = SupportedSuperpowersHost | "qwen" | "claude"
+export type CapabilityHost = SupportedSuperpowersHost | "qwen" | "claude" | "copilot-cli"
 export type ControlPlaneCapabilityCommand = ControlPlaneCommandKey | "explain"
 
 type WorkflowKind = WorkflowConfig["kind"]
@@ -91,6 +91,31 @@ export function getControlPlaneCommandDecision(input: {
 
   if (input.workflowKind === "direct" && input.command === "explain" && input.host !== "opencode" && input.host !== "codex") {
     return unsupportedDecision("unsupported_workflow_mode")
+  }
+
+  // Copilot CLI Stage 1: only read-only commands supported
+  if (input.host === "copilot-cli") {
+    if (input.command === "explain") {
+      return unsupportedDecision("unsupported_control_plane_command")
+    }
+    if (input.command === "use" || input.command === "disable") {
+      return unsupportedDecision("unsupported_workflow_mode")
+    }
+  }
+
+  return supportedDecision()
+}
+
+export function getCopilotProjectionDecision(input: {
+  workflowKind: WorkflowKind
+  sourceEntry: WorkflowSourceEntry
+}): CapabilityDecision {
+  if (input.workflowKind === "direct") {
+    return unsupportedDecision("unsupported_host_direct_projection")
+  }
+
+  if (input.workflowKind === "superpowers" && input.sourceEntry.source === "gstack") {
+    return unsupportedDecision("unsupported_host_source_projection")
   }
 
   return supportedDecision()
