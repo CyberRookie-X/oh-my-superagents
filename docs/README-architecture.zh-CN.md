@@ -170,6 +170,21 @@ bash scripts/run-codex-debian-canary.sh
 - Qwen 目前实现为薄适配层
 - 当前支持范围刻意比 OpenCode/Codex 更窄
 
+### Copilot CLI
+
+主要特征：
+
+- 项目级 `.copilot-plugin/agents/*.md` 与 `.copilot-plugin/skills/*/SKILL.md` wrappers
+- `plugin.json` 清单文件支持通过 `copilot plugin install` 一键安装
+- `hooks.json` 生命周期自动化（sessionStart 同步、可选 postToolUse 状态检查）
+- Stage 3 适配层，刻意做到最薄，具备 agent + skill + plugin + hooks 投影
+
+架构后果：
+
+- Copilot CLI 保持薄宿主适配层
+- 与其他宿主共享相同的规范路由和 source-entry 模型
+- Plugin 打包机制支持通过 `copilot plugin install` 分发，无需 OMS 特定配置
+
 ## 用源码规模表示厚度
 
 下面的统计是实现文件的大致源码行数。
@@ -181,6 +196,7 @@ bash scripts/run-codex-debian-canary.sh
 | OpenCode 适配层 | `src/opencode.ts` | 242 | 薄 |
 | Codex 适配 + bootstrap | `src/codex.ts`、`src/codex-bootstrap.ts` | 565 | 中等 |
 | Qwen 适配层 | `src/qwen.ts` | 220 | 薄 |
+| Copilot CLI 适配层 | `src/copilot.ts` | ~300 | 薄 |
 | 兼容性监控 | `src/superpowers-compatibility.ts`、`src/superpowers-detectors.ts` | 1051 | 中等 |
 | 共享工件协调层 | `src/materialize.ts` | 345 | 薄到中等 |
 

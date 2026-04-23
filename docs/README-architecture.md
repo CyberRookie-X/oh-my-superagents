@@ -249,6 +249,21 @@ Architectural consequence:
 - Claude consumes the same canonical route and source-entry model as the other hosts
 - current support centers on the `superpowers` workflow slice plus control-plane artifact management
 
+### Copilot CLI
+
+Main characteristics:
+
+- project-scoped `.copilot-plugin/agents/*.md` and `.copilot-plugin/skills/*/SKILL.md` wrappers
+- `plugin.json` manifest for one-command installation via `copilot plugin install`
+- `hooks.json` for lifecycle automation (sessionStart sync, optional postToolUse status)
+- Stage 3 adapter, intentionally the thinnest host with agent + skill + plugin + hooks projection
+
+Architectural consequence:
+
+- Copilot CLI stays a thin host adapter
+- Copilot CLI consumes the same canonical route and source-entry model as the other hosts
+- Plugin packaging enables distribution via `copilot plugin install` without OMS-specific setup
+
 ## Thickness By Source Size
 
 These counts are approximate source lines of code from the implementation files only.
@@ -263,6 +278,7 @@ They exclude tests and documentation.
 | Codex adapter + bootstrap | `src/codex.ts`, `src/codex-bootstrap.ts` | 760 | Medium |
 | Qwen adapter | `src/qwen.ts` | 424 | Thin |
 | Claude adapter | `src/claude.ts` | 138 | Thin |
+| Copilot CLI adapter | `src/copilot.ts` | ~300 | Thin |
 | Compatibility monitor | `src/superpowers-compatibility.ts`, `src/superpowers-detectors.ts` | 1093 | Medium |
 | Shared artifact reconciliation | `src/materialize.ts` | 712 | Thin-to-medium |
 
