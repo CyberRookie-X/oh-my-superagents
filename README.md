@@ -4,20 +4,20 @@
 
 Architecture: [English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, Qwen, and Claude Code, with first-class `superpowers` support and an experimental host-native direct mode on OpenCode, Codex, and Qwen.
+Host-native routing and OMS control-plane support for AI work on OpenCode, Codex, Qwen, Claude Code, and Copilot CLI, with first-class `superpowers` support and an experimental host-native direct mode on OpenCode, Codex, Qwen, and Copilot CLI.
 
 ## Support Matrix
 
-| Capability | OpenCode | Codex | Qwen | Claude Code |
-| --- | --- | --- | --- | --- |
-| `superpowers` workflow routing | Full | Full | Partial | Experimental |
-| Direct mode | Experimental | Experimental | Experimental | None yet |
-| OMS control plane | Full | Full | Full | Experimental |
-| Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | None |
-| Compatibility monitor | Full | Full | None yet | None yet |
-| Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | Skills |
-| Temporary disable helper | Full | Full | None yet | None yet |
-| `codexFast` | Full | Full | None yet | None yet |
+| Capability | OpenCode | Codex | Qwen | Claude Code | Copilot CLI |
+| --- | --- | --- | --- | --- | --- |
+| `superpowers` workflow routing | Full | Full | Partial | Experimental | Experimental |
+| Direct mode | Experimental | Experimental | Experimental | None yet | Experimental |
+| OMS control plane | Full | Full | Full | Experimental | Experimental |
+| Host bootstrap | Native plugin entry | Local bootstrap/plugin bundle | None | None | None |
+| Compatibility monitor | Full | Full | None yet | None yet | None yet |
+| Generated host artifacts | Agents + commands | Agents + plugin/skills | Agents + commands | Skills | Scripts |
+| Temporary disable helper | Full | Full | None yet | None yet | None yet |
+| `codexFast` | Full | Full | None yet | None yet | None yet |
 
 Support level notes:
 
@@ -417,6 +417,31 @@ Qwen command files are generated from the same control-plane prefix and alias se
 For direct mode on Qwen, OMS keeps the same project-local host shape but swaps in `ai-<intent>` commands and `rt-<intent>` agents.
 That direct-mode path does not require upstream skill discovery, supports `status`, `doctor`, and `sync`, and still leaves `explain` unsupported on Qwen.
 For gstack-backed `superpowers` routes, Qwen is not supported in this slice; use OpenCode or Codex for those projections.
+
+For Claude Code, the current slice's `sync` generates project-level `.claude/skills/*/SKILL.md` wrappers for the `superpowers` surface. Direct workflow projection is still intentionally unsupported on Claude.
+
+`explain --host claude --phase <phase>` is supported for the current Claude `superpowers` slice.
+
+## Copilot CLI Support
+
+Copilot CLI (gh copilot) support is experimental.
+
+- no heavy bootstrap flow
+- generates wrapper scripts in `.github/copilot` directory
+- upstream skills are discovered from existing `.github/copilot` or project-level skills
+
+Copilot CLI wrapper script names are fixed:
+- `oms-brainstorm`
+- `oms-plan`
+- `oms-execute`
+- `oms-review`
+- `oms-verify`
+- `oms-visual`
+- `oms-web-test`
+
+For direct mode on Copilot CLI, OMS keeps the same project-local host shape but swaps in `ai-<intent>` scripts.
+That direct-mode path does not require upstream skill discovery, supports `status`, `doctor`, and `sync`, and still leaves `explain` unsupported on Copilot CLI.
+For gstack-backed `superpowers` routes, Copilot CLI is not supported in this slice; use OpenCode or Codex for those projections.
 
 ## Bootstrap
 

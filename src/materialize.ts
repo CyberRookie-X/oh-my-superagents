@@ -254,10 +254,10 @@ function parseRouteOwnership(content: string) {
 
   return {
     stage: match[1] as "1" | "2",
-    host: match[2] as "opencode" | "codex" | "qwen" | "claude",
+    host: match[2] as "opencode" | "codex" | "qwen" | "claude" | "copilot",
     source: match[3],
     route: match[4],
-    projection: match[5] as "agent" | "command" | "skill",
+    projection: match[5] as "agent" | "command" | "skill" | "script",
     renderedName: match[6],
   }
 }

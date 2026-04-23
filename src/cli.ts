@@ -54,6 +54,7 @@ import type { ContextIndex } from "./context-index.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
 import { buildClaudeArtifacts } from "./claude.js"
 import { buildCodexArtifacts, explainAllCodex, explainCodexPhase } from "./codex.js"
+import { buildCopilotArtifacts } from "./copilot.js"
 import { CONTEXT_LIFECYCLE_STAGES } from "./context-lifecycle.js"
 import { detectClaudeGstackAvailability } from "./gstack-detectors.js"
 import { isOmsOwnedArtifactFile, isOmsOwnedSkillFile, isOpenCodeRuntimeMetadataContent, materializeArtifacts } from "./materialize.js"
@@ -83,7 +84,7 @@ export type CliResult = {
   stderr: string
 }
 
-type CliHost = SupportedSuperpowersHost | "qwen" | "claude"
+type CliHost = SupportedSuperpowersHost | "qwen" | "claude" | "copilot"
 type ExplainCliHost = Exclude<CliHost, "qwen">
 
 const CODEX_MARKETPLACE_PATH = ".agents/plugins/marketplace.json"
@@ -1513,7 +1514,13 @@ function explainAllForCliHost(
   host: ExplainCliHost,
   deps: CliDeps,
 ) {
-  return host === "claude" ? explainAllClaude(config) : deps.explainAllForHost(config, host)
+  if (host === "claude") {
+    return explainAllClaude(config)
+  }
+  if (host === "copilot") {
+    return []
+  }
+  return deps.explainAllForHost(config, host)
 }
 
 function explainPhaseForCliHost(
@@ -1522,7 +1529,13 @@ function explainPhaseForCliHost(
   phase: BuiltInPhase,
   deps: CliDeps,
 ) {
-  return host === "claude" ? explainClaudePhase(config, phase) : deps.explainPhaseForHost(config, host, phase)
+  if (host === "claude") {
+    return explainClaudePhase(config, phase)
+  }
+  if (host === "copilot") {
+    return {}
+  }
+  return deps.explainPhaseForHost(config, host, phase)
 }
 
 function assertQwenProjectionSupport(config: Awaited<ReturnType<typeof loadRouterConfig>>["config"]) {
@@ -1653,6 +1666,10 @@ async function getArtifactsForHost(
     return buildClaudeArtifacts(config).skills
   }
 
+  if (host === "copilot") {
+    return buildCopilotArtifacts(config).scripts
+  }
+
   assertQwenProjectionSupport(config)
 
   const built = await deps.buildQwenArtifacts(config, {
@@ -1732,6 +1749,9 @@ const OWNED_ARTIFACT_RULES: Record<CliHost, Array<{ directory: string; extension
     { directory: ".qwen/commands", extension: ".md" },
   ],
   claude: [],
+  copilot: [
+    { directory: ".github/copilot", extension: "" },
+  ],
 }
 
 function isMissingFsError(error: unknown) {
@@ -2544,8 +2564,8 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
       return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, or --host claude is supported for explain in v1" }
     }
 
-    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude") {
-      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, or --host claude is supported in v1" }
+    if (command !== "explain" && host !== "opencode" && host !== "codex" && host !== "qwen" && host !== "claude" && host !== "copilot") {
+      return { exitCode: 1, stdout: "", stderr: "Only --host opencode, --host codex, --host qwen, --host claude, or --host copilot is supported in v1" }
     }
 
     const cliHost = host as CliHost

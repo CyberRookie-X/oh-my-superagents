@@ -4,20 +4,20 @@
 
 架构说明：[English](./docs/README-architecture.md) | [简体中文](./docs/README-architecture.zh-CN.md)
 
-`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Claude Code 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen 的实验性、宿主原生 direct mode。
+`oh-my-superagents` 正在演进为一个更通用的路由与 OMS 控制平面产品，当前在 OpenCode、Codex、Qwen、Claude Code、Copilot CLI 上提供一等公民级别的 `superpowers` 支持，并包含一个覆盖 OpenCode、Codex、Qwen、Copilot CLI 的实验性、宿主原生 direct mode。
 
 ## 支持矩阵
 
-| 能力 | OpenCode | Codex | Qwen | Claude Code |
-| --- | --- | --- | --- | --- |
-| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 |
-| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 |
-| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 |
-| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 |
-| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills |
-| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
-| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 |
+| 能力 | OpenCode | Codex | Qwen | Claude Code | Copilot CLI |
+| --- | --- | --- | --- | --- | --- |
+| `superpowers` 工作流路由 | 完整支持 | 完整支持 | 部分支持 | 实验性支持 | 实验性支持 |
+| Direct mode | 实验性支持 | 实验性支持 | 实验性支持 | 暂未实现 | 实验性支持 |
+| OMS 控制平面 | 完整支持 | 完整支持 | 完整支持 | 实验性支持 | 实验性支持 |
+| 宿主引导/Bootstrap | 原生插件入口 | 本地 bootstrap / plugin bundle | 暂无 | 暂无 | 暂无 |
+| 上游兼容性监控 | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
+| 生成宿主工件 | Agents + Commands | Agents + Plugin/Skills | Agents + Commands | Skills | Scripts |
+| 临时停用 helper | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
+| `codexFast` | 完整支持 | 完整支持 | 暂未实现 | 暂未实现 | 暂未实现 |
 
 支持等级说明：
 
@@ -432,6 +432,27 @@ Stage 2 的 Qwen 支持在 `superpowers` workflow mode 下刻意保持很薄：
 对于 Claude Code，当前这个切片里的 `sync` 会为 `superpowers` surface 生成项目级 `.claude/skills/*/SKILL.md` wrappers。Claude 上的 direct workflow 投影当前仍然故意不支持。
 
 `explain --host claude --phase <phase>` 当前已支持，用于当前 Claude `superpowers` slice。
+
+## Copilot CLI 支持
+
+Copilot CLI (gh copilot) 支持是实验性的。
+
+- 不做重型 bootstrap
+- 只生成 `.github/copilot` 目录下的 wrapper 脚本
+- 上游技能通过已有的 `.github/copilot` 或项目级 skills 发现
+
+固定的 Copilot CLI wrapper 脚本名称：
+- `oms-brainstorm`
+- `oms-plan`
+- `oms-execute`
+- `oms-review`
+- `oms-verify`
+- `oms-visual`
+- `oms-web-test`
+
+如果是 Copilot CLI direct mode，OMS 会继续沿用项目内宿主原生形态，但改为生成 `ai-<intent>` 脚本。
+这条 direct-mode 路径不要求 upstream skill discovery，当前支持 `status`、`doctor`、`sync`，但 `explain` 在 Copilot CLI 上仍未支持。
+如果是 gstack-backed 的 `superpowers` 路由，当前这个切片里 Copilot CLI 不支持投影；请改用 OpenCode 或 Codex。
 
 ## Bootstrap
 
