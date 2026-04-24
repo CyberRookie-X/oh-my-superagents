@@ -9,6 +9,14 @@ import {
   RUNTIME_AGENT_METADATA_FILE,
 } from "./opencode.js"
 
+export function assertSafeArtifactPath(cwd: string, relativePath: string): void {
+  const resolved = path.resolve(cwd, relativePath);
+  const resolvedCwd = path.resolve(cwd);
+  if (!resolved.startsWith(resolvedCwd + path.sep) && resolved !== resolvedCwd) {
+    throw new Error(`Artifact path escapes working directory: ${relativePath}`);
+  }
+}
+
 type StatsLike = {
   isFile: () => boolean
 }
@@ -552,6 +560,10 @@ export async function materializeArtifacts(
   )
 
   try {
+    for (const artifact of input.artifacts) {
+      assertSafeArtifactPath(input.cwd, path.join(artifact.directory, artifact.fileName))
+    }
+
     for (const artifact of input.artifacts) {
       validateFileName(artifact.fileName)
       validateDirectory(artifact.directory)

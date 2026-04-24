@@ -27,6 +27,7 @@ import {
   type ResolvedPolicyFamilies,
   type RuntimeSelectorProvenance,
 } from "./policy-resolution.js"
+import { assertSafeArtifactPath } from "./materialize.js"
 import { buildRuntimeContextSnapshot, matchesPolicySelector } from "./policy-selectors.js"
 import {
   deriveLifecycleStage,
@@ -1324,7 +1325,7 @@ async function buildCompressionEngineBundle(input: {
       return {
         artifact: {
           ...artifact,
-          content: await readFile(path.join(input.cwd, artifact.path)),
+          content: (assertSafeArtifactPath(input.cwd, artifact.path), await readFile(path.join(input.cwd, artifact.path))),
         },
       }
     } catch (error) {

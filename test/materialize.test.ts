@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isOmsOwnedSkillFile, materializeArtifacts } from "../src/materialize.js"
+import { assertSafeArtifactPath, isOmsOwnedSkillFile, materializeArtifacts } from "../src/materialize.js"
 import {
   RUNTIME_AGENT_METADATA_DIRECTORY,
   RUNTIME_AGENT_METADATA_FILE,
@@ -1088,5 +1088,23 @@ describe("materializeArtifacts", () => {
       "/workspace/project/plugins/oh-my-superagents-codex/skills/oms-status/SKILL.md",
     ])
     expect(removedPaths).toEqual(result.removed)
+  })
+})
+
+describe("assertSafeArtifactPath", () => {
+  it("accepts safe relative path", () => {
+    expect(() => assertSafeArtifactPath("/project", ".opencode/agents/file.md")).not.toThrow()
+  })
+
+  it("rejects path with .. traversal", () => {
+    expect(() => assertSafeArtifactPath("/project", "../etc/passwd")).toThrow()
+  })
+
+  it("rejects absolute path", () => {
+    expect(() => assertSafeArtifactPath("/project", "/etc/passwd")).toThrow()
+  })
+
+  it("rejects path escaping via nested ..", () => {
+    expect(() => assertSafeArtifactPath("/project", ".opencode/../../etc/passwd")).toThrow()
   })
 })
