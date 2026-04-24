@@ -330,8 +330,8 @@ const LegacyRouterConfigSchema = z
       commandPrefix: SafeNameSchema.optional(),
       commands: CommandsOverrideSchema.optional(),
       superpowersCompatibility: SuperpowersCompatibilitySchema.optional(),
-      policyRulesMerge: z.enum(["concat", "replace"]).default("concat"),
-      workloadMappingsMerge: z.enum(["concat", "replace"]).default("concat"),
+      policyRulesMerge: z.enum(["concat", "replace"]).optional(),
+      workloadMappingsMerge: z.enum(["concat", "replace"]).optional(),
   })
   .strict()
 
@@ -1167,15 +1167,44 @@ function validateSourceRouting(config: ControlPlaneConfig) {
 
 const MAX_EXTENDS_DEPTH = 5
 
+function validatePresetExtendsDepth(
+  presets: Record<string, ControlPlanePreset>,
+  presetKey: string,
+  depth: number = 0,
+  visiting: Set<string> = new Set(),
+): void {
+  if (depth > MAX_EXTENDS_DEPTH) {
+    throw new Error(`Preset extends chain exceeds maximum depth of ${MAX_EXTENDS_DEPTH}`)
+  }
+
+  if (visiting.has(presetKey)) {
+    throw new Error(`Circular preset extends detected: ${presetKey}`)
+  }
+
+  const preset = presets[presetKey]
+  if (!preset) {
+    throw new Error(`Unknown preset: ${presetKey}`)
+  }
+
+  if (preset.extends) {
+    const parentPreset = presets[preset.extends]
+    if (!parentPreset) {
+      throw new Error(`Preset ${presetKey} extends unknown preset: ${preset.extends}`)
+    }
+    visiting.add(presetKey)
+    validatePresetExtendsDepth(presets, preset.extends, depth + 1, visiting)
+  }
+}
+
 export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConfig {
+  for (const presetKey of Object.keys(config.presets)) {
+    validatePresetExtendsDepth(config.presets, presetKey)
+  }
+
   const visiting = new Set<string>()
   const resolved = new Map<string, ControlPlanePreset>()
 
-  const resolvePreset = (presetKey: string, depth: number = 0): ControlPlanePreset => {
-    if (depth > MAX_EXTENDS_DEPTH) {
-      throw new Error(`Preset extends chain exceeds maximum depth of ${MAX_EXTENDS_DEPTH}`)
-    }
-
+  const resolvePreset = (presetKey: string): ControlPlanePreset => {
     const cached = resolved.get(presetKey)
     if (cached) {
       return cached
@@ -1201,7 +1230,7 @@ export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConf
         throw new Error(`Preset ${presetKey} extends unknown preset: ${preset.extends}`)
       }
 
-      const resolvedParent = resolvePreset(preset.extends, depth + 1)
+      const resolvedParent = resolvePreset(preset.extends)
       nextPreset = {
         ...preset,
         defaultLane: preset.defaultLane ?? resolvedParent.defaultLane,

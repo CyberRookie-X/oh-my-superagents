@@ -3211,11 +3211,11 @@ describe("loadRouterConfig", () => {
 
   it("enforces a max extends depth of 5", async () => {
     const presets: Record<string, string> = {}
-    for (let i = 1; i <= 6; i++) {
+    for (let i = 0; i <= 6; i++) {
       presets[`p${i}`] = JSON.stringify({
         label: `P${i}`,
         short: `p${i}`,
-        ...(i > 1 ? { extends: `p${i - 1}` } : {}),
+        ...(i > 0 ? { extends: `p${i - 1}` } : {}),
         profiles: { build: { model: "openai/gpt-5" } },
         routes: {},
         defaultRoute: "build",
