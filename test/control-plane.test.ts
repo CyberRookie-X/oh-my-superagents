@@ -13,7 +13,7 @@ import {
   summarizeEffectiveSourceEntries,
   summarizeSubagentExecutionDiagnostics,
   summarizeRoutingValidation,
-} from "../src/control-plane.js"
+} from "../src/control-plane/index.js"
 import { enhanceCompressionBundleWithSummary } from "../src/context-compression.js"
 import { createDefaultControlPlaneConfig } from "../src/config.js"
 

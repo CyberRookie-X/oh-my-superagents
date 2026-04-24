@@ -1,7 +1,7 @@
 import path from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { runCli } from "../src/cli.js"
-import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-plane.js"
+import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-plane/index.js"
 import { explainCodexPhase } from "../src/codex.js"
 import { buildArtifacts as buildOpenCodeArtifacts, MARKER_TEXT } from "../src/opencode.js"
 import { buildQwenArtifacts, discoverQwenUpstreamSkills } from "../src/qwen.js"

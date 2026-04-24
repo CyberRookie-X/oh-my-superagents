@@ -49,7 +49,7 @@ import {
   type LaneExplainability,
   type ResolveControlPlaneInput,
   type ResolvedControlPlane,
-} from "./control-plane.js"
+} from "./control-plane/index.js"
 import { writeAuthorityWithRecoverySnapshotAtomically } from "./config-write.js"
 import type { ContextIndex } from "./context-index.js"
 import { buildCodexBootstrapFiles, readOwnPackageVersion, runCodexBootstrap } from "./codex-bootstrap.js"
