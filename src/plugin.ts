@@ -10,7 +10,7 @@ import {
   type SuperpowersCompatibilityMode,
   type SuperpowersCompatibilityResult,
 } from "./superpowers-compatibility.js"
-import { detectOpenCodeSuperpowers } from "./superpowers-detectors.js"
+import { detectOpenCodeSuperpowers, detectCodexSuperpowers } from "./superpowers-detectors.js"
 
 const SERVICE_NAME = "oh-my-superagents"
 const CONFIG_FILE_NAME = "oh-my-superagents.config.jsonc"
@@ -135,7 +135,10 @@ async function reportCompatibilityDiagnostics(input: {
   overrides?: Record<string, { minimumSupportedVersion?: string; testedRanges?: string[]; knownBadRanges?: string[] }>
   log: (level: LogLevel, message: string) => Promise<void>
 }) {
-  const compatibility = await resolveCompatibilityForStartup(input)
+  const currentHost: "opencode" | "codex" =
+    process.env.OMS_HOST === "codex" ? "codex" : "opencode"
+
+  const compatibility = await resolveCompatibilityForStartup(currentHost, input)
 
   if (compatibility.status === "incompatible") {
     const detectedVersion = compatibility.detectedVersion ?? compatibility.detectedRef ?? "unknown"
@@ -174,17 +177,22 @@ function formatStartupGuidance(input: {
   ].join(" ")
 }
 
-async function resolveCompatibilityForStartup(input: {
-  cwd: string
-  policyMode: SuperpowersCompatibilityMode
-  allowUntested: "warn" | "block"
-  overrides?: Record<string, { minimumSupportedVersion?: string; testedRanges?: string[]; knownBadRanges?: string[] }>
-  log: (level: LogLevel, message: string) => Promise<void>
-}): Promise<SuperpowersCompatibilityResult> {
+async function resolveCompatibilityForStartup(
+  host: "opencode" | "codex",
+  input: {
+    cwd: string
+    policyMode: SuperpowersCompatibilityMode
+    allowUntested: "warn" | "block"
+    overrides?: Record<string, { minimumSupportedVersion?: string; testedRanges?: string[]; knownBadRanges?: string[] }>
+    log: (level: LogLevel, message: string) => Promise<void>
+  },
+): Promise<SuperpowersCompatibilityResult> {
+  const detector = host === "opencode" ? detectOpenCodeSuperpowers : detectCodexSuperpowers
+  const detectorInput = host === "opencode" ? { cwd: input.cwd } : {}
   let detection
 
   try {
-    detection = await detectOpenCodeSuperpowers({ cwd: input.cwd })
+    detection = await detector(detectorInput)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await input.log(
@@ -192,7 +200,7 @@ async function resolveCompatibilityForStartup(input: {
       `Superpowers compatibility detector failed. Falling back to not_detected. ${message}`,
     )
 
-    return createNotDetectedCompatibilityResult(input.policyMode)
+    return createNotDetectedCompatibilityResult(host, input.policyMode)
   }
 
   try {
@@ -205,7 +213,7 @@ async function resolveCompatibilityForStartup(input: {
       `Superpowers compatibility evaluator failed. Falling back to not_detected. ${message}`,
     )
 
-    return createNotDetectedCompatibilityResult(input.policyMode)
+    return createNotDetectedCompatibilityResult(host, input.policyMode)
   }
 }
 
@@ -253,11 +261,12 @@ function isRuntimeAgentMetadata(value: unknown): value is RuntimeAgentMetadata {
 }
 
 function createNotDetectedCompatibilityResult(
+  host: "opencode" | "codex",
   policyMode: SuperpowersCompatibilityMode,
 ): SuperpowersCompatibilityResult {
   return {
-    host: "opencode",
-    source: "opencode-install-detection",
+    host,
+    source: host === "opencode" ? "opencode-install-detection" : "codex-repo",
     detectedVersion: null,
     detectedRef: null,
     status: "not_detected",
