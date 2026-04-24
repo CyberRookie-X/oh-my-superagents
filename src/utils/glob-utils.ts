@@ -5,8 +5,11 @@ export function escapeGlobPattern(pattern: string): string {
     switch (ch) {
       case "*":
         if (pattern[i + 1] === "*") {
-          if (pattern[i + 2] === "/" || pattern[i + 2] === undefined) {
+          if (pattern[i + 2] === "/") {
             result += "(?:.+/)?";
+            i += 2;
+          } else if (pattern[i + 2] === undefined) {
+            result += ".*";
             i += 2;
           } else {
             result += ".*";

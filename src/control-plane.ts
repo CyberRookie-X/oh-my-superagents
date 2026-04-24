@@ -21,6 +21,7 @@ import {
   resolvePresetReuse,
 } from "./config.js"
 import { clonePolicyRules } from "./policy-families.js"
+import { escapeGlobPattern, matchesGlobPattern, normalizeRelativePath } from "./utils/glob-utils.js"
 import {
   resolvePolicyFamilies,
   type ResolvedPolicyFamilies,
@@ -1496,56 +1497,6 @@ function buildPolicyRuntimeSnapshot(input: {
   runtimeModalityRequirements?: string[]
   runtimeAgentRole?: "primary" | "subagent"
 }) {
-  function normalizeRelativePath(relativePath: string) {
-    return relativePath.replaceAll("\\", "/")
-  }
-
-  function escapeGlobPattern(pattern: string) {
-    let escaped = ""
-
-    for (let index = 0; index < pattern.length; index += 1) {
-      const current = pattern[index]
-      const next = pattern[index + 1]
-      const nextNext = pattern[index + 2]
-
-      if (current === "*" && next === "*" && nextNext === "/") {
-        escaped += "(?:.*/)?"
-        index += 2
-        continue
-      }
-
-      if (current === "*" && next === "*") {
-        escaped += ".*"
-        index += 1
-        continue
-      }
-
-      if (current === "*") {
-        escaped += "[^/]*"
-        continue
-      }
-
-      if (current === "?") {
-        escaped += "."
-        continue
-      }
-
-      if (/[|\\{}()[\]^$+?.]/.test(current)) {
-        escaped += `\\${current}`
-        continue
-      }
-
-      escaped += current
-    }
-
-    return escaped
-  }
-
-  function matchesGlobPattern(value: string, pattern: string) {
-    const regex = new RegExp(`^${escapeGlobPattern(normalizeRelativePath(pattern))}$`)
-    return regex.test(value)
-  }
-
   const defaultLifecycleStage = input.config.workflow.kind === "superpowers" ? "plan" : "execute_task"
   const lifecycleHint = input.runtimeLifecycleStage ?? defaultLifecycleStage
   const canonicalRoute = resolveContextCompressionCanonicalRoute({
@@ -1568,7 +1519,7 @@ function buildPolicyRuntimeSnapshot(input: {
   const authorityWorkloadTags = relativePath.length > 0
     ? [...new Set(
         input.authorityWorkloadMappings.flatMap((mapping) => (
-          mapping.path.some((pattern) => matchesGlobPattern(relativePath, pattern))
+          mapping.path.some((pattern) => matchesGlobPattern(pattern, relativePath))
             ? mapping.workloadTags
             : []
         ))
