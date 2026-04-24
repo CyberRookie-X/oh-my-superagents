@@ -30,6 +30,7 @@ import {
   getControlPlaneCommandDecision,
   type ControlPlaneCapabilityCommand,
 } from "./capabilities.js"
+import { MissingConfigError } from "./errors.js"
 import {
   buildControlPlaneExplainTrace,
   buildControlPlaneRouteExplainTrace,
@@ -1840,6 +1841,9 @@ async function removeCodexMarketplaceEntryFile(cwd: string, deps: CliDeps) {
 
   try {
     const nextContent = removeCodexMarketplaceEntry(await deps.readArtifactFile(filePath))
+    if (nextContent === undefined) {
+      return undefined
+    }
     await deps.mkdir(path.dirname(filePath), { recursive: true })
     await deps.writeFile(filePath, nextContent)
     return filePath
@@ -2929,7 +2933,7 @@ export async function runCli(argv: string[], deps: CliDeps = defaultDeps): Promi
         try {
           resolved = await deps.resolveControlPlane({ command: "sync", cwd, explicitPath, runtimeLane })
         } catch (error) {
-        if (cliHost !== "opencode" || !(error instanceof Error) || error.message !== "Command sync requires a real config source") {
+        if (cliHost !== "opencode" || !(error instanceof MissingConfigError) || error.command !== "sync") {
           throw error
         }
 

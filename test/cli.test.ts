@@ -5,6 +5,7 @@ import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-pl
 import { explainCodexPhase } from "../src/codex.js"
 import { buildArtifacts as buildOpenCodeArtifacts, MARKER_TEXT } from "../src/opencode.js"
 import { buildQwenArtifacts, discoverQwenUpstreamSkills } from "../src/qwen.js"
+import { MissingConfigError } from "../src/errors.js"
 import { explainPhase, resolvePhase } from "../src/router.js"
 
 const baseConfig = {
@@ -2849,7 +2850,7 @@ describe("runCli", () => {
     const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
       resolveControlPlane: async ({ command }: { command: string }) => {
         if (command === "sync") {
-          throw new Error("Command sync requires a real config source")
+          throw new MissingConfigError("sync")
         }
 
         return {
@@ -2958,7 +2959,7 @@ describe("runCli", () => {
     const result = await runCli(["sync", "--host", "opencode"], createCliDeps({
       resolveControlPlane: async ({ command }: { command: string }) => {
         if (command === "sync") {
-          throw new Error("Command sync requires a real config source")
+          throw new MissingConfigError("sync")
         }
 
         return {

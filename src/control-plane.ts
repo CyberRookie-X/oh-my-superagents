@@ -20,6 +20,7 @@ import {
   readControlPlaneSourceDocument,
   resolvePresetReuse,
 } from "./config.js"
+import { MissingConfigError } from "./errors.js"
 import { clonePolicyRules } from "./policy-families.js"
 import { escapeGlobPattern, matchesGlobPattern, normalizeRelativePath } from "./utils/glob-utils.js"
 import {
@@ -1661,7 +1662,7 @@ export async function resolveControlPlane(input: ResolveControlPlaneInput): Prom
     }
 
     if (!READ_ONLY_COMMANDS.has(input.command)) {
-      throw new Error(`Command ${input.command} requires a real config source`)
+      throw new MissingConfigError(input.command)
     }
 
     const config = createDefaultControlPlaneConfig()
