@@ -119,7 +119,7 @@ describe("evaluateSuperpowersCompatibility", () => {
     )
 
     expect(result.detectedVersion).toBe("5.1.0-beta.1")
-    expect(result.status).toBe("untested")
+    expect(result.status).toBe("compatible")
   })
 
   it("treats sha-like commit refs as not_detected", () => {
@@ -481,6 +481,31 @@ describe("evaluateSuperpowersCompatibility", () => {
     expect(error).toBeInstanceOf(Error)
     expect(error).not.toBeInstanceOf(TypeError)
     expect((error as Error).message).toMatch(/knownbadranges.*array of strings/i)
+  })
+
+  describe("prerelease version matching", () => {
+    const matrix = {
+      opencode: { minimumSupportedVersion: "5.0.0", testedRanges: [">=5.0.0 <6.0.0"], knownBadRanges: [] },
+      codex: { minimumSupportedVersion: "5.0.0", testedRanges: [">=5.0.0 <6.0.0"], knownBadRanges: [] },
+    } as const
+
+    it("accepts prerelease of compatible core version", () => {
+      const detection = { host: "opencode" as const, source: "test", detectedVersion: "5.1.0-beta.1", detectedRef: "v5.1.0-beta.1" }
+      const result = evaluateSuperpowersCompatibility(detection, "strict", matrix)
+      expect(result.status).toBe("compatible")
+    })
+
+    it("accepts prerelease at minimum version", () => {
+      const detection = { host: "opencode" as const, source: "test", detectedVersion: "5.0.0-alpha.1", detectedRef: "v5.0.0-alpha.1" }
+      const result = evaluateSuperpowersCompatibility(detection, "strict", matrix)
+      expect(result.status).toBe("compatible")
+    })
+
+    it("rejects prerelease below minimum version", () => {
+      const detection = { host: "opencode" as const, source: "test", detectedVersion: "4.9.0-beta.1", detectedRef: "v4.9.0-beta.1" }
+      const result = evaluateSuperpowersCompatibility(detection, "strict", matrix)
+      expect(result.status).toBe("incompatible")
+    })
   })
 
   it("blocks only incompatible results in strict mode", () => {

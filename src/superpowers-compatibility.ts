@@ -141,7 +141,11 @@ export function evaluateSuperpowersCompatibility(
     throw new Error("Detected version normalization produced an invalid semantic version.")
   }
 
-  if (compareSemver(detectedVersion, matrixEntry.minimumSupportedVersion) < 0) {
+  const minCheckVersion = detectedVersion.prerelease.length > 0
+    ? { ...detectedVersion, prerelease: [] as string[] }
+    : detectedVersion
+
+  if (compareSemver(minCheckVersion, matrixEntry.minimumSupportedVersion) < 0) {
     return finalizeCompatibilityResult(normalizedDetection, policyMode, {
       status: "incompatible",
       reason: `Version is below minimum supported version ${matrixEntry.minimumSupportedVersion.normalized}.`,
@@ -485,18 +489,21 @@ function parseComparator(comparator: string, errorMessage: string): ParsedCompar
 }
 
 function matchesRange(version: ParsedSemver, range: ParsedRange) {
-  if (version.prerelease.length > 0 && !range.includesPrereleaseBoundary) {
-    return false
-  }
+  if (version.prerelease.length > 0) {
+    if (range.includesPrereleaseBoundary) {
+      if (
+        !range.comparators.some(
+          (comparator) =>
+            comparator.boundary.prerelease.length > 0 && hasSameBaseVersion(version, comparator.boundary),
+        )
+      ) {
+        return false
+      }
+      return range.comparators.every((comparator) => matchesComparator(version, comparator))
+    }
 
-  if (
-    version.prerelease.length > 0 &&
-    !range.comparators.some(
-      (comparator) =>
-        comparator.boundary.prerelease.length > 0 && hasSameBaseVersion(version, comparator.boundary),
-    )
-  ) {
-    return false
+    const coreVersion = { ...version, prerelease: [] as string[] }
+    return range.comparators.every((comparator) => matchesComparator(coreVersion, comparator))
   }
 
   return range.comparators.every((comparator) => matchesComparator(version, comparator))
