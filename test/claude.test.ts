@@ -27,6 +27,8 @@ describe("renderClaudeSkillFile", () => {
     )
     expect(output).toContain("- profile: `planner`")
     expect(output).toContain("- model: `anthropic/claude-sonnet-4-5`")
+    expect(output).toContain("## Model")
+    expect(output).toContain("Preferred model: anthropic/claude-sonnet-4-5")
   })
 })
 

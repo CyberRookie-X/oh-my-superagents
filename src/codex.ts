@@ -1,4 +1,5 @@
-import { BUILT_IN_PHASES, SAFE_NAME_PATTERN, type RouterConfig } from "./config.js"
+import { BUILT_IN_PHASES, type RouterConfig } from "./config.js"
+import { SAFE_NAME_PATTERN } from "./adapters/shared.js"
 import { resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
 import { MARKER_TEXT, renderRouteOwnershipMetadata, type GeneratedArtifact } from "./opencode.js"
 import type { WorkflowSourceEntry } from "./workflow-sources.js"
@@ -43,7 +44,7 @@ function getCodexEffortConfig(selection: {
 
   return {
     reasoningEffort,
-    serviceTier: selection.codexFast || selection.effort === "fast" ? "fast" : undefined,
+    serviceTier: selection.codexFast ? "fast" : (selection.effort === "fast" ? "fast" : undefined),
   }
 }
 

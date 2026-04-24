@@ -3103,50 +3103,298 @@ describe("loadRouterConfig", () => {
     })
   })
 
-  it("rejects multi-level preset reuse chains", async () => {
+  it("resolves grandchild extends child extends parent correctly", async () => {
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+      exists: async () => true,
+      readFile: async () => `{
+        "settings": {
+          "activePreset": "grandchild"
+        },
+        "profiles": {
+          "global-build": { "model": "openai/gpt-5" }
+        },
+        "presets": {
+          "base": {
+            "label": "Base",
+            "short": "base",
+            "profiles": {
+              "build": { "model": "openai/gpt-5" },
+              "strategy": { "model": "anthropic/claude-sonnet-4-5" }
+            },
+            "routes": {
+              "brainstorming": "strategy"
+            },
+            "defaultRoute": "build"
+          },
+          "child": {
+            "label": "Child",
+            "short": "child",
+            "extends": "base",
+            "profiles": {
+              "review": { "model": "anthropic/claude-sonnet-4-5" }
+            },
+            "routes": {
+              "brainstorming": "review"
+            },
+            "defaultRoute": "review"
+          },
+          "grandchild": {
+            "label": "Grandchild",
+            "short": "grandchild",
+            "extends": "child",
+            "profiles": {
+              "verify": { "model": "google/gemini-2.5-pro" }
+            },
+            "routes": {
+              "brainstorming": "verify"
+            },
+            "defaultRoute": "verify"
+          }
+        }
+      }`,
+    })
+
+    expect(result.config.presets.grandchild.profiles).toEqual({
+      build: { model: "openai/gpt-5" },
+      strategy: { model: "anthropic/claude-sonnet-4-5" },
+      review: { model: "anthropic/claude-sonnet-4-5" },
+      verify: { model: "google/gemini-2.5-pro" },
+    })
+    expect(result.config.presets.grandchild.routes).toEqual({
+      brainstorming: "verify",
+    })
+    expect(result.config.presets.grandchild.defaultRoute).toBe("verify")
+  })
+
+  it("detects cycles across multi-level preset extends chains", async () => {
     await expect(
-      loadRouterConfig({
+      loadControlPlaneConfig({
         cwd: "/workspace/project",
         homeDir: "/home/tester",
         explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
         exists: async () => true,
         readFile: async () => `{
-          "settings": {
-            "activePreset": "grandchild"
+          "settings": { "activePreset": "a" },
+          "profiles": {
+            "build": { "model": "openai/gpt-5" }
           },
           "presets": {
-            "base": {
-              "label": "Base",
-              "short": "base",
-              "profiles": {
-                "build": { "model": "openai/gpt-5" }
-              },
+            "a": {
+              "label": "A",
+              "short": "a",
+              "extends": "b",
               "routes": {},
               "defaultRoute": "build"
             },
-            "child": {
-              "label": "Child",
-              "short": "child",
-              "extends": "base",
-              "profiles": {
-                "review": { "model": "anthropic/claude-sonnet-4-5" }
-              },
+            "b": {
+              "label": "B",
+              "short": "b",
+              "extends": "c",
               "routes": {},
-              "defaultRoute": "review"
+              "defaultRoute": "build"
             },
-            "grandchild": {
-              "label": "Grandchild",
-              "short": "grandchild",
-              "extends": "child",
-              "profiles": {
-                "verify": { "model": "google/gemini-2.5-pro" }
-              },
+            "c": {
+              "label": "C",
+              "short": "c",
+              "extends": "a",
               "routes": {},
-              "defaultRoute": "verify"
+              "defaultRoute": "build"
             }
           }
         }`,
       }),
-    ).rejects.toThrow(/single-level|single level|extends/i)
+    ).rejects.toThrow(/circular preset extends/i)
+  })
+
+  it("enforces a max extends depth of 5", async () => {
+    const presets: Record<string, string> = {}
+    for (let i = 1; i <= 6; i++) {
+      presets[`p${i}`] = JSON.stringify({
+        label: `P${i}`,
+        short: `p${i}`,
+        ...(i > 1 ? { extends: `p${i - 1}` } : {}),
+        profiles: { build: { model: "openai/gpt-5" } },
+        routes: {},
+        defaultRoute: "build",
+      })
+    }
+
+    await expect(
+      loadControlPlaneConfig({
+        cwd: "/workspace/project",
+        homeDir: "/home/tester",
+        explicitPath: "/workspace/project/oh-my-superagents.config.jsonc",
+        exists: async () => true,
+        readFile: async () => JSON.stringify({
+          settings: { activePreset: "p6" },
+          profiles: { build: { model: "openai/gpt-5" } },
+          presets: Object.fromEntries(
+            Object.entries(presets).map(([k, v]) => [k, JSON.parse(v)]),
+          ),
+        }),
+      }),
+    ).rejects.toThrow(/extends chain exceeds maximum depth/i)
+  })
+
+  it("uses workloadMappingsMerge replace to override authority workloadMappings", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": JSON.stringify({
+        settings: { activePreset: "default" },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            profiles: { build: { model: "openai/gpt-5" } },
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        authority: {
+          workloadMappings: [
+            { path: ["frontend/**"], workloadTags: ["frontend"] },
+          ],
+        },
+      }),
+      "/workspace/project/oh-my-superagents.config.jsonc": JSON.stringify({
+        settings: { workloadMappingsMerge: "replace" },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            profiles: { build: { model: "openai/gpt-5" } },
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        authority: {
+          workloadMappings: [
+            { path: ["backend/**"], workloadTags: ["backend"] },
+          ],
+        },
+      }),
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.config.policyRules).toHaveLength(0)
+  })
+
+  it("uses policyRulesMerge replace to override policyRules", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": JSON.stringify({
+        settings: { activePreset: "default" },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            profiles: { build: { model: "openai/gpt-5" } },
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        policyRules: [{
+          id: "global-rule",
+          selector: { lifecycleStage: ["verify"] },
+          policy: { modelPolicy: { preferredProfiles: ["global-vision"] } },
+        }],
+      }),
+      "/workspace/project/oh-my-superagents.config.jsonc": JSON.stringify({
+        settings: { policyRulesMerge: "replace" },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            profiles: { build: { model: "openai/gpt-5" } },
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        policyRules: [{
+          id: "project-rule",
+          selector: { lifecycleStage: ["verify"] },
+          policy: { modelPolicy: { preferredProfiles: ["project-vision"] } },
+        }],
+      }),
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.config.policyRules).toEqual([{
+      id: "project-rule",
+      selector: { lifecycleStage: ["verify"] },
+      policy: { modelPolicy: { preferredProfiles: ["project-vision"] } },
+    }])
+  })
+
+  it("uses policyRulesMerge concat (default) to append policyRules", async () => {
+    const files = {
+      "/home/tester/.config/oh-my-superagents/config.jsonc": JSON.stringify({
+        settings: { activePreset: "default" },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            profiles: { build: { model: "openai/gpt-5" } },
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        policyRules: [{
+          id: "global-rule",
+          selector: { lifecycleStage: ["verify"] },
+          policy: { modelPolicy: { preferredProfiles: ["global-vision"] } },
+        }],
+      }),
+      "/workspace/project/oh-my-superagents.config.jsonc": JSON.stringify({
+        settings: { policyRulesMerge: "concat" },
+        presets: {
+          default: {
+            label: "Default",
+            short: "def",
+            profiles: { build: { model: "openai/gpt-5" } },
+            routes: {},
+            defaultRoute: "build",
+          },
+        },
+        policyRules: [{
+          id: "project-rule",
+          selector: { lifecycleStage: ["verify"] },
+          policy: { modelPolicy: { preferredProfiles: ["project-vision"] } },
+        }],
+      }),
+    }
+
+    const result = await loadControlPlaneConfig({
+      cwd: "/workspace/project",
+      homeDir: "/home/tester",
+      exists: createExists(files),
+      readFile: createReadFile(files),
+    })
+
+    expect(result.config.policyRules).toEqual([
+      {
+        id: "global-rule",
+        selector: { lifecycleStage: ["verify"] },
+        policy: { modelPolicy: { preferredProfiles: ["global-vision"] } },
+      },
+      {
+        id: "project-rule",
+        selector: { lifecycleStage: ["verify"] },
+        policy: { modelPolicy: { preferredProfiles: ["project-vision"] } },
+      },
+    ])
   })
 })

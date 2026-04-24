@@ -183,6 +183,37 @@ export function explainPhase(config: RouterConfig, phase: BuiltInPhase, routeCon
   }
 }
 
-export function explainAll(config: RouterConfig, routeContext: RouteContext = {}) {
-  return SUPERPOWERS_ROUTE_CATALOG.map((phase) => explainPhase(config, phase, routeContext))
+type ExplainResult = ReturnType<typeof explainPhase> | {
+  routeId: string
+  canonicalRoute: CanonicalRouteId
+  profileId: string
+  routeSource: "preset-route" | "lane-route" | "lane-default" | "preset-default"
+  effectiveLane?: string
+  resolvedSource: WorkflowSourceKind
+  sourceResolution: "default" | "explicit"
+  description: string
+}
+
+export function explainAll(config: RouterSourceConfig): ExplainResult[] {
+  if (isDirectWorkflow(config)) {
+    const intents = Object.keys(config.workflow?.intents ?? {})
+    return intents.map((intentId) => {
+      const canonicalRoute = toDirectCanonicalRouteId(intentId)
+      try {
+        return explainPhase(config, canonicalRoute as any)
+      } catch {
+        return {
+          routeId: intentId,
+          canonicalRoute,
+          profileId: config.defaultRoute,
+          routeSource: "preset-default",
+          effectiveLane: undefined,
+          resolvedSource: "direct",
+          sourceResolution: "default",
+          description: `Direct intent: ${intentId}`,
+        }
+      }
+    })
+  }
+  return SUPERPOWERS_ROUTE_CATALOG.map((phase) => explainPhase(config, phase))
 }

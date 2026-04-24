@@ -81,6 +81,10 @@ export const PHASE_TO_COMMAND = {
   "webapp-testing": "/sp-web-test",
 } as const satisfies Record<BuiltInPhase, string>
 
+export function createSuperpowersRouteSet(): Set<BuiltInPhase> {
+  return new Set(SUPERPOWERS_ROUTE_CATALOG)
+}
+
 export const PHASE_TO_AGENT = {
   brainstorming: "spr-strategy",
   "writing-plans": "spr-plan",

@@ -330,6 +330,8 @@ const LegacyRouterConfigSchema = z
       commandPrefix: SafeNameSchema.optional(),
       commands: CommandsOverrideSchema.optional(),
       superpowersCompatibility: SuperpowersCompatibilitySchema.optional(),
+      policyRulesMerge: z.enum(["concat", "replace"]).default("concat"),
+      workloadMappingsMerge: z.enum(["concat", "replace"]).default("concat"),
   })
   .strict()
 
@@ -861,12 +863,17 @@ function mergeLayeredConfigs(
     }
   }
 
+  const workloadMappingsMerge = higherPriority.settings?.workloadMappingsMerge ?? "concat"
+  const policyRulesMerge = higherPriority.settings?.policyRulesMerge ?? "concat"
+
   const mergedAuthority = lowerPriority.authority || higherPriority.authority
     ? {
-        workloadMappings: [
-          ...(lowerPriority.authority?.workloadMappings ?? []),
-          ...(higherPriority.authority?.workloadMappings ?? []),
-        ],
+        workloadMappings: workloadMappingsMerge === "replace"
+          ? (higherPriority.authority?.workloadMappings ?? [])
+          : [
+              ...(lowerPriority.authority?.workloadMappings ?? []),
+              ...(higherPriority.authority?.workloadMappings ?? []),
+            ],
         policyRules: [
           ...(lowerPriority.authority?.policyRules ?? []),
           ...(higherPriority.authority?.policyRules ?? []),
@@ -887,10 +894,12 @@ function mergeLayeredConfigs(
       ...higherPriority.contextProviders,
     },
     authority: mergedAuthority,
-    policyRules: [
-      ...(lowerPriority.policyRules ?? []),
-      ...(higherPriority.policyRules ?? []),
-    ],
+    policyRules: policyRulesMerge === "replace"
+      ? (higherPriority.policyRules ?? [])
+      : [
+          ...(lowerPriority.policyRules ?? []),
+          ...(higherPriority.policyRules ?? []),
+        ],
     profiles: {
       ...lowerPriority.profiles,
       ...higherPriority.profiles,
@@ -1156,11 +1165,17 @@ function validateSourceRouting(config: ControlPlaneConfig) {
   }
 }
 
+const MAX_EXTENDS_DEPTH = 5
+
 export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConfig {
   const visiting = new Set<string>()
   const resolved = new Map<string, ControlPlanePreset>()
 
-  const resolvePreset = (presetKey: string): ControlPlanePreset => {
+  const resolvePreset = (presetKey: string, depth: number = 0): ControlPlanePreset => {
+    if (depth > MAX_EXTENDS_DEPTH) {
+      throw new Error(`Preset extends chain exceeds maximum depth of ${MAX_EXTENDS_DEPTH}`)
+    }
+
     const cached = resolved.get(presetKey)
     if (cached) {
       return cached
@@ -1172,7 +1187,7 @@ export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConf
     }
 
     if (visiting.has(presetKey)) {
-      throw new Error(`Cyclic preset reuse detected: ${presetKey}`)
+      throw new Error(`Circular preset extends detected: ${presetKey}`)
     }
 
     visiting.add(presetKey)
@@ -1186,13 +1201,7 @@ export function resolvePresetReuse(config: ControlPlaneConfig): ControlPlaneConf
         throw new Error(`Preset ${presetKey} extends unknown preset: ${preset.extends}`)
       }
 
-      if (parentPreset.extends) {
-        throw new Error(
-          `Preset ${presetKey} extends ${preset.extends}, but single-level preset reuse does not allow chained extends`,
-        )
-      }
-
-      const resolvedParent = resolvePreset(preset.extends)
+      const resolvedParent = resolvePreset(preset.extends, depth + 1)
       nextPreset = {
         ...preset,
         defaultLane: preset.defaultLane ?? resolvedParent.defaultLane,

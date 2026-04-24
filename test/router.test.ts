@@ -294,7 +294,49 @@ describe("explainPhase", () => {
 })
 
 describe("explainAll", () => {
-  it("returns all built-in phases", () => {
-    expect(explainAll(config)).toHaveLength(7)
+  it("returns all built-in phases in superpowers mode", () => {
+    const superpowersConfig = {
+      workflow: { kind: "superpowers" as const },
+      profiles: {
+        build: { model: "openai/gpt-5" },
+      },
+      routes: {},
+      defaultRoute: "build",
+    }
+    const results = explainAll(superpowersConfig as never)
+    expect(results).toHaveLength(7)
+    expect(results[0]).toHaveProperty("phase")
+    expect(results[0]).toHaveProperty("commandName")
+    expect(results[0]).toHaveProperty("agentName")
+  })
+
+  it("returns user intents in direct mode", () => {
+    const directConfig = {
+      workflow: {
+        kind: "direct" as const,
+        intents: {
+          plan: { label: "Plan" },
+          build: { label: "Build" },
+        },
+      },
+      profiles: {
+        planner: { model: "openai/gpt-5" },
+        builder: { model: "gpt-5.4" },
+      },
+      routes: {},
+      defaultRoute: "builder",
+    }
+    const results = explainAll(directConfig as never)
+    expect(results).toHaveLength(2)
+    expect(results[0]).toMatchObject({
+      routeId: "plan",
+      canonicalRoute: "intent.plan",
+      resolvedSource: "direct",
+    })
+    expect(results[1]).toMatchObject({
+      routeId: "build",
+      canonicalRoute: "intent.build",
+      resolvedSource: "direct",
+    })
   })
 })

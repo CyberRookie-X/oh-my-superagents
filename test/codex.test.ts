@@ -148,6 +148,28 @@ describe("buildCodexArtifacts", () => {
     expect(agent?.content).toContain('service_tier = "fast"')
   })
 
+  it("applies service tier from effort=fast when codexFast is not set", () => {
+    const artifacts = buildCodexArtifacts({
+      profiles: { build: { model: "gpt-5.4", effort: "fast" } },
+      routes: {},
+      defaultRoute: "build",
+    })
+
+    const agent = artifacts.agents.find((item) => item.fileName === "oms-plan.toml")
+    expect(agent?.content).toContain('service_tier = "fast"')
+  })
+
+  it("omits service tier when codexFast is false and effort is not fast", () => {
+    const artifacts = buildCodexArtifacts({
+      profiles: { build: { model: "gpt-5.4", effort: "deep", codexFast: false } },
+      routes: {},
+      defaultRoute: "build",
+    })
+
+    const agent = artifacts.agents.find((item) => item.fileName === "oms-plan.toml")
+    expect(agent?.content).not.toContain("service_tier")
+  })
+
   it("uses gstack developer instructions and the plan-eng-review source entry for planning agents", () => {
     const artifacts = buildCodexArtifacts({
       workflow: { kind: "superpowers" },

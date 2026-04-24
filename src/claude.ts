@@ -96,6 +96,9 @@ export function renderClaudeSkillFile(input: RenderClaudeSkillFileInput) {
     `- profile: \`${input.profileId}\``,
     `- model: \`${input.model}\``,
     "",
+    "## Model",
+    `Preferred model: ${input.model}`,
+    "",
   ].join("\n")
 }
 

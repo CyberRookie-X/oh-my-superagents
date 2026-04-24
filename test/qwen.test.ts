@@ -448,29 +448,40 @@ describe("buildQwenArtifacts", () => {
     expect([...artifacts.agents, ...artifacts.commands].some((artifact) => artifact.directory === ".qwen/skills")).toBe(false)
   })
 
-  it("fails closed when any required upstream Qwen skill is missing", async () => {
-    await expect(
-      buildQwenArtifacts(
-        {
-          profiles: { build: { model: "qwen/qwen3-coder-480b" } },
-          routes: {},
-          defaultRoute: "build",
-        },
-        {
-          cwd: "/workspace/project",
-          homeDir: "/home/test",
-          controlPlaneSettings,
-          readDirectoryBasenames: async () => [
-            "brainstorming",
-            "writing-plans",
-            "subagent-driven-development",
-            "requesting-code-review",
-            "verification-before-completion",
-            "frontend-design",
-          ],
-        },
-      ),
-    ).rejects.toThrow(/webapp-testing|Qwen-usable superpowers skills are not installed/i)
+  it("gracefully degrades with stub agents when upstream Qwen skills are missing", async () => {
+    const artifacts = await buildQwenArtifacts(
+      {
+        profiles: { build: { model: "qwen/qwen3-coder-480b" } },
+        routes: {},
+        defaultRoute: "build",
+      },
+      {
+        cwd: "/workspace/project",
+        homeDir: "/home/test",
+        controlPlaneSettings,
+        readDirectoryBasenames: async () => [
+          "brainstorming",
+          "writing-plans",
+          "subagent-driven-development",
+          "requesting-code-review",
+          "verification-before-completion",
+          "frontend-design",
+        ],
+      },
+    )
+
+    expect(artifacts.warnings).toEqual([
+      "Missing upstream superpowers skills: webapp-testing. Install them to .qwen/skills/ or .agents/skills/.",
+    ])
+
+    const webTestAgent = artifacts.agents.find((item) => item.fileName === "oms-web-test.md")
+    expect(webTestAgent).toBeDefined()
+    expect(webTestAgent?.content).toContain("[MISSING UPSTREAM] webapp-testing")
+    expect(webTestAgent?.content).toContain("# WARNING: Upstream skill not found")
+
+    const planAgent = artifacts.agents.find((item) => item.fileName === "oms-plan.md")
+    expect(planAgent?.content).toContain("name: oms-plan")
+    expect(planAgent?.content).not.toContain("[MISSING UPSTREAM]")
   })
 
   it("fails through the shared capability policy when qwen projects a gstack-backed route", async () => {

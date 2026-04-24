@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
+import { SAFE_NAME_PATTERN } from "./adapters/shared.js"
 import {
   BUILT_IN_PHASES,
   CONTROL_PLANE_COMMAND_KEYS,
@@ -38,7 +39,6 @@ const PHASE_TO_SKILL = {
   "webapp-testing": "webapp-testing",
 } as const satisfies Record<BuiltInPhase, string>
 
-const SAFE_NAME_PATTERN = /^[a-z0-9-]+$/
 const DIRECT_MODE_SUPPORTED_CONTROL_PLANE_COMMANDS = new Set<ControlPlaneCommandKey>(["status", "sync", "doctor"])
 
 export type QwenSkillName = (typeof PHASE_TO_SKILL)[BuiltInPhase]
@@ -384,16 +384,28 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
     .filter(([, skillPath]) => !skillPath)
     .map(([skillName]) => skillName)
 
+  const warnings: string[] = []
+
   if (missingSkills.length > 0) {
-    throw new Error(
-      `Required Qwen workflow entries are not installed. Missing required upstream entries: ${missingSkills.join(", ")}`,
-    )
+    warnings.push(`Missing upstream superpowers skills: ${missingSkills.join(", ")}. Install them to .qwen/skills/ or .agents/skills/.`)
   }
 
   const agents: GeneratedArtifact[] = []
 
   for (const phase of BUILT_IN_PHASES) {
     const upstreamSkillName = PHASE_TO_SKILL[phase]
+
+    if (!upstreamSkills[upstreamSkillName]) {
+      agents.push({
+        kind: "agent",
+        directory: ".qwen/agents",
+        fileName: `${PHASE_TO_QWEN_AGENT[phase]}.md`,
+        ownerPrefix: "oms-",
+        content: `---\nname: ${PHASE_TO_QWEN_AGENT[phase]}\ndescription: '[MISSING UPSTREAM] ${upstreamSkillName}'\n---\n\n<!-- oms-route: canonicalRoute=phase.unknown host=qwen -->\n\n# WARNING: Upstream skill not found\n\nThe superpowers "${upstreamSkillName}" skill is not installed.\nInstall it first, then re-run: oh-my-superagents sync --host qwen\n`,
+      })
+      continue
+    }
+
     const resolved = resolveMappedRoute(config, upstreamSkillName)
     const sourceEntry = getSourceEntry(
       resolved.sourceEntry,
@@ -420,5 +432,5 @@ export async function buildQwenArtifacts(config: RouterConfig, input: BuildQwenA
     })
   }
 
-  return { agents, commands }
+  return { agents, commands, warnings }
 }

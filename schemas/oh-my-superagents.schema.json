@@ -57,7 +57,9 @@
             "doctor": { "$ref": "#/$defs/commandEntry" }
           }
         },
-        "superpowersCompatibility": { "$ref": "#/$defs/compatibility" }
+        "superpowersCompatibility": { "$ref": "#/$defs/compatibility" },
+        "policyRulesMerge": { "enum": ["concat", "replace"], "default": "concat" },
+        "workloadMappingsMerge": { "enum": ["concat", "replace"], "default": "concat" }
       }
     },
     "sourcePresets": {
@@ -334,7 +336,9 @@
                 "doctor": { "$ref": "#/$defs/commandEntry" }
               }
             },
-            "superpowersCompatibility": { "$ref": "#/$defs/compatibility" }
+            "superpowersCompatibility": { "$ref": "#/$defs/compatibility" },
+            "policyRulesMerge": { "enum": ["concat", "replace"], "default": "concat" },
+            "workloadMappingsMerge": { "enum": ["concat", "replace"], "default": "concat" }
           }
         },
         "sourcePresets": {
