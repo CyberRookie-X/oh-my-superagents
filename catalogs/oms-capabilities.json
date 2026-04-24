@@ -1,18 +1,14 @@
 {
   "models": {
-    "backend-text": {
-      "tags": ["backend", "reasoning-heavy"],
-      "supports": ["text", "code"]
-    },
-    "vision-review": {
-      "tags": ["frontend", "review"],
-      "supports": ["text", "vision-input"]
-    }
+    "backend-text": { "tags": ["backend", "reasoning-heavy"], "supports": ["text", "code"] },
+    "vision-review": { "tags": ["frontend", "review"], "supports": ["text", "vision-input"] },
+    "fast-iteration": { "tags": ["frontend", "backend", "fast"], "supports": ["text", "code"] },
+    "planning-heavy": { "tags": ["planning", "architecture"], "supports": ["text", "code"] },
+    "multimodal-analysis": { "tags": ["analysis", "data"], "supports": ["text", "vision-input", "code"] }
   },
   "tools": {
-    "playwright": {
-      "kind": "mcp",
-      "tags": ["browser", "visual"]
-    }
+    "playwright": { "kind": "mcp", "tags": ["browser", "visual", "testing"] },
+    "git-worktree": { "kind": "skill", "tags": ["version-control", "isolation"] },
+    "filesystem": { "kind": "provider", "tags": ["io", "project-context"] }
   }
 }

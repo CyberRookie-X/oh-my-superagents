@@ -73,6 +73,31 @@ function compactSparseArrays(value: unknown): unknown {
   return value
 }
 
+function normalizePolicyRules(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value
+  }
+
+  const record = value as Record<string, unknown>
+
+  if (Array.isArray(value)) {
+    return value.map(normalizePolicyRules)
+  }
+
+  const normalized: Record<string, unknown> = {}
+
+  for (const [key, entry] of Object.entries(record)) {
+    if (key === "policyRules" && entry && typeof entry === "object" && !Array.isArray(entry)) {
+      normalized[key] = Object.values(entry as Record<string, unknown>)
+      continue
+    }
+
+    normalized[key] = normalizePolicyRules(entry)
+  }
+
+  return normalized
+}
+
 function materializeAuthorityFragment(
   writes: Array<{
     path: string
@@ -85,7 +110,7 @@ function materializeAuthorityFragment(
     applyWrite(authorityFragment, write.path, write.value)
   }
 
-  return parseOmsAuthorityDocument(compactSparseArrays(authorityFragment))
+  return parseOmsAuthorityDocument(normalizePolicyRules(compactSparseArrays(authorityFragment)))
 }
 
 describe("parseCapabilityCatalog", () => {
@@ -303,8 +328,19 @@ describe("parseOnboardingQuestionGraph", () => {
         id: "frontend-visual-verification",
         writes: expect.arrayContaining([
           expect.objectContaining({
-            path: "policyRules[0].policy.modelPolicy.requiredCapabilities",
-            value: ["vision-input"],
+            path: "policyRules.visual-verification",
+            value: expect.objectContaining({
+              id: "visual-verification",
+              selector: expect.objectContaining({
+                lifecycleStage: ["verify"],
+                workloadTags: ["frontend"],
+              }),
+              policy: expect.objectContaining({
+                modelPolicy: expect.objectContaining({
+                  requiredCapabilities: ["vision-input"],
+                }),
+              }),
+            }),
           }),
         ]),
       }),
@@ -328,19 +364,23 @@ describe("parseOnboardingQuestionGraph", () => {
     )
 
     const browserToolsQuestion = parsed.questions.find((question) => question.id === "browser-external-tools")
-    const selectorWrite = browserToolsQuestion?.writes.find((write) => write.path === "policyRules[3].selector")
+    const selectorWrite = browserToolsQuestion?.writes.find((write) => write.path === "policyRules.browser-tools")
 
     expect(browserToolsQuestion).toBeDefined()
     expect(selectorWrite).toEqual({
-      path: "policyRules[3].selector",
-      value: {},
-    })
-    expect(browserToolsQuestion?.writes).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        path: "policyRules[3].policy.toolPolicy.allowedMcpTags",
-        value: ["browser", "visual"],
+      path: "policyRules.browser-tools",
+      value: expect.objectContaining({
+        id: "browser-tools",
+        selector: expect.objectContaining({
+          workloadTags: ["browser"],
+        }),
+        policy: expect.objectContaining({
+          modelPolicy: expect.objectContaining({
+            requiredCapabilities: ["browser"],
+          }),
+        }),
       }),
-    ]))
+    })
   })
 
   it("ships a schema artifact with the expected onboarding question graph contract", () => {
@@ -491,14 +531,12 @@ describe("parseOnboardingQuestionGraph", () => {
     )
 
     for (const question of parsed.questions) {
-      expect(materializeAuthorityFragment(question.writes)).toMatchObject({
-        policyRules: [
-          {
-            id: expect.any(String),
-            selector: expect.any(Object),
-            policy: expect.any(Object),
-          },
-        ],
+      const fragment = materializeAuthorityFragment(question.writes)
+      expect(fragment.policyRules).toHaveLength(1)
+      expect(fragment.policyRules[0]).toMatchObject({
+        id: expect.any(String),
+        selector: expect.any(Object),
+        policy: expect.any(Object),
       })
     }
   })
@@ -512,11 +550,11 @@ describe("parseOnboardingQuestionGraph", () => {
 
     const authority = materializeAuthorityFragment(parsed.questions.flatMap((question) => question.writes))
 
-    expect(authority.policyRules.map((rule) => rule.id)).toEqual([
-      "verify-vision",
-      "subagent-packet-default",
-      "review-workload-default",
-      "browser-tooling-default",
+    expect(authority.policyRules.map((rule) => rule.id).sort()).toEqual([
+      "browser-tools",
+      "packet-first",
+      "review-heavy",
+      "visual-verification",
     ])
   })
 })
@@ -563,7 +601,7 @@ describe("published docs catalogs", () => {
     )
 
     expect(JSON.parse(importOutput)).toMatchObject({
-      capabilityCatalogModelIds: ["backend-text", "vision-review"],
+      capabilityCatalogModelIds: ["backend-text", "vision-review", "fast-iteration", "planning-heavy", "multimodal-analysis"],
       onboardingQuestionIds: [
         "frontend-visual-verification",
         "subagent-packet-first",

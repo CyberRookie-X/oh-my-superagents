@@ -3,79 +3,23 @@
   "questions": [
     {
       "id": "frontend-visual-verification",
-      "prompt": "Do verify flows need screenshots or visual review?",
-      "writes": [
-        {
-          "path": "policyRules[0].id",
-          "value": "verify-vision"
-        },
-        {
-          "path": "policyRules[0].selector.lifecycleStage",
-          "value": ["verify"]
-        },
-        {
-          "path": "policyRules[0].selector.modalityRequirements",
-          "value": ["vision-input"]
-        },
-        {
-          "path": "policyRules[0].policy.modelPolicy.requiredCapabilities",
-          "value": ["vision-input"]
-        }
-      ]
+      "prompt": "Do verify flows need screenshots or visual comparisons?",
+      "writes": [{"path": "policyRules.visual-verification", "value": {"id": "visual-verification", "selector": {"lifecycleStage": ["verify"], "workloadTags": ["frontend"]}, "policy": {"modelPolicy": {"requiredCapabilities": ["vision-input"]}}}}]
     },
     {
       "id": "subagent-packet-first",
-      "prompt": "Should subagents default to packet-first context handoff?",
-      "writes": [
-        {
-          "path": "policyRules[1].id",
-          "value": "subagent-packet-default"
-        },
-        {
-          "path": "policyRules[1].selector.agentRole",
-          "value": ["subagent"]
-        },
-        {
-          "path": "policyRules[1].policy.contextPolicy.packetFirst",
-          "value": true
-        }
-      ]
+      "prompt": "Should subagents default to packet-first execution?",
+      "writes": [{"path": "policyRules.packet-first", "value": {"id": "packet-first", "selector": {"lifecycleStage": ["execute_task"]}, "policy": {"toolPolicy": {"allowedSkillTags": ["packet-first"]}}}}]
     },
     {
       "id": "review-vs-build-workload",
-      "prompt": "Is the workload more review-heavy than build-heavy?",
-      "writes": [
-        {
-          "path": "policyRules[2].id",
-          "value": "review-workload-default"
-        },
-        {
-          "path": "policyRules[2].selector.workloadTags",
-          "value": ["review"]
-        },
-        {
-          "path": "policyRules[2].policy.modelPolicy.preferredProfiles",
-          "value": ["vision-review"]
-        }
-      ]
+      "prompt": "Is the workload more review-heavy or build-heavy?",
+      "writes": [{"path": "policyRules.review-heavy", "value": {"id": "review-heavy", "selector": {"lifecycleStage": ["review"]}, "policy": {"modelPolicy": {"preferredProfiles": ["vision-review"]}}}}]
     },
     {
       "id": "browser-external-tools",
-      "prompt": "Will the workflow rely on browser-oriented external tools?",
-      "writes": [
-        {
-          "path": "policyRules[3].id",
-          "value": "browser-tooling-default"
-        },
-        {
-          "path": "policyRules[3].selector",
-          "value": {}
-        },
-        {
-          "path": "policyRules[3].policy.toolPolicy.allowedMcpTags",
-          "value": ["browser", "visual"]
-        }
-      ]
+      "prompt": "Will the workflow rely on browser automation tools?",
+      "writes": [{"path": "policyRules.browser-tools", "value": {"id": "browser-tools", "selector": {"workloadTags": ["browser"]}, "policy": {"modelPolicy": {"requiredCapabilities": ["browser"]}}}}]
     }
   ]
 }

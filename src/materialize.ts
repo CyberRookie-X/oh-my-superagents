@@ -297,7 +297,9 @@ function isRouteOwnedFile(filePath: string, content: string) {
     )
   }
 
-  if (path.basename(filePath, ".md") !== ownership.renderedName) {
+  const basename = path.basename(filePath)
+  const extension = path.extname(basename)
+  if (basename.slice(0, -extension.length || undefined) !== ownership.renderedName) {
     return false
   }
 

@@ -18,33 +18,29 @@ Generated from stable OMS catalogs and schemas. Use the JSON catalogs and schema
 
 ## Capability Models
 - backend-text: tags=backend, reasoning-heavy; supports=text, code
+- fast-iteration: tags=frontend, backend, fast; supports=text, code
+- multimodal-analysis: tags=analysis, data; supports=text, vision-input, code
+- planning-heavy: tags=planning, architecture; supports=text, code
 - vision-review: tags=frontend, review; supports=text, vision-input
 
 ## Capability Tools
-- playwright: kind=mcp; tags=browser, visual
+- filesystem: kind=provider; tags=io, project-context
+- git-worktree: kind=skill; tags=version-control, isolation
+- playwright: kind=mcp; tags=browser, visual, testing
 
 ## Onboarding Questions
 ### frontend-visual-verification
-Do verify flows need screenshots or visual review?
-- policyRules[0].id => "verify-vision"
-- policyRules[0].selector.lifecycleStage => ["verify"]
-- policyRules[0].selector.modalityRequirements => ["vision-input"]
-- policyRules[0].policy.modelPolicy.requiredCapabilities => ["vision-input"]
+Do verify flows need screenshots or visual comparisons?
+- policyRules.visual-verification => {"id":"visual-verification","selector":{"lifecycleStage":["verify"],"workloadTags":["frontend"]},"policy":{"modelPolicy":{"requiredCapabilities":["vision-input"]}}}
 
 ### subagent-packet-first
-Should subagents default to packet-first context handoff?
-- policyRules[1].id => "subagent-packet-default"
-- policyRules[1].selector.agentRole => ["subagent"]
-- policyRules[1].policy.contextPolicy.packetFirst => true
+Should subagents default to packet-first execution?
+- policyRules.packet-first => {"id":"packet-first","selector":{"lifecycleStage":["execute_task"]},"policy":{"toolPolicy":{"allowedSkillTags":["packet-first"]}}}
 
 ### review-vs-build-workload
-Is the workload more review-heavy than build-heavy?
-- policyRules[2].id => "review-workload-default"
-- policyRules[2].selector.workloadTags => ["review"]
-- policyRules[2].policy.modelPolicy.preferredProfiles => ["vision-review"]
+Is the workload more review-heavy or build-heavy?
+- policyRules.review-heavy => {"id":"review-heavy","selector":{"lifecycleStage":["review"]},"policy":{"modelPolicy":{"preferredProfiles":["vision-review"]}}}
 
 ### browser-external-tools
-Will the workflow rely on browser-oriented external tools?
-- policyRules[3].id => "browser-tooling-default"
-- policyRules[3].selector => {}
-- policyRules[3].policy.toolPolicy.allowedMcpTags => ["browser","visual"]
+Will the workflow rely on browser automation tools?
+- policyRules.browser-tools => {"id":"browser-tools","selector":{"workloadTags":["browser"]},"policy":{"modelPolicy":{"requiredCapabilities":["browser"]}}}

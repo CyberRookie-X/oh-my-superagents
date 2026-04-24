@@ -2,7 +2,7 @@
 
 Generated from stable OMS catalogs and schemas. Use the JSON catalogs and schemas as the source of truth.
 
-- docs/ai/oms-capability-catalog.md: digest of 2 models and 1 tools.
+- docs/ai/oms-capability-catalog.md: digest of 5 models and 3 tools.
 - docs/ai/oms-onboarding-playbooks.md: digest of onboarding question graph version 1 with 4 prompts.
 - catalogs/oms-capabilities.json: authoritative machine-readable capability catalog.
 - catalogs/oms-onboarding-question-graph.json: authoritative machine-readable onboarding question graph.

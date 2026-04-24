@@ -14,66 +14,65 @@ This digest summarizes question graph version 1 with 4 onboarding prompts.
 ## Playbooks
 
 ### frontend-visual-verification
-- Prompt: Do verify flows need screenshots or visual review?
-- Total writes: 4
+- Prompt: Do verify flows need screenshots or visual comparisons?
+- Total writes: 1
 
 #### Rule IDs
-- `policyRules[0].id` => `"verify-vision"`
+- none
 
 #### Selector Writes
-- `policyRules[0].selector.lifecycleStage` => `["verify"]`
-- `policyRules[0].selector.modalityRequirements` => `["vision-input"]`
+- none
 
 #### Policy Writes
-- `policyRules[0].policy.modelPolicy.requiredCapabilities` => `["vision-input"]`
+- none
 
 #### Other Writes
-- none
+- `policyRules.visual-verification` => `{"id":"visual-verification","selector":{"lifecycleStage":["verify"],"workloadTags":["frontend"]},"policy":{"modelPolicy":{"requiredCapabilities":["vision-input"]}}}`
 
 ### subagent-packet-first
-- Prompt: Should subagents default to packet-first context handoff?
-- Total writes: 3
+- Prompt: Should subagents default to packet-first execution?
+- Total writes: 1
 
 #### Rule IDs
-- `policyRules[1].id` => `"subagent-packet-default"`
+- none
 
 #### Selector Writes
-- `policyRules[1].selector.agentRole` => `["subagent"]`
+- none
 
 #### Policy Writes
-- `policyRules[1].policy.contextPolicy.packetFirst` => `true`
+- none
 
 #### Other Writes
-- none
+- `policyRules.packet-first` => `{"id":"packet-first","selector":{"lifecycleStage":["execute_task"]},"policy":{"toolPolicy":{"allowedSkillTags":["packet-first"]}}}`
 
 ### review-vs-build-workload
-- Prompt: Is the workload more review-heavy than build-heavy?
-- Total writes: 3
+- Prompt: Is the workload more review-heavy or build-heavy?
+- Total writes: 1
 
 #### Rule IDs
-- `policyRules[2].id` => `"review-workload-default"`
+- none
 
 #### Selector Writes
-- `policyRules[2].selector.workloadTags` => `["review"]`
+- none
 
 #### Policy Writes
-- `policyRules[2].policy.modelPolicy.preferredProfiles` => `["vision-review"]`
+- none
 
 #### Other Writes
-- none
+- `policyRules.review-heavy` => `{"id":"review-heavy","selector":{"lifecycleStage":["review"]},"policy":{"modelPolicy":{"preferredProfiles":["vision-review"]}}}`
 
 ### browser-external-tools
-- Prompt: Will the workflow rely on browser-oriented external tools?
-- Total writes: 3
+- Prompt: Will the workflow rely on browser automation tools?
+- Total writes: 1
 
 #### Rule IDs
-- `policyRules[3].id` => `"browser-tooling-default"`
+- none
 
 #### Selector Writes
-- `policyRules[3].selector` => `{}`
+- none
 
 #### Policy Writes
-- `policyRules[3].policy.toolPolicy.allowedMcpTags` => `["browser","visual"]`
+- none
 
 #### Other Writes
-- none
+- `policyRules.browser-tools` => `{"id":"browser-tools","selector":{"workloadTags":["browser"]},"policy":{"modelPolicy":{"requiredCapabilities":["browser"]}}}`

@@ -1,8 +1,22 @@
+import { readFileSync } from "node:fs"
+import { resolve, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 import { spawn as spawnChildProcess } from "node:child_process"
 import { cwd as getCwd } from "node:process"
 
 const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 5_000
-const MCP_PROTOCOL_VERSION = "2025-03-26"
+
+function getPackageVersion(): string {
+  try {
+    const __dirname = dirname(fileURLToPath(import.meta.url))
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, "..", "package.json"), "utf-8")) as { version?: string }
+    return pkg.version ?? "0.0.0"
+  } catch { return "0.0.0" }
+}
+
+function getMcpProtocolVersion(): string {
+  return process.env.OMS_MCP_PROTOCOL_VERSION ?? "2025-03-26"
+}
 
 type McpToolRequestMethod = "tools/list" | "tools/call"
 type McpSessionRequestMethod = "initialize" | McpToolRequestMethod
@@ -123,11 +137,11 @@ function createDefaultSendRequest(input: {
 
     try {
       await session.request("initialize", {
-        protocolVersion: MCP_PROTOCOL_VERSION,
+        protocolVersion: getMcpProtocolVersion(),
         capabilities: {},
         clientInfo: {
           name: "oh-my-superagents",
-          version: "0.1.0",
+          version: getPackageVersion(),
         },
       }, "initialize")
       session.notify("notifications/initialized")
