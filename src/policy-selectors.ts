@@ -1,4 +1,5 @@
 import type { ContextLifecycleStage } from "./context-lifecycle.js"
+import { matchesGlobPattern, normalizeRelativePath } from "./utils/glob-utils.js"
 
 export type RuntimeContextSnapshot = {
   cwd: string
@@ -19,10 +20,6 @@ export type PolicySelector = {
   modalityRequirements?: string[]
 }
 
-function normalizeRelativePath(relativePath: string) {
-  return relativePath.replaceAll("\\", "/")
-}
-
 export function buildRuntimeContextSnapshot(input: RuntimeContextSnapshot): RuntimeContextSnapshot {
   return {
     ...input,
@@ -32,54 +29,8 @@ export function buildRuntimeContextSnapshot(input: RuntimeContextSnapshot): Runt
   }
 }
 
-function matchesGlobPattern(value: string, pattern: string) {
-  const regex = new RegExp(`^${escapeGlobPattern(normalizeRelativePath(pattern))}$`)
-  return regex.test(value)
-}
-
-function escapeGlobPattern(pattern: string) {
-  let escaped = ""
-
-  for (let index = 0; index < pattern.length; index += 1) {
-    const current = pattern[index]
-    const next = pattern[index + 1]
-    const nextNext = pattern[index + 2]
-
-    if (current === "*" && next === "*" && nextNext === "/") {
-      escaped += "(?:.*/)?"
-      index += 2
-      continue
-    }
-
-    if (current === "*" && next === "*") {
-      escaped += ".*"
-      index += 1
-      continue
-    }
-
-    if (current === "*") {
-      escaped += "[^/]*"
-      continue
-    }
-
-    if (current === "?") {
-      escaped += "."
-      continue
-    }
-
-    if (/[|\\{}()[\]^$+?.]/.test(current)) {
-      escaped += `\\${current}`
-      continue
-    }
-
-    escaped += current
-  }
-
-  return escaped
-}
-
 export function matchesPolicySelector(snapshot: RuntimeContextSnapshot, selector: PolicySelector): boolean {
-  if (selector.path && !selector.path.some((pattern) => matchesGlobPattern(snapshot.relativePath, pattern))) {
+  if (selector.path && !selector.path.some((pattern) => matchesGlobPattern(pattern, snapshot.relativePath))) {
     return false
   }
 

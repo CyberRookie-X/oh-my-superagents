@@ -36,7 +36,7 @@ export function escapeGlobPattern(pattern: string): string {
 
 export function matchesGlobPattern(pattern: string, value: string): boolean {
   if (value.includes("..")) return false;
-  const escaped = escapeGlobPattern(pattern);
+  const escaped = escapeGlobPattern(normalizeRelativePath(pattern));
   const regex = new RegExp("^" + escaped + "$");
   return regex.test(value);
 }
