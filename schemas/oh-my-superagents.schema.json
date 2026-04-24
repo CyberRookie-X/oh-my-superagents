@@ -811,7 +811,7 @@
     },
     "policyRule": {
       "type": "object",
-      "required": ["selector", "policy"],
+      "required": ["id", "selector", "policy"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "minLength": 1 },

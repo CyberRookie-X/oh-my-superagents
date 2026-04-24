@@ -214,7 +214,7 @@ const PolicyFamiliesSchema = z
 
 export const PolicyRuleSchema = z
   .object({
-    id: z.string().min(1).optional(),
+    id: z.string().min(1),
     selector: PolicySelectorSchema,
     policy: PolicyFamiliesSchema,
   })
@@ -920,6 +920,13 @@ function validatePolicyRules(config: ControlPlaneConfig) {
   }
 }
 
+function assignDefaultRuleIds(rules: PolicyRule[]): PolicyRule[] {
+  return rules.map((rule, i) => ({
+    ...rule,
+    id: rule.id || `rule-${String(i + 1).padStart(2, "0")}`,
+  }))
+}
+
 function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneConfig {
   const finalized: ControlPlaneConfig = {
     workflow: merged.workflow ?? { kind: "superpowers" },
@@ -937,10 +944,10 @@ function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneCon
     sourcePresets: merged.sourcePresets ?? {},
     compressionPresets: finalizeCompressionPresets(merged.compressionPresets),
     contextProviders: cloneContextProviders(merged.contextProviders),
-    policyRules: [
+    policyRules: assignDefaultRuleIds([
       ...(clonePolicyRules(merged.authority?.policyRules) ?? []),
       ...(clonePolicyRules(merged.policyRules) ?? []),
-    ],
+    ]),
     profiles: cloneProfiles(merged.profiles) ?? {},
     lanes: cloneLanes(merged.lanes ?? {}),
     presets: merged.presets,

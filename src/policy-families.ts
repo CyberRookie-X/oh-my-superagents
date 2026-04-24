@@ -26,7 +26,7 @@ export type PolicyFamilies = {
 }
 
 export type PolicyRule = {
-  id?: string
+  id: string
   selector: PolicySelector
   policy: PolicyFamilies
 }
@@ -58,7 +58,7 @@ export function clonePolicyFamilies(input: PolicyFamilies | undefined): PolicyFa
 
 export function clonePolicyRules(input: PolicyRule[] | undefined): PolicyRule[] | undefined {
   return input?.map((rule) => ({
-    ...(rule.id ? { id: rule.id } : {}),
+    id: rule.id,
     selector: {
       path: rule.selector.path ? [...rule.selector.path] : undefined,
       lifecycleStage: rule.selector.lifecycleStage ? [...rule.selector.lifecycleStage] : undefined,

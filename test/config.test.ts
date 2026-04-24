@@ -94,6 +94,7 @@ describe("loadControlPlaneConfig", () => {
           },
         },
         policyRules: [{
+          id: "frontend-vision-rule",
           selector: { path: ["frontend/**"], lifecycleStage: ["verify"] },
           policy: { modelPolicy: { preferredProfiles: ["frontend-vision"] } },
         }],
@@ -122,6 +123,7 @@ describe("loadControlPlaneConfig", () => {
           },
         },
         policyRules: [{
+          id: "verify-typo-rule",
           selector: { lifecycleStage: ["verfiy"] },
           policy: { modelPolicy: { preferredProfiles: ["frontend-vision"] } },
         }],
@@ -148,6 +150,7 @@ describe("loadControlPlaneConfig", () => {
           },
         },
         policyRules: [{
+          id: "empty-path-rule",
           selector: { path: [] },
           policy: { modelPolicy: { preferredProfiles: ["frontend-vision"] } },
         }],
@@ -174,6 +177,7 @@ describe("loadControlPlaneConfig", () => {
           },
         },
         policyRules: [{
+          id: "empty-list-override",
           selector: { lifecycleStage: ["verify"] },
           policy: { modelPolicy: { preferredProfiles: [] } },
         }],
@@ -183,7 +187,7 @@ describe("loadControlPlaneConfig", () => {
     expect(loaded.config.policyRules?.[0]?.policy.modelPolicy?.preferredProfiles).toEqual([])
   })
 
-  it("accepts null scalar overrides for policy families so narrower rules can clear broader values", async () => {
+    it("accepts null scalar overrides for policy families so narrower rules can clear broader values", async () => {
     const loaded = await loadControlPlaneConfig({
       cwd: "/repo",
       explicitPath: "/repo/oh-my-superagents.config.jsonc",
@@ -202,6 +206,7 @@ describe("loadControlPlaneConfig", () => {
           },
         },
         policyRules: [{
+          id: "null-scalar-override",
           selector: { lifecycleStage: ["verify"] },
           policy: {
             modelPolicy: { effort: null, preferWindowClass: null },
@@ -333,6 +338,7 @@ describe("loadControlPlaneConfig", () => {
         routes: {},
         defaultRoute: "build",
         policyRules: [{
+          id: "legacy-discriminator",
           selector: { lifecycleStage: ["verify"] },
           policy: { modelPolicy: { preferredProfiles: ["frontend-vision"] } },
         }],
