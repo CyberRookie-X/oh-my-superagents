@@ -226,19 +226,40 @@ function parseArgs(argv: string[]) {
 
   for (let index = 0; index < rest.length; index += 1) {
     const value = rest[index]
-    if (!value?.startsWith("--")) {
-      positionals.push(value)
+
+    if (value === "--") {
+      positionals.push(...rest.slice(index + 1))
+      break
+    }
+
+    if (value?.startsWith("--")) {
+      const eqIdx = value.indexOf("=")
+      if (eqIdx >= 0) {
+        flags.set(value.slice(0, eqIdx), value.slice(eqIdx + 1))
+        continue
+      }
+
+      const next = rest[index + 1]
+      if (!next || next.startsWith("-")) {
+        flags.set(value, true)
+        continue
+      }
+
+      flags.set(value, next)
+      index += 1
       continue
     }
 
-    const next = rest[index + 1]
-    if (!next || next.startsWith("--")) {
-      flags.set(value, true)
+    if (value?.startsWith("-") && value.length === 2 && value[1] !== "-") {
+      if (value === "-h") {
+        flags.set("--help", true)
+      } else {
+        flags.set(`--${value.slice(1)}`, true)
+      }
       continue
     }
 
-    flags.set(value, next)
-    index += 1
+    positionals.push(value)
   }
 
   return { command, flags, positionals }
