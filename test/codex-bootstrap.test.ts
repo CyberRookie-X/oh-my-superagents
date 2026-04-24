@@ -645,9 +645,7 @@ describe("runCodexBootstrap", () => {
         },
         readdir: async () => [],
         stat: async () => ({ isFile: () => true }),
-        rename: async () => {
-          throw new Error("unexpected")
-        },
+        rename: async () => {},
         unlink: async () => {
           throw new Error("unexpected")
         },
@@ -670,7 +668,7 @@ describe("runCodexBootstrap", () => {
     )
   })
 
-  it("reruns Codex bootstrap through materializeArtifacts so stale OMS-owned skills are removed", async () => {
+  it("writes Codex skill files through writeCodexBootstrapFiles instead of materializeArtifacts", async () => {
     const controlPlaneConfig = createDefaultControlPlaneConfig()
     const customControlPlaneConfig = {
       ...controlPlaneConfig,
@@ -689,6 +687,7 @@ describe("runCodexBootstrap", () => {
           artifacts: Array<{ directory: string; fileName: string }>
         }
       | undefined
+    const writeCalls: string[] = []
 
     const result = await runCodexBootstrap({
       cwd: "/workspace/project",
@@ -717,12 +716,14 @@ describe("runCodexBootstrap", () => {
           exitCode: 0 as const,
           warnings: [],
           written: [],
-          removed: ["/workspace/project/plugins/oh-my-superagents-codex/skills/oms-status/SKILL.md"],
+          removed: [],
         }
       },
       fs: {
         mkdir: async () => {},
-        writeFile: async () => {},
+        writeFile: async (filePath: string) => {
+          writeCalls.push(filePath)
+        },
         readFile: async (filePath: string) => {
           if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
             return JSON.stringify(customControlPlaneConfig)
@@ -732,33 +733,29 @@ describe("runCodexBootstrap", () => {
         },
         readdir: async () => [],
         stat: async () => ({ isFile: () => true }),
-        rename: async () => {
-          throw new Error("unexpected")
-        },
+        rename: async () => {},
         unlink: async () => {
           throw new Error("unexpected")
         },
       },
     })
 
-    expect(materializeInput?.artifacts).toEqual(
+    expect(materializeInput?.artifacts).toEqual([])
+    expect(writeCalls).toEqual(
       expect.arrayContaining([
-        {
-          directory: "plugins/oh-my-superagents-codex/skills/team-state",
-          fileName: "SKILL.md",
-        },
-        {
-          directory: "plugins/oh-my-superagents-codex/skills/team-stat",
-          fileName: "SKILL.md",
-        },
+        "/workspace/project/plugins/oh-my-superagents-codex/skills/team-state/SKILL.md.tmp",
+        "/workspace/project/plugins/oh-my-superagents-codex/skills/team-stat/SKILL.md.tmp",
       ]),
     )
-    expect(result.syncResult.removed).toContain(
-      "/workspace/project/plugins/oh-my-superagents-codex/skills/oms-status/SKILL.md",
+    expect(result.bootstrapFiles).toEqual(
+      expect.arrayContaining([
+        "/workspace/project/plugins/oh-my-superagents-codex/skills/team-state/SKILL.md",
+        "/workspace/project/plugins/oh-my-superagents-codex/skills/team-stat/SKILL.md",
+      ]),
     )
   })
 
-  it("removes stale direct-mode Codex skills when intents change on rerun", async () => {
+  it("writes updated direct-mode Codex skills when intents change on rerun", async () => {
     const fs = createMemoryFs()
     const configPath = "/workspace/project/oh-my-superagents.config.jsonc"
     const planRouterConfig = {
@@ -817,10 +814,22 @@ describe("runCodexBootstrap", () => {
     const second = await run()
 
     expect(first.syncResult.exitCode).toBe(0)
+    expect(first.bootstrapFiles).toEqual(
+      expect.arrayContaining([
+        "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+      ]),
+    )
     expect(second.syncResult.exitCode).toBe(0)
     expect(second.syncResult.warnings).toEqual([])
-    expect(second.syncResult.removed).toContain(
-      "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+    expect(second.bootstrapFiles).toEqual(
+      expect.arrayContaining([
+        "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-build/SKILL.md",
+      ]),
+    )
+    expect(second.bootstrapFiles).not.toEqual(
+      expect.arrayContaining([
+        "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
+      ]),
     )
   })
 
@@ -978,9 +987,7 @@ describe("runCodexBootstrap", () => {
         },
         readdir: async () => [],
         stat: async () => ({ isFile: () => true }),
-        rename: async () => {
-          throw new Error("unexpected")
-        },
+        rename: async () => {},
         unlink: async () => {
           throw new Error("unexpected")
         },
@@ -993,5 +1000,76 @@ describe("runCodexBootstrap", () => {
       "/workspace/project/plugins/oh-my-superagents-codex/skills/ai-plan/SKILL.md",
     ]))
     expect(materializeArtifactsCalled).toBe(true)
+  })
+
+  it("writes each skill file at most once during bootstrap", async () => {
+    const controlPlaneConfig = createDefaultControlPlaneConfig()
+    const customControlPlaneConfig = {
+      ...controlPlaneConfig,
+      settings: {
+        ...controlPlaneConfig.settings,
+        commandPrefix: "oms",
+        commands: {
+          ...controlPlaneConfig.settings.commands,
+          status: { name: "status", aliases: ["st"] },
+        },
+      },
+    }
+    const activePreset = customControlPlaneConfig.presets[customControlPlaneConfig.settings.activePreset]
+    const writeCalls: string[] = []
+
+    await runCodexBootstrap({
+      cwd: "/workspace/project",
+      discoverConfigPath: async () => "/workspace/project/oh-my-superagents.config.jsonc",
+      loadConfig: async () => ({
+        path: "/workspace/project/oh-my-superagents.config.jsonc",
+        config: {
+          workflow: customControlPlaneConfig.workflow,
+          profiles: activePreset.profiles,
+          routes: activePreset.routes,
+          defaultRoute: activePreset.defaultRoute,
+          superpowersCompatibility: customControlPlaneConfig.settings.superpowersCompatibility,
+        },
+      }),
+      resolveCompatibility: async () => compatibleCodexWarn,
+      buildCodexArtifacts: () => ({ agents: [] }),
+      materializeArtifacts: async () => ({
+        exitCode: 0 as const,
+        warnings: [],
+        written: [],
+        removed: [],
+      }),
+      fs: {
+        mkdir: async () => {},
+        writeFile: async (filePath: string) => {
+          writeCalls.push(filePath)
+        },
+        readFile: async (filePath: string) => {
+          if (filePath === "/workspace/project/oh-my-superagents.config.jsonc") {
+            return JSON.stringify(customControlPlaneConfig)
+          }
+
+          throw createNotFoundError(filePath)
+        },
+        readdir: async () => [],
+        stat: async () => ({ isFile: () => true }),
+        rename: async () => {},
+        unlink: async () => {
+          throw new Error("unexpected")
+        },
+      },
+    })
+
+    const skillWriteCounts = new Map<string, number>()
+    for (const call of writeCalls) {
+      const normalized = call.replace(/\.tmp$/, "")
+      if (normalized.includes("/SKILL.md")) {
+        skillWriteCounts.set(normalized, (skillWriteCounts.get(normalized) ?? 0) + 1)
+      }
+    }
+
+    for (const [path, count] of skillWriteCounts) {
+      expect(count).toBe(1)
+    }
   })
 })

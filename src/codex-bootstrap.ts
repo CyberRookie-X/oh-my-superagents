@@ -11,7 +11,6 @@ import {
   type loadRouterConfig,
 } from "./config.js"
 import { buildCodexArtifacts } from "./codex.js"
-import type { GeneratedArtifact } from "./opencode.js"
 import type { MaterializeArtifactsResult, materializeArtifacts } from "./materialize.js"
 import { renderAuxiliaryOwnershipMetadata, renderControlPlaneOwnershipMetadata } from "./opencode.js"
 import type {
@@ -22,6 +21,7 @@ import type {
 type BootstrapFs = {
   mkdir: (filePath: string, options?: { recursive?: boolean }) => Promise<void>
   writeFile: (filePath: string, content: string) => Promise<void>
+  rename: (from: string, to: string) => Promise<void>
 }
 
 export type CodexBootstrapFile = {
@@ -407,16 +407,6 @@ export function buildCodexBootstrapFiles(input: {
   return { files }
 }
 
-function toGeneratedArtifact(codexFile: CodexBootstrapFile): GeneratedArtifact {
-  return {
-    kind: "command",
-    directory: path.dirname(codexFile.path),
-    fileName: path.basename(codexFile.path),
-    ownerPrefix: "unused-for-stage1-metadata",
-    content: codexFile.content,
-  }
-}
-
 function assertProjectRelativePath(cwd: string, targetPath: string) {
   const absolute = path.resolve(cwd, targetPath)
   const relative = path.relative(cwd, absolute)
@@ -436,7 +426,15 @@ export async function writeCodexBootstrapFiles(input: {
   for (const file of input.files) {
     const absolutePath = assertProjectRelativePath(input.cwd, file.path)
     await input.fs.mkdir(path.dirname(absolutePath), { recursive: true })
-    await input.fs.writeFile(absolutePath, file.content)
+
+    if (file.path.endsWith("/SKILL.md")) {
+      const tmpPath = absolutePath + ".tmp"
+      await input.fs.writeFile(tmpPath, file.content)
+      await input.fs.rename(tmpPath, absolutePath)
+    } else {
+      await input.fs.writeFile(absolutePath, file.content)
+    }
+
     written.push(absolutePath)
   }
 
@@ -527,13 +525,7 @@ export async function runCodexBootstrap(input: {
     controlPlaneSettings,
   })
 
-  const controlPlaneSkillFiles = bootstrapFiles.files.filter((file) => file.path.endsWith("/SKILL.md"))
-  const scaffoldFiles = bootstrapFiles.files.filter((file) => !file.path.endsWith("/SKILL.md"))
-
-  const syncArtifacts = [
-    ...input.buildCodexArtifacts(loaded.config).agents,
-    ...controlPlaneSkillFiles.map(toGeneratedArtifact),
-  ]
+  const syncArtifacts = input.buildCodexArtifacts(loaded.config).agents
   const syncResult = await input.materializeArtifacts({
     cwd: input.cwd,
     artifacts: syncArtifacts,
@@ -542,16 +534,14 @@ export async function runCodexBootstrap(input: {
 
   const writtenBootstrapFiles = await writeCodexBootstrapFiles({
     cwd: input.cwd,
-    files: scaffoldFiles,
+    files: bootstrapFiles.files,
     fs: input.fs,
   })
-
-  const writtenControlPlaneSkillFiles = controlPlaneSkillFiles.map((file) => path.resolve(input.cwd, file.path))
 
   return {
     configPath: loaded.path,
     createdConfig: !existingConfigPath,
-    bootstrapFiles: [...writtenBootstrapFiles, ...writtenControlPlaneSkillFiles],
+    bootstrapFiles: writtenBootstrapFiles,
     syncResult,
     nextSteps: [
       "Restart Codex.",
