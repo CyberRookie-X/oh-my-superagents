@@ -1,5 +1,6 @@
 import type { ControlPlaneCommandKey } from "./config.js"
 import type { CanonicalRouteId, WorkflowSourceEntry } from "./workflow-sources.js"
+import { deriveLifecycleStage as deriveLifecycleStageFromRoute } from "./lifecycle-mappings.js"
 
 export const CONTEXT_LIFECYCLE_STAGES = [
   "bootstrap",
@@ -52,23 +53,7 @@ export function deriveLifecycleStage(input: {
     }
   }
 
-  switch (input.canonicalRoute) {
-    case "phase.brainstorm":
-      return "design"
-    case "phase.plan":
-      return "plan"
-    case "phase.execute":
-      return "execute_task"
-    case "phase.review":
-      return "review"
-    case "phase.verify":
-    case "phase.web-test":
-      return "verify"
-    case "phase.visual":
-      return "design"
-    default:
-      return input.canonicalRoute.startsWith("intent.") ? "execute_task" : "bootstrap"
-  }
+  return deriveLifecycleStageFromRoute(input.canonicalRoute)
 }
 
 export function isLifecycleCompressionBoundary(stage: ContextLifecycleStage) {

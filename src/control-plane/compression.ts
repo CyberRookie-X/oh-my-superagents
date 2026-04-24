@@ -17,6 +17,7 @@ import {
 import type { ContextIndex } from "../context-index.js"
 import { assertSafeArtifactPath } from "../materialize.js"
 import { deriveLifecycleStage, type ContextLifecycleStage } from "../context-lifecycle.js"
+import { resolveLifecycleStageToCanonicalRoute } from "../lifecycle-mappings.js"
 import { matchesPolicySelector } from "../policy-selectors.js"
 import { getWorkflowSourceEntry } from "../workflow-sources.js"
 import type { CanonicalRouteId, WorkflowSourceKind } from "../workflow-sources.js"
@@ -49,21 +50,7 @@ export function resolveContextCompressionCanonicalRoute(input: {
       ?? "intent.default" as CanonicalRouteId
   }
 
-  switch (input.lifecycleStage) {
-    case "design":
-    case "bootstrap":
-      return "phase.brainstorm"
-    case "plan":
-    case "checkpoint":
-    case "resume":
-      return "phase.plan"
-    case "review":
-      return "phase.review"
-    case "verify":
-      return "phase.verify"
-    default:
-      return "phase.execute"
-  }
+  return resolveLifecycleStageToCanonicalRoute(input.lifecycleStage) ?? "phase.execute"
 }
 
 function resolveIndexedLifecycleStage(
