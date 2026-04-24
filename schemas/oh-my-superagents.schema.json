@@ -882,6 +882,33 @@
         "mode": {
           "enum": ["warn", "strict"],
           "default": "warn"
+        },
+        "allowUntested": {
+          "enum": ["warn", "block"],
+          "default": "warn"
+        },
+        "overrides": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "opencode": { "$ref": "#/$defs/compatibilityOverride" },
+            "codex": { "$ref": "#/$defs/compatibilityOverride" }
+          }
+        }
+      }
+    },
+    "compatibilityOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minimumSupportedVersion": { "type": "string" },
+        "testedRanges": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "knownBadRanges": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       }
     },

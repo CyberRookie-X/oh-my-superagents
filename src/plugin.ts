@@ -1,10 +1,12 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import type { Plugin } from "@opencode-ai/plugin"
-import { loadRouterConfig } from "./config.js"
+import { loadRouterConfig, type SuperpowersCompatibilityConfig } from "./config.js"
 import { RUNTIME_AGENT_METADATA_DIRECTORY, RUNTIME_AGENT_METADATA_FILE } from "./opencode.js"
 import {
   evaluateSuperpowersCompatibility,
+  mergeMatrixWithOverrides,
+  SUPERPOWERS_COMPATIBILITY,
   type SuperpowersCompatibilityMode,
   type SuperpowersCompatibilityResult,
 } from "./superpowers-compatibility.js"
@@ -33,12 +35,12 @@ type RuntimeAgentMetadata = {
 export const OhMySuperpowersPlugin: Plugin = async ({ client, directory, worktree }) => {
   const log = createPluginLogger(client as PluginClient)
   const rootDirectory = await resolvePluginRootDirectory(directory, worktree)
-  let compatibilityMode: SuperpowersCompatibilityMode = "warn"
+  let superpowersCompatibility: SuperpowersCompatibilityConfig = { mode: "warn", allowUntested: "warn" }
   let shouldReportCompatibility = true
 
   try {
     const { config } = await loadRouterConfig({ cwd: rootDirectory })
-    compatibilityMode = config.superpowersCompatibility.mode
+    superpowersCompatibility = config.superpowersCompatibility
 
     void log("info", "router config loaded")
   } catch (error) {
@@ -68,7 +70,9 @@ export const OhMySuperpowersPlugin: Plugin = async ({ client, directory, worktre
   if (shouldReportCompatibility) {
     void reportCompatibilityDiagnostics({
       cwd: rootDirectory,
-      policyMode: compatibilityMode,
+      policyMode: superpowersCompatibility.mode,
+      allowUntested: superpowersCompatibility.allowUntested,
+      overrides: superpowersCompatibility.overrides,
       log,
     })
   }
@@ -127,6 +131,8 @@ async function resolvePluginRootDirectory(directory: string, worktree?: string) 
 async function reportCompatibilityDiagnostics(input: {
   cwd: string
   policyMode: SuperpowersCompatibilityMode
+  allowUntested: "warn" | "block"
+  overrides?: Record<string, { minimumSupportedVersion?: string; testedRanges?: string[]; knownBadRanges?: string[] }>
   log: (level: LogLevel, message: string) => Promise<void>
 }) {
   const compatibility = await resolveCompatibilityForStartup(input)
@@ -171,6 +177,8 @@ function formatStartupGuidance(input: {
 async function resolveCompatibilityForStartup(input: {
   cwd: string
   policyMode: SuperpowersCompatibilityMode
+  allowUntested: "warn" | "block"
+  overrides?: Record<string, { minimumSupportedVersion?: string; testedRanges?: string[]; knownBadRanges?: string[] }>
   log: (level: LogLevel, message: string) => Promise<void>
 }): Promise<SuperpowersCompatibilityResult> {
   let detection
@@ -188,7 +196,8 @@ async function resolveCompatibilityForStartup(input: {
   }
 
   try {
-    return evaluateSuperpowersCompatibility(detection, input.policyMode)
+    const matrix = mergeMatrixWithOverrides(SUPERPOWERS_COMPATIBILITY, input.overrides)
+    return evaluateSuperpowersCompatibility(detection, input.policyMode, matrix, input.allowUntested)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await input.log(

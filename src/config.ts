@@ -53,9 +53,24 @@ const ProfileSchema = z
   })
   .strict()
 
-const CompatibilitySchema = z
+const CompatibilityOverrideSchema = z
+  .object({
+    minimumSupportedVersion: z.string().optional(),
+    testedRanges: z.array(z.string()).optional(),
+    knownBadRanges: z.array(z.string()).optional(),
+  })
+  .strict()
+
+const SuperpowersCompatibilitySchema = z
   .object({
     mode: z.enum(SUPERPOWERS_COMPATIBILITY_MODES).default("warn"),
+    allowUntested: z.enum(["warn", "block"]).default("warn"),
+    overrides: z
+      .object({
+        opencode: CompatibilityOverrideSchema.optional(),
+        codex: CompatibilityOverrideSchema.optional(),
+      })
+      .optional(),
   })
   .strict()
 
@@ -281,40 +296,40 @@ const LegacyRouterConfigSchema = z
     profiles: z.record(z.string().min(1), ProfileSchema),
     routes: z.record(z.string().min(1), z.string().min(1)).optional(),
     defaultRoute: z.string().min(1),
-    superpowersCompatibility: CompatibilitySchema.optional(),
+    superpowersCompatibility: SuperpowersCompatibilitySchema.optional(),
   })
   .strict()
 
-const SafeNameSchema = z.string().min(1).regex(SAFE_NAME_PATTERN)
+  const SafeNameSchema = z.string().min(1).regex(SAFE_NAME_PATTERN)
 
-const CommandEntryOverrideSchema = z
-  .object({
-    name: SafeNameSchema.optional(),
-    aliases: z.array(SafeNameSchema).optional(),
-  })
-  .strict()
+  const CommandEntryOverrideSchema = z
+    .object({
+      name: SafeNameSchema.optional(),
+      aliases: z.array(SafeNameSchema).optional(),
+    })
+    .strict()
 
-const CommandsOverrideSchema = z
-  .object({
-    status: CommandEntryOverrideSchema.optional(),
-    use: CommandEntryOverrideSchema.optional(),
-    disable: CommandEntryOverrideSchema.optional(),
-    sync: CommandEntryOverrideSchema.optional(),
-    doctor: CommandEntryOverrideSchema.optional(),
-  })
-  .strict()
+  const CommandsOverrideSchema = z
+    .object({
+      status: CommandEntryOverrideSchema.optional(),
+      use: CommandEntryOverrideSchema.optional(),
+      disable: CommandEntryOverrideSchema.optional(),
+      sync: CommandEntryOverrideSchema.optional(),
+      doctor: CommandEntryOverrideSchema.optional(),
+    })
+    .strict()
 
-const LayeredSettingsSchema = z
-  .object({
-    enabled: z.boolean().optional(),
-    activePreset: z.string().min(1).optional(),
-    defaultLane: z.union([z.string().min(1), z.null()]).optional(),
-    laneSelection: LaneSelectionSchema.optional(),
-    subagentExecution: SubagentExecutionSchema.optional(),
-    contextCompression: ContextCompressionSchema.optional(),
-    commandPrefix: SafeNameSchema.optional(),
-    commands: CommandsOverrideSchema.optional(),
-    superpowersCompatibility: CompatibilitySchema.optional(),
+  const LayeredSettingsSchema = z
+    .object({
+      enabled: z.boolean().optional(),
+      activePreset: z.string().min(1).optional(),
+      defaultLane: z.union([z.string().min(1), z.null()]).optional(),
+      laneSelection: LaneSelectionSchema.optional(),
+      subagentExecution: SubagentExecutionSchema.optional(),
+      contextCompression: ContextCompressionSchema.optional(),
+      commandPrefix: SafeNameSchema.optional(),
+      commands: CommandsOverrideSchema.optional(),
+      superpowersCompatibility: SuperpowersCompatibilitySchema.optional(),
   })
   .strict()
 
@@ -353,6 +368,19 @@ const LayeredControlPlaneConfigSchema = z
 type LegacyRouterConfigInput = z.infer<typeof LegacyRouterConfigSchema>
 export type SuperpowersCompatibilityConfig = {
   mode: SuperpowersCompatibilityMode
+  allowUntested: "warn" | "block"
+  overrides?: {
+    opencode?: {
+      minimumSupportedVersion?: string
+      testedRanges?: string[]
+      knownBadRanges?: string[]
+    }
+    codex?: {
+      minimumSupportedVersion?: string
+      testedRanges?: string[]
+      knownBadRanges?: string[]
+    }
+  }
 }
 export type DirectIntentConfig = z.infer<typeof DirectIntentSchema>
 export type WorkflowConfig = z.infer<typeof WorkflowSchema>
@@ -675,7 +703,7 @@ export function createDefaultControlPlaneConfig(): ControlPlaneConfig {
       contextCompression: finalizeContextCompression(undefined),
       commandPrefix: "oms",
       commands: synthesizeCommands(undefined),
-      superpowersCompatibility: { mode: "warn" },
+      superpowersCompatibility: { mode: "warn", allowUntested: "warn" },
     },
     sourcePresets: {},
     compressionPresets: {},
@@ -939,7 +967,7 @@ function finalizeConfig(merged: LayeredControlPlaneConfigInput): ControlPlaneCon
       contextCompression: finalizeContextCompression(merged.settings?.contextCompression),
       commandPrefix: merged.settings?.commandPrefix ?? "oms",
       commands: synthesizeCommands(merged.settings?.commands),
-      superpowersCompatibility: merged.settings?.superpowersCompatibility ?? { mode: "warn" },
+      superpowersCompatibility: merged.settings?.superpowersCompatibility ?? { mode: "warn", allowUntested: "warn" },
     },
     sourcePresets: merged.sourcePresets ?? {},
     compressionPresets: finalizeCompressionPresets(merged.compressionPresets),

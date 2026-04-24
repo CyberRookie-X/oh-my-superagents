@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   evaluateSuperpowersCompatibility,
+  mergeMatrixWithOverrides,
   toSuperpowersAvailabilityResult,
 } from "../src/superpowers-compatibility.js"
 
@@ -546,6 +547,199 @@ describe("evaluateSuperpowersCompatibility", () => {
     expect(compatible.shouldBlock).toBe(false)
     expect(untested.shouldBlock).toBe(false)
     expect(notDetected.shouldBlock).toBe(false)
+  })
+
+  it("blocks untested versions when allowUntested is block", () => {
+    const result = evaluateSuperpowersCompatibility(
+      {
+        host: "opencode",
+        source: "test",
+        detectedVersion: "6.0.0",
+      },
+      "warn",
+      undefined,
+      "block",
+    )
+
+    expect(result.status).toBe("untested")
+    expect(result.shouldBlock).toBe(true)
+  })
+
+  it("does not block untested versions when allowUntested is warn", () => {
+    const result = evaluateSuperpowersCompatibility(
+      {
+        host: "opencode",
+        source: "test",
+        detectedVersion: "6.0.0",
+      },
+      "warn",
+      undefined,
+      "warn",
+    )
+
+    expect(result.status).toBe("untested")
+    expect(result.shouldBlock).toBe(false)
+  })
+
+  it("blocks incompatible versions in strict mode regardless of allowUntested", () => {
+    const result = evaluateSuperpowersCompatibility(
+      {
+        host: "opencode",
+        source: "test",
+        detectedVersion: "4.9.9",
+      },
+      "strict",
+      undefined,
+      "warn",
+    )
+
+    expect(result.status).toBe("incompatible")
+    expect(result.shouldBlock).toBe(true)
+  })
+
+  it("reports the version in the known bad range reason", () => {
+    const matrix = {
+      opencode: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: ["5.0.2"],
+      },
+      codex: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: [],
+      },
+    } as const
+
+    const result = evaluateSuperpowersCompatibility(
+      {
+        host: "opencode",
+        source: "test",
+        detectedVersion: "5.0.2",
+      },
+      "warn",
+      matrix,
+    )
+
+    expect(result.status).toBe("incompatible")
+    expect(result.reason).toMatch(/5\.0\.2/)
+    expect(result.reason).toMatch(/known bad range/i)
+  })
+
+  it("blocks known bad range in strict mode", () => {
+    const matrix = {
+      opencode: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: ["5.0.2"],
+      },
+      codex: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: [],
+      },
+    } as const
+
+    const result = evaluateSuperpowersCompatibility(
+      {
+        host: "opencode",
+        source: "test",
+        detectedVersion: "5.0.2",
+      },
+      "strict",
+      matrix,
+    )
+
+    expect(result.status).toBe("incompatible")
+    expect(result.shouldBlock).toBe(true)
+  })
+})
+
+describe("mergeMatrixWithOverrides", () => {
+  it("returns the original matrix unchanged when no overrides are provided", () => {
+    const matrix = {
+      opencode: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: [],
+      },
+      codex: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: [],
+      },
+    } as const
+
+    const result = mergeMatrixWithOverrides(matrix)
+
+    expect(result.opencode.minimumSupportedVersion).toBe("5.0.0")
+    expect(result.codex.minimumSupportedVersion).toBe("5.0.0")
+  })
+
+  it("overrides minimumSupportedVersion for a specific host", () => {
+    const matrix = {
+      opencode: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: [],
+      },
+      codex: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: [],
+      },
+    } as const
+
+    const result = mergeMatrixWithOverrides(matrix, {
+      opencode: { minimumSupportedVersion: "5.3.0" },
+    })
+
+    expect(result.opencode.minimumSupportedVersion).toBe("5.3.0")
+    expect(result.codex.minimumSupportedVersion).toBe("5.0.0")
+  })
+
+  it("adds knownBadRanges via overrides", () => {
+    const matrix = {
+      opencode: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: [],
+      },
+      codex: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: [],
+      },
+    } as const
+
+    const result = mergeMatrixWithOverrides(matrix, {
+      opencode: { knownBadRanges: ["5.0.1", "5.0.2"] },
+    })
+
+    expect(result.opencode.knownBadRanges).toEqual(["5.0.1", "5.0.2"])
+    expect(result.codex.knownBadRanges).toEqual([])
+  })
+
+  it("does not mutate the original matrix", () => {
+    const matrix = {
+      opencode: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: [],
+      },
+      codex: {
+        minimumSupportedVersion: "5.0.0",
+        testedRanges: [">=5.0.0 <6.0.0"],
+        knownBadRanges: [],
+      },
+    } as const
+
+    const result = mergeMatrixWithOverrides(matrix, {
+      opencode: { knownBadRanges: ["5.0.1"] },
+    })
+
+    expect(matrix.opencode.knownBadRanges).toEqual([])
+    expect(result.opencode.knownBadRanges).toEqual(["5.0.1"])
   })
 })
 

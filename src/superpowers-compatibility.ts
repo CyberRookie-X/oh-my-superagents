@@ -20,6 +20,41 @@ export type SuperpowersCompatibilityMatrixEntry = {
   knownBadRanges: readonly string[]
 }
 
+export type SuperpowersCompatibilityMatrix = Record<
+  SupportedSuperpowersHost,
+  SuperpowersCompatibilityMatrixEntry
+>
+
+export interface CompatibilityOverride {
+  minimumSupportedVersion?: string
+  testedRanges?: string[]
+  knownBadRanges?: string[]
+}
+
+export function mergeMatrixWithOverrides(
+  matrix: SuperpowersCompatibilityMatrix,
+  overrides?: Record<string, CompatibilityOverride>,
+): SuperpowersCompatibilityMatrix {
+  const result: SuperpowersCompatibilityMatrix = {
+    opencode: { ...matrix.opencode },
+    codex: { ...matrix.codex },
+  }
+  if (!overrides) {
+    return result
+  }
+  for (const host of Object.keys(result) as SupportedSuperpowersHost[]) {
+    const override = overrides[host]
+    if (override) {
+      result[host] = {
+        minimumSupportedVersion: override.minimumSupportedVersion ?? result[host].minimumSupportedVersion,
+        testedRanges: override.testedRanges ?? [...result[host].testedRanges],
+        knownBadRanges: override.knownBadRanges ?? [...result[host].knownBadRanges],
+      }
+    }
+  }
+  return result
+}
+
 export const SUPERPOWERS_COMPATIBILITY = {
   opencode: {
     minimumSupportedVersion: "5.0.0",
@@ -31,7 +66,7 @@ export const SUPERPOWERS_COMPATIBILITY = {
     testedRanges: [">=5.0.0 <6.0.0"],
     knownBadRanges: [],
   },
-} as const satisfies Record<SupportedSuperpowersHost, SuperpowersCompatibilityMatrixEntry>
+} as const satisfies SuperpowersCompatibilityMatrix
 
 export function normalizeSuperpowersVersion(value?: string | null) {
   return parseSemver(value)?.normalized ?? null
@@ -122,8 +157,8 @@ const SEMVER_PATTERN =
 export function evaluateSuperpowersCompatibility(
   detection: SuperpowersDetectionResult,
   policyMode: SuperpowersCompatibilityMode = "warn",
-  matrix: Record<SupportedSuperpowersHost, SuperpowersCompatibilityMatrixEntry> =
-    SUPERPOWERS_COMPATIBILITY,
+  matrix: SuperpowersCompatibilityMatrix = SUPERPOWERS_COMPATIBILITY,
+  allowUntested: "warn" | "block" = "warn",
 ): SuperpowersCompatibilityResult {
   const matrixEntry = validateMatrixEntry(detection.host, matrix[detection.host])
   const normalizedDetection = normalizeDetection(detection)
@@ -133,6 +168,7 @@ export function evaluateSuperpowersCompatibility(
       normalizedDetection,
       policyMode,
       getNotDetectedCompatibilityOutcome(normalizedDetection),
+      allowUntested,
     )
   }
 
@@ -149,27 +185,29 @@ export function evaluateSuperpowersCompatibility(
     return finalizeCompatibilityResult(normalizedDetection, policyMode, {
       status: "incompatible",
       reason: `Version is below minimum supported version ${matrixEntry.minimumSupportedVersion.normalized}.`,
-    })
+    }, allowUntested)
   }
 
-  if (matrixEntry.knownBadRanges.some((range) => matchesRange(detectedVersion, range))) {
-    return finalizeCompatibilityResult(normalizedDetection, policyMode, {
-      status: "incompatible",
-      reason: "Version matches a known bad range.",
-    })
+  for (const badRange of matrixEntry.knownBadRanges) {
+    if (matchesRange(detectedVersion, badRange)) {
+      return finalizeCompatibilityResult(normalizedDetection, policyMode, {
+        status: "incompatible",
+        reason: `Version ${normalizedDetection.detectedVersion} is in a known bad range.`,
+      }, allowUntested)
+    }
   }
 
   if (matrixEntry.testedRanges.some((range) => matchesRange(detectedVersion, range))) {
     return finalizeCompatibilityResult(normalizedDetection, policyMode, {
       status: "compatible",
       reason: "Version is within a tested range.",
-    })
+    }, allowUntested)
   }
 
   return finalizeCompatibilityResult(normalizedDetection, policyMode, {
     status: "untested",
     reason: "Version is parseable but outside tested ranges.",
-  })
+  }, allowUntested)
 }
 
 export function toSuperpowersAvailabilityResult(
@@ -313,6 +351,7 @@ function finalizeCompatibilityResult(
   detection: ReturnType<typeof normalizeDetection>,
   policyMode: SuperpowersCompatibilityMode,
   outcome: Pick<SuperpowersCompatibilityResult, "status" | "reason">,
+  allowUntested: "warn" | "block" = "warn",
 ): SuperpowersCompatibilityResult {
   return {
     host: detection.host,
@@ -322,7 +361,9 @@ function finalizeCompatibilityResult(
     status: outcome.status,
     reason: outcome.reason,
     policyMode,
-    shouldBlock: policyMode === "strict" && outcome.status === "incompatible",
+    shouldBlock:
+      (policyMode === "strict" && outcome.status === "incompatible") ||
+      (allowUntested === "block" && outcome.status === "untested"),
   }
 }
 
