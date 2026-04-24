@@ -1,11 +1,11 @@
 import {
   BUILT_IN_PHASES,
   CONTROL_PLANE_COMMAND_KEYS,
-  SAFE_NAME_PATTERN,
   type ControlPlaneCommandKey,
   type ControlPlaneConfig,
   type RouterConfig,
 } from "./config.js"
+import { SAFE_NAME_PATTERN } from "./adapters/shared.js"
 import { listLaneExecutionUnits, renderLaneSplitGuidance } from "./lane-execution.js"
 import { PHASE_TO_AGENT, PHASE_TO_COMMAND, resolvePhase, resolveRoute, type BuiltInPhase } from "./router.js"
 import type { CanonicalRouteId, WorkflowSourceEntry, WorkflowSourceKind } from "./workflow-sources.js"
