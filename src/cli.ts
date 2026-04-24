@@ -76,6 +76,7 @@ import {
 } from "./superpowers-compatibility.js"
 import { detectCodexSuperpowers, detectOpenCodeSuperpowers } from "./superpowers-detectors.js"
 import { evaluateProjectionReadiness, type ProjectionReadiness } from "./upstream-readiness.js"
+import { safeJsonParse } from "./utils/json.js"
 
 export type CliResult = {
   exitCode: 0 | 1 | 2
@@ -1606,8 +1607,11 @@ function buildOpenCodeCodexFastRuntimeDiagnostics(
     }
   }
 
-  const parsed = JSON.parse(runtimeMetadataArtifact.content) as {
+  const { value: parsed, warning } = safeJsonParse<{
     agents: Record<string, { codexFast: boolean }>
+  }>(runtimeMetadataArtifact.content, { agents: {} })
+  if (warning) {
+    return [{ level: "warning", message: warning }]
   }
 
   return {
@@ -1751,7 +1755,10 @@ function toProjectRelativePath(cwd: string, filePath: string) {
 }
 
 function hasCodexMarketplaceEntry(content: string) {
-  const parsed = JSON.parse(content) as unknown
+  const { value: parsed, warning } = safeJsonParse<Record<string, unknown>>(content, {})
+  if (warning) {
+    return false
+  }
   if (!isRecord(parsed)) {
     return false
   }
@@ -1762,7 +1769,10 @@ function hasCodexMarketplaceEntry(content: string) {
 }
 
 function removeCodexMarketplaceEntry(content: string) {
-  const parsed = JSON.parse(content) as unknown
+  const { value: parsed, warning } = safeJsonParse<Record<string, unknown>>(content, {})
+  if (warning) {
+    return
+  }
   if (!isRecord(parsed) || !Array.isArray(parsed.plugins)) {
     throw new Error("Codex marketplace.json plugins must be an array")
   }
