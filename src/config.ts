@@ -588,7 +588,10 @@ export async function defaultExists(filePath: string) {
   try {
     await access(filePath)
     return true
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && (err as NodeJS.ErrnoException).code === "ENOENT") {
+      return false
+    }
     return false
   }
 }
@@ -1293,8 +1296,19 @@ export async function discoverConfigPath(input: DiscoverConfigPathInput) {
 export async function loadControlPlaneConfig(
   input: LoadControlPlaneConfigInput,
 ): Promise<LoadedControlPlaneConfig> {
-  const exists = input.exists ?? defaultExists
+  const exists = input.exists
   const reader = input.readFile ?? defaultReadFile
+  const fileAvailable = exists ?? (async (filePath: string): Promise<boolean> => {
+    try {
+      await reader(filePath)
+      return true
+    } catch (err) {
+      if (err instanceof Error && (err as NodeJS.ErrnoException).code === "ENOENT") {
+        return false
+      }
+      throw err
+    }
+  })
   const homeDirectory = input.homeDir ?? homedir()
   const globalPath = getGlobalConfigPath(homeDirectory)
   const projectPath = getProjectConfigPath(input.cwd)
@@ -1303,30 +1317,30 @@ export async function loadControlPlaneConfig(
 
   if (input.explicitPath) {
     if (input.explicitPath === projectPath) {
-      const [explicitExists, globalExists] = await Promise.all([
-        exists(input.explicitPath),
-        exists(globalPath),
+      const [explicitAvailable, globalAvailable] = await Promise.all([
+        fileAvailable(input.explicitPath),
+        fileAvailable(globalPath),
       ])
 
-      if (explicitExists) {
-        sources = globalExists
+      if (explicitAvailable) {
+        sources = globalAvailable
           ? [globalPath, input.explicitPath]
           : [input.explicitPath]
-      } else if (globalExists) {
+      } else if (globalAvailable) {
         overlayPath = input.explicitPath
         sources = [globalPath]
       } else {
         sources = []
       }
     } else {
-      sources = (await exists(input.explicitPath)) ? [input.explicitPath] : []
+      sources = (await fileAvailable(input.explicitPath)) ? [input.explicitPath] : []
     }
   } else {
     sources = (
       await Promise.all([
         globalPath,
         projectPath,
-      ].map(async (filePath) => ((await exists(filePath)) ? filePath : undefined)))
+      ].map(async (filePath) => ((await fileAvailable(filePath)) ? filePath : undefined)))
     ).filter((filePath): filePath is string => Boolean(filePath))
   }
 
@@ -1407,7 +1421,7 @@ export async function loadControlPlaneConfig(
 
     const authorityError = error instanceof Error ? error : new Error(String(error))
     const lastKnownGoodPath = getLastKnownGoodPath(authorityPath)
-    const hasLastKnownGood = await exists(lastKnownGoodPath)
+    const hasLastKnownGood = await fileAvailable(lastKnownGoodPath)
     if (!shouldFallbackToLastKnownGood({ authorityError, hasLastKnownGood })) {
       throw error
     }
