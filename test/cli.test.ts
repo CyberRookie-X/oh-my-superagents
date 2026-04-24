@@ -1,6 +1,6 @@
 import path from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { runCli } from "../src/cli.js"
+import { runCli } from "../src/cli/index.js"
 import { resolveControlPlane as resolveOmsControlPlane } from "../src/control-plane/index.js"
 import { explainCodexPhase } from "../src/codex.js"
 import { buildArtifacts as buildOpenCodeArtifacts, MARKER_TEXT } from "../src/opencode.js"
@@ -810,7 +810,7 @@ describe("runCli", () => {
       }
     })
 
-    const { runCli: runCliWithCapabilities } = await import("../src/cli.js")
+    const { runCli: runCliWithCapabilities } = await import("../src/cli/index.js")
     const result = await runCliWithCapabilities(["status", "--host", "qwen"], createCliDeps({
       buildQwenArtifacts: async () => ({
         agents: [],
@@ -856,7 +856,7 @@ describe("runCli", () => {
       }
     })
 
-    const { runCli: runCliWithCapabilities } = await import("../src/cli.js")
+    const { runCli: runCliWithCapabilities } = await import("../src/cli/index.js")
     const result = await runCliWithCapabilities(["status", "--host", "opencode"], createCliDeps())
 
     expect(getControlPlaneCommandDecision).toHaveBeenCalledWith({

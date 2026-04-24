@@ -278,9 +278,7 @@ function isSameRouteOwnership(leftContent: string, rightContent: string) {
     left !== undefined
     && right !== undefined
     && left.host === right.host
-    && left.source === right.source
     && left.route === right.route
-    && left.projection === right.projection
   )
 }
 
@@ -535,6 +533,7 @@ function isArtifactOwnedByCurrentContract(
 
   if (isRouteOwnedArtifact(artifact)) {
     return isRouteOwnedFile(existingPath, existingContent)
+      && isSameRouteOwnership(existingContent, artifact.content)
   }
 
   return isPrefixOwned(artifact.fileName, existingContent, new Set([artifact.ownerPrefix]))

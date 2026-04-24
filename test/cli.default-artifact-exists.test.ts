@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 
-import { runCli } from "../src/cli.js"
+import { runCli } from "../src/cli/index.js"
 
 describe("runCli default artifactExists", () => {
   const originalCwd = process.cwd()

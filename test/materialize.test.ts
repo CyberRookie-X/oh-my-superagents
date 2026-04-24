@@ -518,6 +518,46 @@ describe("materializeArtifacts", () => {
     expect(result.warnings).toEqual([])
   })
 
+  it("does not consider different routes with same filename as same contract", async () => {
+    const planArtifact = {
+      directory: ".opencode/commands",
+      fileName: "sp-route.md",
+      ownerPrefix: "sp-",
+      content: [
+        "---",
+        "description: 'Route phase.plan'",
+        "---",
+        "",
+        "<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
+        "<!-- oms-route: stage=1; host=opencode; source=gstack; route=phase.plan; projection=command; rendered-name=sp-route -->",
+        "",
+      ].join("\n"),
+    }
+
+    const reviewContent = [
+      "---",
+      "description: 'Route phase.review'",
+      "---",
+      "",
+      "<!-- generated-by: oh-my-superagents; do-not-edit: true -->",
+      "<!-- oms-route: stage=1; host=opencode; source=gstack; route=phase.review; projection=command; rendered-name=sp-route -->",
+      "",
+    ].join("\n")
+
+    const result = await materializeArtifacts({
+      cwd: "/workspace/project",
+      artifacts: [planArtifact],
+      fs: createMemoryFs({
+        "/workspace/project/.opencode/commands/sp-route.md": reviewContent,
+      }).fs,
+    })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.warnings).toEqual([
+      "Collision at /workspace/project/.opencode/commands/sp-route.md",
+    ])
+  })
+
   it("treats Claude skill wrappers as OMS-owned and cleans up stale neighbors", async () => {
     const { fs, removedPaths } = createMemoryFs({
       "/workspace/project/.claude/skills/oms-plan/SKILL.md": renderOwnedClaudeSkill("oms-plan"),

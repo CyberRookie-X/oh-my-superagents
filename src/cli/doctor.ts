@@ -26,6 +26,24 @@ export async function buildControlPlaneDoctor(
     host,
     () => resolveCompatibilityForCliHost(host, resolved.config.settings.superpowersCompatibility.mode, deps, resolved.config.settings.superpowersCompatibility.allowUntested, resolved.config.settings.superpowersCompatibility.overrides),
   )
+
+  const doctorIssues: Array<{
+    level: "error" | "warning"
+    message: string
+    suggestion: string
+  }> = []
+
+  if (compatibility?.status === "untested") {
+    const allowUntested = resolved.config.settings.superpowersCompatibility.allowUntested
+    const level = allowUntested === "block" ? "error" as const : "warning" as const
+    doctorIssues.push({
+      level,
+      message: `Superpowers version ${compatibility.detectedVersion} is untested with this release of oh-my-superagents.`,
+      suggestion: allowUntested === "block"
+        ? "Set compatibility.allowUntested to 'warn' or upgrade/downgrade superpowers."
+        : "Consider testing thoroughly before production use.",
+    })
+  }
   const effectiveSourceReadiness = await summarizeEffectiveSourceReadiness({
     resolved,
     evaluateReadiness: createProjectionReadinessResolver({
@@ -89,6 +107,7 @@ export async function buildControlPlaneDoctor(
         : filterNamedCommandsForWorkflow(resolved.config.settings.commands, resolved.config.workflow, host)),
     },
     compatibility,
+    ...(doctorIssues.length > 0 ? { doctorIssues } : {}),
     artifacts: formattedArtifacts,
     ...summarizeLaneExplainability(resolved),
     ...(subagentExecution ? { subagentExecution } : {}),
